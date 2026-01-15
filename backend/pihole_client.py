@@ -571,7 +571,12 @@ class PiholeClient(DNSBlockerClient):
                 data = response.json()
                 blocking = data.get('blocking')
                 logger.debug(f"Blocking status on {self.server_name}: {blocking}")
-                return blocking
+                # Normalize to boolean - Pi-hole can return "enabled"/"disabled" strings or booleans
+                if isinstance(blocking, bool):
+                    return blocking
+                elif isinstance(blocking, str):
+                    return blocking.lower() == 'enabled'
+                return None
             logger.error(f"Failed to get blocking status from {self.server_name}: {response.status_code}")
             return None
         except Exception as e:

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, Query as QueryParam
+from fastapi import FastAPI, Depends, HTTPException, Query as QueryParam, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -11,9 +11,15 @@ import os
 import logging
 
 from .database import get_db, init_db
-from .models import Query, AlertRule, AlertHistory
+from .models import Query, AlertRule, AlertHistory, User, Session as SessionModel
 from .config import get_settings
 from .service import get_service
+from .auth import (
+    hash_password, verify_password, create_session, delete_session,
+    set_session_cookie, clear_session_cookie, get_current_user,
+    get_current_user_optional, require_admin, require_setup_incomplete,
+    is_setup_complete, get_user_count
+)
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +150,86 @@ class StatisticsResponse(BaseModel):
     new_clients_24h: int
 
 
+# ============================================================================
+# Authentication Pydantic Models
+# ============================================================================
+
+class LoginRequest(BaseModel):
+    username: str = PydanticField(min_length=1, max_length=100)
+    password: str = PydanticField(min_length=1, max_length=255)
+
+
+class SetupRequest(BaseModel):
+    username: str = PydanticField(min_length=3, max_length=100)
+    password: str = PydanticField(min_length=8, max_length=255)
+    email: Optional[str] = PydanticField(default=None, max_length=255)
+
+    @field_validator('username')
+    @classmethod
+    def validate_username(cls, v: str) -> str:
+        import re
+        if not re.match(r'^[a-zA-Z0-9_-]+$', v):
+            raise ValueError("Username can only contain letters, numbers, underscores, and hyphens")
+        return v.lower()
+
+    @field_validator('email')
+    @classmethod
+    def validate_email(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or v == '':
+            return None
+        import re
+        if not re.match(r'^[^@]+@[^@]+\.[^@]+$', v):
+            raise ValueError("Invalid email format")
+        return v.lower()
+
+
+class UserResponse(BaseModel):
+    id: int
+    username: str
+    email: Optional[str]
+    display_name: Optional[str]
+    is_active: bool
+    is_admin: bool
+    oidc_provider: Optional[str]
+    has_local_password: bool
+    created_at: Optional[str]
+    last_login_at: Optional[str]
+
+
+class AuthCheckResponse(BaseModel):
+    authenticated: bool
+    user: Optional[UserResponse]
+    setup_complete: bool
+
+
+class UserCreate(BaseModel):
+    username: str = PydanticField(min_length=3, max_length=100)
+    password: Optional[str] = PydanticField(default=None, min_length=8, max_length=255)
+    email: Optional[str] = PydanticField(default=None, max_length=255)
+    display_name: Optional[str] = PydanticField(default=None, max_length=255)
+    is_admin: bool = False
+
+    @field_validator('username')
+    @classmethod
+    def validate_username(cls, v: str) -> str:
+        import re
+        if not re.match(r'^[a-zA-Z0-9_-]+$', v):
+            raise ValueError("Username can only contain letters, numbers, underscores, and hyphens")
+        return v.lower()
+
+
+class UserUpdate(BaseModel):
+    email: Optional[str] = PydanticField(default=None, max_length=255)
+    display_name: Optional[str] = PydanticField(default=None, max_length=255)
+    password: Optional[str] = PydanticField(default=None, min_length=8, max_length=255)
+    is_active: Optional[bool] = None
+    is_admin: Optional[bool] = None
+
+
+# ============================================================================
+# Query Status Constants
+# ============================================================================
+
 # Blocked status values from Pi-hole v6
 BLOCKED_STATUSES = ['GRAVITY', 'GRAVITY_CNAME', 'REGEX', 'REGEX_CNAME',
                     'BLACKLIST', 'BLACKLIST_CNAME', 'REGEX_BLACKLIST',
@@ -192,7 +278,235 @@ async def shutdown_event():
     await service.shutdown()
 
 
+# ============================================================================
+# Authentication Endpoints
+# ============================================================================
+
+@app.get("/api/auth/check")
+async def check_auth(
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+) -> AuthCheckResponse:
+    """Check authentication status - used on app load"""
+    setup_complete = await is_setup_complete(db)
+    user = await get_current_user_optional(request, db)
+
+    return AuthCheckResponse(
+        authenticated=user is not None,
+        user=UserResponse(**user.to_dict()) if user else None,
+        setup_complete=setup_complete
+    )
+
+
+@app.post("/api/auth/setup")
+async def setup_admin(
+    data: SetupRequest,
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_setup_incomplete)
+):
+    """Initial setup - create first admin user. Only works when no users exist."""
+    # Create admin user
+    user = User(
+        username=data.username,
+        email=data.email,
+        password_hash=hash_password(data.password),
+        is_active=True,
+        is_admin=True
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+
+    # Create session
+    session = await create_session(db, user, request)
+    set_session_cookie(response, session)
+
+    logger.info(f"Setup complete: created admin user '{data.username}'")
+    return {"message": "Setup complete", "user": user.to_dict()}
+
+
+@app.post("/api/auth/login")
+async def login(
+    data: LoginRequest,
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db)
+):
+    """Login with username and password"""
+    # Check if setup is complete
+    if not await is_setup_complete(db):
+        raise HTTPException(status_code=400, detail="Setup not complete. Please create an admin account first.")
+
+    # Find user
+    stmt = select(User).where(User.username == data.username.lower())
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+
+    # Verify credentials
+    if not user or not user.password_hash:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+
+    if not user.is_active:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+
+    if not verify_password(data.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+
+    # Create session
+    session = await create_session(db, user, request)
+    set_session_cookie(response, session)
+
+    logger.info(f"User '{user.username}' logged in")
+    return {"message": "Login successful", "user": user.to_dict()}
+
+
+@app.post("/api/auth/logout")
+async def logout(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db)
+):
+    """Logout - clear session"""
+    from .auth import get_session_id_from_request
+
+    session_id = get_session_id_from_request(request)
+    if session_id:
+        await delete_session(db, session_id)
+
+    clear_session_cookie(response)
+    return {"message": "Logged out"}
+
+
+@app.get("/api/auth/me")
+async def get_me(
+    user: User = Depends(get_current_user)
+) -> UserResponse:
+    """Get current authenticated user"""
+    return UserResponse(**user.to_dict())
+
+
+# ============================================================================
+# User Management Endpoints (Admin only)
+# ============================================================================
+
+@app.get("/api/users")
+async def list_users(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_admin)
+) -> List[UserResponse]:
+    """List all users (admin only)"""
+    stmt = select(User).order_by(User.created_at.desc())
+    result = await db.execute(stmt)
+    users = result.scalars().all()
+    return [UserResponse(**u.to_dict()) for u in users]
+
+
+@app.post("/api/users")
+async def create_user(
+    data: UserCreate,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin)
+) -> UserResponse:
+    """Create a new user (admin only)"""
+    # Check if username exists
+    stmt = select(User).where(User.username == data.username.lower())
+    result = await db.execute(stmt)
+    if result.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Username already exists")
+
+    # Check if email exists (if provided)
+    if data.email:
+        stmt = select(User).where(User.email == data.email.lower())
+        result = await db.execute(stmt)
+        if result.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="Email already exists")
+
+    # Create user
+    user = User(
+        username=data.username.lower(),
+        email=data.email.lower() if data.email else None,
+        display_name=data.display_name,
+        password_hash=hash_password(data.password) if data.password else None,
+        is_admin=data.is_admin,
+        is_active=True
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+
+    logger.info(f"Admin '{admin.username}' created user '{user.username}'")
+    return UserResponse(**user.to_dict())
+
+
+@app.put("/api/users/{user_id}")
+async def update_user(
+    user_id: int,
+    data: UserUpdate,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin)
+) -> UserResponse:
+    """Update a user (admin only)"""
+    stmt = select(User).where(User.id == user_id)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Prevent admin from demoting themselves
+    if user.id == admin.id and data.is_admin is False:
+        raise HTTPException(status_code=400, detail="Cannot remove your own admin privileges")
+
+    # Update fields
+    if data.email is not None:
+        user.email = data.email.lower() if data.email else None
+    if data.display_name is not None:
+        user.display_name = data.display_name
+    if data.password:
+        user.password_hash = hash_password(data.password)
+    if data.is_active is not None:
+        user.is_active = data.is_active
+    if data.is_admin is not None:
+        user.is_admin = data.is_admin
+
+    await db.commit()
+    await db.refresh(user)
+
+    logger.info(f"Admin '{admin.username}' updated user '{user.username}'")
+    return UserResponse(**user.to_dict())
+
+
+@app.delete("/api/users/{user_id}")
+async def delete_user(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin)
+):
+    """Delete a user (admin only)"""
+    if user_id == admin.id:
+        raise HTTPException(status_code=400, detail="Cannot delete your own account")
+
+    stmt = select(User).where(User.id == user_id)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    username = user.username
+    await db.delete(user)
+    await db.commit()
+
+    logger.info(f"Admin '{admin.username}' deleted user '{username}'")
+    return {"message": f"User '{username}' deleted"}
+
+
+# ============================================================================
 # Query endpoints
+# ============================================================================
+
 @app.get("/api/queries", response_model=List[QueryResponse])
 async def search_queries(
     domain: Optional[str] = QueryParam(None, max_length=255),

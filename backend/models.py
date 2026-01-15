@@ -335,3 +335,132 @@ class BlockingOverride(Base):
             'enabled_at': self.enabled_at.isoformat() if self.enabled_at else None,
             'disabled_by': self.disabled_by,
         }
+
+
+class User(Base):
+    """User account for authentication"""
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    # Identity
+    username = Column(String(100), unique=True, nullable=False, index=True)
+    email = Column(String(255), unique=True, nullable=True, index=True)
+    display_name = Column(String(255), nullable=True)
+
+    # Local authentication (null for OIDC-only users)
+    password_hash = Column(String(255), nullable=True)
+
+    # OIDC linking
+    oidc_provider = Column(String(100), nullable=True, index=True)  # e.g., 'authentik'
+    oidc_subject = Column(String(255), nullable=True)  # 'sub' claim from OIDC
+
+    # Status
+    is_active = Column(Boolean, default=True)
+    is_admin = Column(Boolean, default=False)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    last_login_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index('idx_users_oidc', 'oidc_provider', 'oidc_subject', unique=True,
+              postgresql_where=Column('oidc_provider').isnot(None)),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'username': self.username,
+            'email': self.email,
+            'display_name': self.display_name,
+            'is_active': self.is_active,
+            'is_admin': self.is_admin,
+            'oidc_provider': self.oidc_provider,
+            'has_local_password': self.password_hash is not None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'last_login_at': self.last_login_at.isoformat() if self.last_login_at else None,
+        }
+
+
+class Session(Base):
+    """User session for authentication state"""
+    __tablename__ = "sessions"
+
+    id = Column(String(64), primary_key=True)  # Random session token
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+
+    # Session metadata
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    last_activity_at = Column(DateTime(timezone=True), default=utcnow)
+
+    # Security tracking
+    ip_address = Column(String(45), nullable=True)  # IPv6 max length
+    user_agent = Column(String(500), nullable=True)
+
+    __table_args__ = (
+        Index('idx_sessions_expires', 'expires_at'),
+        Index('idx_sessions_user_activity', 'user_id', 'last_activity_at'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'expires_at': self.expires_at.isoformat() if self.expires_at else None,
+            'last_activity_at': self.last_activity_at.isoformat() if self.last_activity_at else None,
+            'ip_address': self.ip_address,
+        }
+
+
+class OIDCProvider(Base):
+    """OIDC provider configuration"""
+    __tablename__ = "oidc_providers"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), unique=True, nullable=False)  # e.g., 'authentik'
+    display_name = Column(String(255), nullable=False)  # e.g., 'Login with Authentik'
+
+    # OIDC configuration
+    issuer_url = Column(String(500), nullable=False)  # e.g., https://auth.example.com
+    client_id = Column(String(255), nullable=False)
+    client_secret = Column(Text, nullable=False)
+    scopes = Column(String(500), default='openid profile email')
+
+    # Claim mappings
+    username_claim = Column(String(100), default='preferred_username')
+    email_claim = Column(String(100), default='email')
+    display_name_claim = Column(String(100), default='name')
+    groups_claim = Column(String(100), nullable=True)  # e.g., 'groups'
+    admin_group = Column(String(255), nullable=True)  # Group name that grants admin
+
+    # Status
+    enabled = Column(Boolean, default=True)
+    display_order = Column(Integer, default=0)
+
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    def to_dict(self, mask_secret: bool = True):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'display_name': self.display_name,
+            'issuer_url': self.issuer_url,
+            'client_id': self.client_id,
+            'client_secret': '********' if mask_secret else self.client_secret,
+            'scopes': self.scopes,
+            'username_claim': self.username_claim,
+            'email_claim': self.email_claim,
+            'display_name_claim': self.display_name_claim,
+            'groups_claim': self.groups_claim,
+            'admin_group': self.admin_group,
+            'enabled': self.enabled,
+            'display_order': self.display_order,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }

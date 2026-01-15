@@ -171,3 +171,53 @@ export interface BlockingSetResponse {
     error?: string;
   }>;
 }
+
+// ============================================================================
+// Authentication Types
+// ============================================================================
+
+export interface User {
+  id: number;
+  username: string;
+  email: string | null;
+  display_name: string | null;
+  is_active: boolean;
+  is_admin: boolean;
+  oidc_provider: string | null;
+  has_local_password: boolean;
+  created_at: string | null;
+  last_login_at: string | null;
+}
+
+export interface AuthCheckResponse {
+  authenticated: boolean;
+  user: User | null;
+  setup_complete: boolean;
+}
+
+export interface LoginRequest {
+  username: string;
+  password: string;
+}
+
+export interface SetupRequest {
+  username: string;
+  password: string;
+  email?: string;
+}
+
+export interface UserCreate {
+  username: string;
+  password?: string;
+  email?: string;
+  display_name?: string;
+  is_admin?: boolean;
+}
+
+export interface UserUpdate {
+  email?: string;
+  display_name?: string;
+  password?: string;
+  is_active?: boolean;
+  is_admin?: boolean;
+}

@@ -1,5 +1,25 @@
 import axios from 'axios';
-import type { Query, AlertRule, AlertRuleCreate, Stats, QuerySearchParams, SettingsResponse, PiholeServer, PiholeServerCreate, DomainEntry, Statistics, BlockingStatusResponse, BlockingSetRequest, BlockingSetResponse } from '../types';
+import type {
+  Query,
+  AlertRule,
+  AlertRuleCreate,
+  Stats,
+  QuerySearchParams,
+  SettingsResponse,
+  PiholeServer,
+  PiholeServerCreate,
+  DomainEntry,
+  Statistics,
+  BlockingStatusResponse,
+  BlockingSetRequest,
+  BlockingSetResponse,
+  User,
+  AuthCheckResponse,
+  LoginRequest,
+  SetupRequest,
+  UserCreate,
+  UserUpdate,
+} from '../types';
 
 const API_BASE_URL = '/api';
 
@@ -8,7 +28,23 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  withCredentials: true, // Include session cookie
 });
+
+// 401 response interceptor - redirect to login when session expires
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      // Check if we're not already on login or setup page
+      const currentPath = window.location.pathname;
+      if (currentPath !== '/login' && currentPath !== '/setup') {
+        window.location.href = '/login';
+      }
+    }
+    return Promise.reject(error);
+  }
+);
 
 export const queryApi = {
   search: async (params: QuerySearchParams): Promise<Query[]> => {
@@ -197,6 +233,70 @@ export const blockingApi = {
   setAllBlocking: async (request: BlockingSetRequest): Promise<BlockingSetResponse> => {
     const response = await api.post<BlockingSetResponse>('/blocking/all', request);
     return response.data;
+  },
+};
+
+// ============================================================================
+// Authentication API
+// ============================================================================
+
+export const authApi = {
+  // Check authentication status (for app initialization)
+  check: async (): Promise<AuthCheckResponse> => {
+    const response = await api.get<AuthCheckResponse>('/auth/check');
+    return response.data;
+  },
+
+  // Initial setup - create first admin user
+  setup: async (data: SetupRequest): Promise<User> => {
+    const response = await api.post<{ message: string; user: User }>('/auth/setup', data);
+    return response.data.user;
+  },
+
+  // Login with username/password
+  login: async (data: LoginRequest): Promise<User> => {
+    const response = await api.post<{ message: string; user: User }>('/auth/login', data);
+    return response.data.user;
+  },
+
+  // Logout - clear session
+  logout: async (): Promise<void> => {
+    await api.post('/auth/logout');
+  },
+
+  // Get current user info
+  getMe: async (): Promise<User> => {
+    const response = await api.get<User>('/auth/me');
+    return response.data;
+  },
+};
+
+// ============================================================================
+// User Management API (Admin only)
+// ============================================================================
+
+export const userApi = {
+  // Get all users
+  getAll: async (): Promise<User[]> => {
+    const response = await api.get<User[]>('/users');
+    return response.data;
+  },
+
+  // Create a new user
+  create: async (data: UserCreate): Promise<User> => {
+    const response = await api.post<User>('/users', data);
+    return response.data;
+  },
+
+  // Update a user
+  update: async (id: number, data: UserUpdate): Promise<User> => {
+    const response = await api.put<User>(`/users/${id}`, data);
+    return response.data;
+  },
+
+  // Delete a user
+  delete: async (id: number): Promise<void> => {
+    await api.delete(`/users/${id}`);
   },
 };
 
