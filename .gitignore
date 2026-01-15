@@ -1,6 +1,10 @@
 # Environment files (secrets)
 .env
 
+# Documentation (local only)
+CLAUDE.md
+docs/
+
 # User may want to commit config.yml (now safe - no secrets)
 # Uncomment the line below if you prefer to keep config.yml local:
 # config.yml
