@@ -6,6 +6,7 @@ import Lists from './pages/Lists';
 import AlertRules from './pages/AlertRules';
 import Statistics from './pages/Statistics';
 import Settings from './pages/Settings';
+import Users from './pages/Users';
 import Login from './pages/Login';
 import Setup from './pages/Setup';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -45,6 +46,7 @@ function Navigation({ darkMode, toggleDarkMode }: { darkMode: boolean; toggleDar
     { path: '/lists', label: 'Lists' },
     { path: '/alerts', label: 'Alert Rules' },
     { path: '/settings', label: 'Settings' },
+    ...(user?.is_admin ? [{ path: '/users', label: 'Users' }] : []),
   ];
 
   // Load blocking status on mount and poll every 10s
@@ -379,6 +381,7 @@ function AppLayout() {
           <Route path="/lists" element={<ProtectedRoute><Lists /></ProtectedRoute>} />
           <Route path="/alerts" element={<ProtectedRoute><AlertRules /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+          <Route path="/users" element={<ProtectedRoute requireAdmin><Users /></ProtectedRoute>} />
         </Routes>
       </main>
     </div>
