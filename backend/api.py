@@ -764,6 +764,7 @@ class PiholeServerCreate(BaseModel):
     name: str
     url: str
     password: str
+    username: Optional[str] = None  # For AdGuard Home (default: 'admin')
     server_type: str = 'pihole'  # 'pihole' or 'adguard'
     enabled: bool = True
     is_source: bool = False
@@ -799,6 +800,7 @@ class PiholeServerUpdate(BaseModel):
     name: Optional[str] = None
     url: Optional[str] = None
     password: Optional[str] = None
+    username: Optional[str] = None  # For AdGuard Home
     server_type: Optional[str] = None
     enabled: Optional[bool] = None
     is_source: Optional[bool] = None
@@ -979,6 +981,7 @@ async def create_pihole_server(
         name=server_data.name,
         url=server_data.url,
         password=server_data.password,
+        username=server_data.username,
         server_type=server_data.server_type,
         enabled=server_data.enabled,
         is_source=server_data.is_source,
@@ -1103,34 +1106,39 @@ async def delete_pihole_server(
 
 @app.post("/api/settings/pihole-servers/test")
 async def test_pihole_connection(server_data: PiholeServerCreate):
-    """Test connection to a Pi-hole server"""
-    from .pihole_client import PiholeClient
+    """Test connection to a DNS ad-blocker server (Pi-hole or AdGuard Home)"""
+    from .dns_client_factory import create_dns_client
     import logging
 
     logger = logging.getLogger(__name__)
+    server_type = server_data.server_type or 'pihole'
+    server_type_display = "AdGuard Home" if server_type == 'adguard' else "Pi-hole"
 
     try:
         # Use context manager for proper resource cleanup
-        async with PiholeClient(
+        client = create_dns_client(
+            server_type=server_type,
             url=server_data.url,
             password=server_data.password,
-            server_name=server_data.name
-        ) as client:
+            server_name=server_data.name,
+            username=server_data.username
+        )
+        async with client:
             # Try to authenticate - this will verify the connection and credentials work
             auth_success = await client.authenticate()
             if auth_success:
                 return {
                     "success": True,
-                    "message": f"Successfully connected to Pi-hole at {server_data.url}"
+                    "message": f"Successfully connected to {server_type_display} at {server_data.url}"
                 }
             else:
                 return {
                     "success": False,
-                    "message": "Authentication failed. Please check your password."
+                    "message": "Authentication failed. Please check your credentials."
                 }
     except Exception as e:
         # Log detailed error server-side for debugging
-        logger.error(f"Pi-hole connection test failed for {server_data.url}: {e}", exc_info=True)
+        logger.error(f"{server_type_display} connection test failed for {server_data.url}: {e}", exc_info=True)
 
         # Return sanitized error messages to client
         error_msg = str(e).lower()
@@ -1142,7 +1150,7 @@ async def test_pihole_connection(server_data: PiholeServerCreate):
         elif "connect" in error_msg or "refused" in error_msg or "timeout" in error_msg:
             return {
                 "success": False,
-                "message": "Cannot connect to the Pi-hole server. Please check the URL and network connectivity."
+                "message": "Cannot connect to the server. Please check the URL and network connectivity."
             }
         else:
             return {
@@ -1315,8 +1323,8 @@ class DomainRequest(BaseModel):
         return v
 
 
-async def get_source_client():
-    """Helper to get authenticated client for source Pi-hole"""
+async def get_source_server():
+    """Helper to get source DNS server model from database"""
     from .database import async_session_maker
     from .models import PiholeServerModel
 
@@ -1329,119 +1337,201 @@ async def get_source_client():
         source = result.scalar_one_or_none()
 
         if not source:
-            raise HTTPException(status_code=400, detail="No source Pi-hole server configured")
+            raise HTTPException(status_code=400, detail="No source DNS server configured")
 
-        return source.url, source.password, source.name
+        return source
+
+
+def create_client_from_server(server):
+    """Create a DNS client from a server model"""
+    from .dns_client_factory import create_dns_client
+    return create_dns_client(
+        server_type=server.server_type or 'pihole',
+        url=server.url,
+        password=server.password,
+        server_name=server.name,
+        username=server.username
+    )
+
+
+async def get_all_enabled_servers():
+    """Helper to get all enabled DNS servers"""
+    from .database import async_session_maker
+    from .models import PiholeServerModel
+
+    async with async_session_maker() as session:
+        stmt = select(PiholeServerModel).where(
+            PiholeServerModel.enabled == True
+        ).order_by(PiholeServerModel.display_order)
+        result = await session.execute(stmt)
+        servers = result.scalars().all()
+
+        if not servers:
+            raise HTTPException(status_code=400, detail="No DNS servers configured")
+
+        return servers
 
 
 @app.get("/api/domains/whitelist")
 async def get_whitelist():
-    """Get all whitelist entries from source Pi-hole"""
-    from .pihole_client import PiholeClient
+    """Get combined whitelist entries from all enabled DNS servers"""
+    servers = await get_all_enabled_servers()
+    all_domains = {}
 
-    url, password, name = await get_source_client()
-    async with PiholeClient(url, password, name) as client:
-        if not await client.authenticate():
-            raise HTTPException(status_code=500, detail="Failed to authenticate with source Pi-hole")
-        domains = await client.get_whitelist()
-        return {"domains": domains}
+    for server in servers:
+        try:
+            async with create_client_from_server(server) as client:
+                if await client.authenticate():
+                    domains = await client.get_whitelist()
+                    for d in domains:
+                        domain_name = d.get('domain', '')
+                        if domain_name and domain_name not in all_domains:
+                            all_domains[domain_name] = d
+        except Exception as e:
+            logger.warning(f"Failed to get whitelist from {server.name}: {e}")
+
+    return {"domains": list(all_domains.values())}
 
 
 @app.post("/api/domains/whitelist")
 async def add_to_whitelist(data: DomainRequest):
-    """Add a domain to whitelist on source Pi-hole"""
-    from .pihole_client import PiholeClient
+    """Add a domain to whitelist on all enabled DNS servers"""
+    servers = await get_all_enabled_servers()
+    results = []
 
-    url, password, name = await get_source_client()
-    async with PiholeClient(url, password, name) as client:
-        if not await client.authenticate():
-            raise HTTPException(status_code=500, detail="Failed to authenticate with source Pi-hole")
-        success = await client.add_to_whitelist(data.domain)
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to add domain to whitelist")
-        return {"message": f"Added {data.domain} to whitelist"}
+    for server in servers:
+        try:
+            async with create_client_from_server(server) as client:
+                if await client.authenticate():
+                    success = await client.add_to_whitelist(data.domain)
+                    results.append({"server": server.name, "success": success})
+                else:
+                    results.append({"server": server.name, "success": False, "error": "Auth failed"})
+        except Exception as e:
+            results.append({"server": server.name, "success": False, "error": str(e)})
+
+    successful = sum(1 for r in results if r.get('success'))
+    if successful == 0:
+        raise HTTPException(status_code=500, detail="Failed to add domain to whitelist on any server")
+
+    return {"message": f"Added {data.domain} to whitelist on {successful}/{len(results)} servers", "results": results}
 
 
 @app.delete("/api/domains/whitelist/{domain:path}")
 async def remove_from_whitelist(domain: str):
-    """Remove a domain from whitelist on source Pi-hole"""
-    from .pihole_client import PiholeClient
+    """Remove a domain from whitelist on all enabled DNS servers"""
+    servers = await get_all_enabled_servers()
+    results = []
 
-    url, password, name = await get_source_client()
-    async with PiholeClient(url, password, name) as client:
-        if not await client.authenticate():
-            raise HTTPException(status_code=500, detail="Failed to authenticate with source Pi-hole")
-        success = await client.remove_from_whitelist(domain)
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to remove domain from whitelist")
-        return {"message": f"Removed {domain} from whitelist"}
+    for server in servers:
+        try:
+            async with create_client_from_server(server) as client:
+                if await client.authenticate():
+                    success = await client.remove_from_whitelist(domain)
+                    results.append({"server": server.name, "success": success})
+                else:
+                    results.append({"server": server.name, "success": False, "error": "Auth failed"})
+        except Exception as e:
+            results.append({"server": server.name, "success": False, "error": str(e)})
+
+    successful = sum(1 for r in results if r.get('success'))
+    if successful == 0:
+        raise HTTPException(status_code=500, detail="Failed to remove domain from whitelist on any server")
+
+    return {"message": f"Removed {domain} from whitelist on {successful}/{len(results)} servers", "results": results}
 
 
 @app.get("/api/domains/blacklist")
 async def get_blacklist():
-    """Get all blacklist entries from source Pi-hole"""
-    from .pihole_client import PiholeClient
+    """Get combined blacklist entries from all enabled DNS servers"""
+    servers = await get_all_enabled_servers()
+    all_domains = {}
 
-    url, password, name = await get_source_client()
-    async with PiholeClient(url, password, name) as client:
-        if not await client.authenticate():
-            raise HTTPException(status_code=500, detail="Failed to authenticate with source Pi-hole")
-        domains = await client.get_blacklist()
-        return {"domains": domains}
+    for server in servers:
+        try:
+            async with create_client_from_server(server) as client:
+                if await client.authenticate():
+                    domains = await client.get_blacklist()
+                    for d in domains:
+                        domain_name = d.get('domain', '')
+                        if domain_name and domain_name not in all_domains:
+                            all_domains[domain_name] = d
+        except Exception as e:
+            logger.warning(f"Failed to get blacklist from {server.name}: {e}")
+
+    return {"domains": list(all_domains.values())}
 
 
 @app.post("/api/domains/blacklist")
 async def add_to_blacklist(data: DomainRequest):
-    """Add a domain to blacklist on source Pi-hole"""
-    from .pihole_client import PiholeClient
+    """Add a domain to blacklist on all enabled DNS servers"""
+    servers = await get_all_enabled_servers()
+    results = []
 
-    url, password, name = await get_source_client()
-    async with PiholeClient(url, password, name) as client:
-        if not await client.authenticate():
-            raise HTTPException(status_code=500, detail="Failed to authenticate with source Pi-hole")
-        success = await client.add_to_blacklist(data.domain)
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to add domain to blacklist")
-        return {"message": f"Added {data.domain} to blacklist"}
+    for server in servers:
+        try:
+            async with create_client_from_server(server) as client:
+                if await client.authenticate():
+                    success = await client.add_to_blacklist(data.domain)
+                    results.append({"server": server.name, "success": success})
+                else:
+                    results.append({"server": server.name, "success": False, "error": "Auth failed"})
+        except Exception as e:
+            results.append({"server": server.name, "success": False, "error": str(e)})
+
+    successful = sum(1 for r in results if r.get('success'))
+    if successful == 0:
+        raise HTTPException(status_code=500, detail="Failed to add domain to blacklist on any server")
+
+    return {"message": f"Added {data.domain} to blacklist on {successful}/{len(results)} servers", "results": results}
 
 
 @app.delete("/api/domains/blacklist/{domain:path}")
 async def remove_from_blacklist(domain: str):
-    """Remove a domain from blacklist on source Pi-hole"""
-    from .pihole_client import PiholeClient
+    """Remove a domain from blacklist on all enabled DNS servers"""
+    servers = await get_all_enabled_servers()
+    results = []
 
-    url, password, name = await get_source_client()
-    async with PiholeClient(url, password, name) as client:
-        if not await client.authenticate():
-            raise HTTPException(status_code=500, detail="Failed to authenticate with source Pi-hole")
-        success = await client.remove_from_blacklist(domain)
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to remove domain from blacklist")
-        return {"message": f"Removed {domain} from blacklist"}
+    for server in servers:
+        try:
+            async with create_client_from_server(server) as client:
+                if await client.authenticate():
+                    success = await client.remove_from_blacklist(domain)
+                    results.append({"server": server.name, "success": success})
+                else:
+                    results.append({"server": server.name, "success": False, "error": "Auth failed"})
+        except Exception as e:
+            results.append({"server": server.name, "success": False, "error": str(e)})
+
+    successful = sum(1 for r in results if r.get('success'))
+    if successful == 0:
+        raise HTTPException(status_code=500, detail="Failed to remove domain from blacklist on any server")
+
+    return {"message": f"Removed {domain} from blacklist on {successful}/{len(results)} servers", "results": results}
 
 
 @app.get("/api/domains/regex-whitelist")
 async def get_regex_whitelist():
-    """Get all regex whitelist entries from source Pi-hole"""
-    from .pihole_client import PiholeClient
-
-    url, password, name = await get_source_client()
-    async with PiholeClient(url, password, name) as client:
+    """Get all regex whitelist entries from source DNS server (Pi-hole only)"""
+    source = await get_source_server()
+    async with create_client_from_server(source) as client:
+        if not client.supports_regex_lists:
+            return {"domains": [], "message": "Regex lists not supported by this server type"}
         if not await client.authenticate():
-            raise HTTPException(status_code=500, detail="Failed to authenticate with source Pi-hole")
+            raise HTTPException(status_code=500, detail="Failed to authenticate with source server")
         domains = await client.get_regex_whitelist()
         return {"domains": domains}
 
 
 @app.delete("/api/domains/regex-whitelist/{pattern_id}")
 async def remove_from_regex_whitelist(pattern_id: int):
-    """Remove a pattern from regex whitelist on source Pi-hole"""
-    from .pihole_client import PiholeClient
-
-    url, password, name = await get_source_client()
-    async with PiholeClient(url, password, name) as client:
+    """Remove a pattern from regex whitelist on source DNS server (Pi-hole only)"""
+    source = await get_source_server()
+    async with create_client_from_server(source) as client:
+        if not client.supports_regex_lists:
+            raise HTTPException(status_code=400, detail="Regex lists not supported by this server type")
         if not await client.authenticate():
-            raise HTTPException(status_code=500, detail="Failed to authenticate with source Pi-hole")
+            raise HTTPException(status_code=500, detail="Failed to authenticate with source server")
         success = await client.remove_from_regex_whitelist(pattern_id)
         if not success:
             raise HTTPException(status_code=500, detail="Failed to remove pattern from regex whitelist")
@@ -1450,26 +1540,26 @@ async def remove_from_regex_whitelist(pattern_id: int):
 
 @app.get("/api/domains/regex-blacklist")
 async def get_regex_blacklist():
-    """Get all regex blacklist entries from source Pi-hole"""
-    from .pihole_client import PiholeClient
-
-    url, password, name = await get_source_client()
-    async with PiholeClient(url, password, name) as client:
+    """Get all regex blacklist entries from source DNS server (Pi-hole only)"""
+    source = await get_source_server()
+    async with create_client_from_server(source) as client:
+        if not client.supports_regex_lists:
+            return {"domains": [], "message": "Regex lists not supported by this server type"}
         if not await client.authenticate():
-            raise HTTPException(status_code=500, detail="Failed to authenticate with source Pi-hole")
+            raise HTTPException(status_code=500, detail="Failed to authenticate with source server")
         domains = await client.get_regex_blacklist()
         return {"domains": domains}
 
 
 @app.delete("/api/domains/regex-blacklist/{pattern_id}")
 async def remove_from_regex_blacklist(pattern_id: int):
-    """Remove a pattern from regex blacklist on source Pi-hole"""
-    from .pihole_client import PiholeClient
-
-    url, password, name = await get_source_client()
-    async with PiholeClient(url, password, name) as client:
+    """Remove a pattern from regex blacklist on source DNS server (Pi-hole only)"""
+    source = await get_source_server()
+    async with create_client_from_server(source) as client:
+        if not client.supports_regex_lists:
+            raise HTTPException(status_code=400, detail="Regex lists not supported by this server type")
         if not await client.authenticate():
-            raise HTTPException(status_code=500, detail="Failed to authenticate with source Pi-hole")
+            raise HTTPException(status_code=500, detail="Failed to authenticate with source server")
         success = await client.remove_from_regex_blacklist(pattern_id)
         if not success:
             raise HTTPException(status_code=500, detail="Failed to remove pattern from regex blacklist")
@@ -1485,9 +1575,8 @@ class BlockingSetRequest(BaseModel):
 
 @app.get("/api/blocking/status")
 async def get_blocking_status(db: AsyncSession = Depends(get_db)):
-    """Get blocking status for all enabled Pi-hole servers"""
+    """Get blocking status for all enabled DNS servers"""
     from .models import PiholeServerModel, BlockingOverride
-    from .pihole_client import PiholeClient
 
     # Get all enabled servers
     stmt = select(PiholeServerModel).where(
@@ -1509,7 +1598,7 @@ async def get_blocking_status(db: AsyncSession = Depends(get_db)):
     statuses = []
     for server in servers:
         try:
-            async with PiholeClient(server.url, server.password, server.name) as client:
+            async with create_client_from_server(server) as client:
                 if await client.authenticate():
                     blocking = await client.get_blocking_status()
                     override = overrides.get(server.id)
@@ -1542,9 +1631,8 @@ async def get_blocking_status(db: AsyncSession = Depends(get_db)):
 
 @app.post("/api/blocking/{server_id}")
 async def set_blocking_for_server(server_id: int, data: BlockingSetRequest, db: AsyncSession = Depends(get_db)):
-    """Enable or disable blocking for a specific Pi-hole server"""
+    """Enable or disable blocking for a specific DNS server"""
     from .models import PiholeServerModel, BlockingOverride
-    from .pihole_client import PiholeClient
 
     # Get server
     stmt = select(PiholeServerModel).where(PiholeServerModel.id == server_id)
@@ -1561,7 +1649,7 @@ async def set_blocking_for_server(server_id: int, data: BlockingSetRequest, db: 
     timer_seconds = data.duration_minutes * 60 if data.duration_minutes and not data.enabled else None
 
     try:
-        async with PiholeClient(server.url, server.password, server.name) as client:
+        async with create_client_from_server(server) as client:
             if not await client.authenticate():
                 raise HTTPException(status_code=500, detail=f"Failed to authenticate with {server.name}")
 
@@ -1626,9 +1714,8 @@ async def set_blocking_for_server(server_id: int, data: BlockingSetRequest, db: 
 
 @app.post("/api/blocking/all")
 async def set_blocking_for_all(data: BlockingSetRequest, db: AsyncSession = Depends(get_db)):
-    """Enable or disable blocking for all enabled Pi-hole servers"""
+    """Enable or disable blocking for all enabled DNS servers"""
     from .models import PiholeServerModel, BlockingOverride
-    from .pihole_client import PiholeClient
 
     # Get all enabled servers
     stmt = select(PiholeServerModel).where(
@@ -1648,7 +1735,7 @@ async def set_blocking_for_all(data: BlockingSetRequest, db: AsyncSession = Depe
     results = []
     for server in servers:
         try:
-            async with PiholeClient(server.url, server.password, server.name) as client:
+            async with create_client_from_server(server) as client:
                 if not await client.authenticate():
                     results.append({
                         "server_id": server.id,

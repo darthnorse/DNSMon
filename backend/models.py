@@ -194,6 +194,7 @@ class PiholeServerModel(Base):
     name = Column(String(100), unique=True, nullable=False)
     url = Column(String(255), nullable=False)
     password = Column(Text, nullable=False)
+    username = Column(String(100), nullable=True)  # For AdGuard Home (default: 'admin')
     server_type = Column(String(20), default='pihole')  # 'pihole' or 'adguard'
     enabled = Column(Boolean, default=True)
     display_order = Column(Integer, default=0)
@@ -225,6 +226,7 @@ class PiholeServerModel(Base):
             'name': self.name,
             'url': self.url,
             'password': '********' if mask_password else self.password,
+            'username': self.username,
             'server_type': self.server_type or 'pihole',
             'enabled': self.enabled,
             'display_order': self.display_order,

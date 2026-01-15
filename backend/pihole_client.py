@@ -5,18 +5,35 @@ import json
 from typing import Optional, Dict, List, Any
 import logging
 
+from .dns_client import DNSBlockerClient
+
 logger = logging.getLogger(__name__)
 
 
-class PiholeClient:
+class PiholeClient(DNSBlockerClient):
     """Client for interacting with Pi-hole v6 REST API"""
 
-    def __init__(self, url: str, password: str, server_name: str):
-        self.url = url.rstrip('/')
-        self.password = password
-        self.server_name = server_name
+    def __init__(self, url: str, password: str, server_name: str, **kwargs):
+        super().__init__(url, password, server_name, **kwargs)
         self.session_info = {"sid": None, "csrf": None, "auth_time": None}
         self.client = httpx.AsyncClient(timeout=30.0)
+
+    # ========== Capability Properties ==========
+
+    @property
+    def supports_regex_lists(self) -> bool:
+        """Pi-hole supports regex-based lists."""
+        return True
+
+    @property
+    def supports_teleporter(self) -> bool:
+        """Pi-hole supports backup/restore via teleporter."""
+        return True
+
+    @property
+    def supports_sync(self) -> bool:
+        """Pi-hole supports cross-instance configuration sync."""
+        return True
 
     async def __aenter__(self):
         return self

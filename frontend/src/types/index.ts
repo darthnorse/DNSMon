@@ -66,6 +66,7 @@ export interface PiholeServer {
   name: string;
   url: string;
   password: string;
+  username: string | null;
   server_type: ServerType;
   enabled: boolean;
   display_order: number;
@@ -80,6 +81,7 @@ export interface PiholeServerCreate {
   name: string;
   url: string;
   password: string;
+  username?: string;
   server_type?: ServerType;
   enabled?: boolean;
   is_source?: boolean;

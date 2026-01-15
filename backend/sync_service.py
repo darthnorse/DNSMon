@@ -4,10 +4,22 @@ from typing import List, Dict, Any, Optional
 from sqlalchemy import select
 from .models import SyncHistory, PiholeServerModel
 from .database import async_session_maker
-from .pihole_client import PiholeClient
+from .dns_client_factory import create_dns_client
 import json
 
 logger = logging.getLogger(__name__)
+
+
+def _create_client_from_server(server: PiholeServerModel):
+    """Create a DNS client from a server model"""
+    return create_dns_client(
+        server_type=server.server_type or 'pihole',
+        url=server.url,
+        password=server.password,
+        server_name=server.name,
+        username=server.username
+    )
+
 
 # Config keys to sync per section (only sync specific safe keys, not entire sections)
 # This avoids issues with null values or device-specific settings
@@ -46,17 +58,29 @@ class PiholeSyncService:
                     filtered[section] = section_data
         return filtered
 
-    def _get_config_summary(self, config: Dict[str, Any]) -> Dict[str, Any]:
+    def _get_config_summary(self, config: Dict[str, Any], server_type: str) -> Dict[str, Any]:
         """Get a summary of config sections for preview/history"""
         summary = {}
-        for section, keys in SYNC_CONFIG_KEYS.items():
-            if section in config and isinstance(config[section], dict):
-                section_data = config[section]
-                for key in keys:
-                    if key in section_data:
-                        value = section_data[key]
-                        if isinstance(value, list):
-                            summary[f'{section}_{key}'] = len(value)
+
+        if server_type == 'adguard':
+            # AdGuard config summary
+            if 'user_rules' in config:
+                summary['user_rules'] = len(config['user_rules'])
+            if 'dns' in config:
+                dns = config['dns']
+                if 'upstream_dns' in dns:
+                    summary['upstream_dns'] = len(dns['upstream_dns'])
+        else:
+            # Pi-hole config summary
+            for section, keys in SYNC_CONFIG_KEYS.items():
+                if section in config and isinstance(config[section], dict):
+                    section_data = config[section]
+                    for key in keys:
+                        if key in section_data:
+                            value = section_data[key]
+                            if isinstance(value, list):
+                                summary[f'{section}_{key}'] = len(value)
+
         return summary
 
     async def get_sync_preview(self) -> Optional[Dict[str, Any]]:
@@ -75,14 +99,17 @@ class PiholeSyncService:
                 source = result.scalar_one_or_none()
 
                 if not source:
-                    logger.warning("No source Pi-hole server configured")
-                    return {'error': 'No source Pi-hole server configured'}
+                    logger.warning("No source server configured")
+                    return {'error': 'No source server configured. Mark a server as "Source" in Settings.'}
 
-                # Get target servers
+                source_type = source.server_type or 'pihole'
+
+                # Get target servers - must match source server_type
                 stmt = select(PiholeServerModel).where(
                     PiholeServerModel.sync_enabled == True,
                     PiholeServerModel.enabled == True,
-                    PiholeServerModel.is_source == False
+                    PiholeServerModel.is_source == False,
+                    PiholeServerModel.server_type == source_type
                 )
                 result = await session.execute(stmt)
                 targets = result.scalars().all()
@@ -92,39 +119,51 @@ class PiholeSyncService:
                         'source': source.to_dict(),
                         'targets': [],
                         'teleporter': {},
-                        'config': {}
+                        'config': {},
+                        'message': f'No {source_type} target servers configured for sync'
                     }
 
                 # Connect to source and get preview data
-                async with PiholeClient(source.url, source.password, source.name) as client:
+                async with _create_client_from_server(source) as client:
+                    if not client.supports_sync:
+                        return {'error': f'Server {source.name} does not support sync'}
+
                     if not await client.authenticate():
                         logger.error(f"Failed to authenticate with source {source.name}")
                         return {'error': f'Failed to authenticate with source {source.name}'}
 
-                    # Get teleporter backup size
-                    teleporter_data = await client.get_teleporter()
-                    teleporter_size = len(teleporter_data) if teleporter_data else 0
+                    # Get teleporter backup size (Pi-hole only)
+                    teleporter_data = None
+                    teleporter_size = 0
+                    if client.supports_teleporter:
+                        teleporter_data = await client.get_teleporter()
+                        teleporter_size = len(teleporter_data) if teleporter_data else 0
 
                     # Get config
                     config = await client.get_config()
-                    config_summary = self._get_config_summary(config) if config else {}
+                    config_summary = self._get_config_summary(config, source_type) if config else {}
 
-                return {
+                preview = {
                     'source': source.to_dict(),
                     'targets': [t.to_dict() for t in targets],
-                    'teleporter': {
+                    'config': {
+                        'summary': config_summary
+                    }
+                }
+
+                # Add teleporter info for Pi-hole
+                if source_type == 'pihole':
+                    preview['teleporter'] = {
                         'backup_size_bytes': teleporter_size,
                         'includes': [
                             'groups', 'adlists', 'adlist_by_group',
                             'domainlist', 'domainlist_by_group',
                             'clients', 'client_by_group'
                         ]
-                    },
-                    'config': {
-                        'keys': SYNC_CONFIG_KEYS,
-                        'summary': config_summary
                     }
-                }
+                    preview['config']['keys'] = SYNC_CONFIG_KEYS
+
+                return preview
 
         except Exception as e:
             logger.error(f"Error previewing sync: {e}", exc_info=True)
@@ -132,16 +171,18 @@ class PiholeSyncService:
 
     async def execute_sync(self, sync_type: str = 'manual', run_gravity: bool = False) -> Optional[int]:
         """
-        Execute configuration sync from source to all targets.
+        Execute configuration sync from source to all targets of the same type.
 
-        Uses two-phase sync like nebula-sync:
+        For Pi-hole:
         1. Teleporter - syncs gravity database (lists, domains, groups, clients)
         2. Config PATCH - syncs settings (DNS including hosts, DHCP, etc.)
 
+        For AdGuard Home:
+        1. Config sync - syncs user rules, DNS settings, filtering config
+
         Args:
             sync_type: 'manual' or 'scheduled'
-            run_gravity: If True, runs gravity update on targets after sync.
-                         Usually not needed since Teleporter includes processed gravity data.
+            run_gravity: If True, runs gravity update on Pi-hole targets after sync.
 
         Returns sync_history_id if successful, None if failed.
         """
@@ -160,51 +201,66 @@ class PiholeSyncService:
                 source = result.scalar_one_or_none()
 
                 if not source:
-                    logger.error("No source Pi-hole server configured")
+                    logger.error("No source server configured")
                     return None
 
-                # Get target servers
+                source_type = source.server_type or 'pihole'
+
+                # Get target servers - must match source server_type
                 stmt = select(PiholeServerModel).where(
                     PiholeServerModel.sync_enabled == True,
                     PiholeServerModel.enabled == True,
-                    PiholeServerModel.is_source == False
+                    PiholeServerModel.is_source == False,
+                    PiholeServerModel.server_type == source_type
                 )
                 result = await session.execute(stmt)
                 targets = result.scalars().all()
 
                 if not targets:
-                    logger.info("No target servers to sync to")
+                    logger.info(f"No {source_type} target servers to sync to")
                     return None
 
-                logger.info(f"Starting {sync_type} sync from {source.name} to {len(targets)} targets")
+                logger.info(f"Starting {sync_type} sync from {source.name} ({source_type}) to {len(targets)} targets")
 
                 # === Phase 1: Get data from source ===
                 teleporter_data = None
                 source_config = None
 
-                async with PiholeClient(source.url, source.password, source.name) as client:
+                async with _create_client_from_server(source) as client:
+                    if not client.supports_sync:
+                        logger.error(f"Source server {source.name} does not support sync")
+                        return None
+
                     if not await client.authenticate():
                         logger.error(f"Failed to authenticate with source {source.name}")
                         return None
 
-                    # Get teleporter backup
-                    teleporter_data = await client.get_teleporter()
-                    if not teleporter_data:
-                        logger.error(f"Failed to get teleporter backup from {source.name}")
-                        all_errors.append(f"Failed to get teleporter backup from source")
+                    # Get teleporter backup (Pi-hole only)
+                    if client.supports_teleporter:
+                        teleporter_data = await client.get_teleporter()
+                        if not teleporter_data:
+                            logger.error(f"Failed to get teleporter backup from {source.name}")
+                            all_errors.append("Failed to get teleporter backup from source")
 
-                    # Get config
+                    # Get config (both Pi-hole and AdGuard)
                     source_config = await client.get_config()
                     if not source_config:
                         logger.error(f"Failed to get config from {source.name}")
-                        all_errors.append(f"Failed to get config from source")
+                        all_errors.append("Failed to get config from source")
 
-                if not teleporter_data and not source_config:
-                    logger.error("Failed to get any data from source")
+                # For Pi-hole, we need either teleporter or config. For AdGuard, just config.
+                if source_type == 'pihole' and not teleporter_data and not source_config:
+                    logger.error("Failed to get any data from Pi-hole source")
+                    return None
+                elif source_type == 'adguard' and not source_config:
+                    logger.error("Failed to get config from AdGuard source")
                     return None
 
-                # Filter config to syncable sections
-                sync_config = self._filter_config_for_sync(source_config) if source_config else {}
+                # Filter config to syncable sections (Pi-hole only, AdGuard sends full config)
+                if source_type == 'pihole':
+                    sync_config = self._filter_config_for_sync(source_config) if source_config else {}
+                else:
+                    sync_config = source_config
 
                 # === Phase 2: Push to targets ===
                 successful_syncs = 0
@@ -215,15 +271,15 @@ class PiholeSyncService:
                     target_success = True
 
                     try:
-                        async with PiholeClient(target.url, target.password, target.name) as client:
+                        async with _create_client_from_server(target) as client:
                             if not await client.authenticate():
                                 error_msg = f"Failed to authenticate with {target.name}"
                                 logger.error(error_msg)
                                 all_errors.append(error_msg)
                                 continue
 
-                            # Push teleporter backup
-                            if teleporter_data:
+                            # Push teleporter backup (Pi-hole only)
+                            if teleporter_data and client.supports_teleporter:
                                 if not await client.post_teleporter(teleporter_data):
                                     error_msg = f"{target.name}: Failed to upload teleporter backup"
                                     logger.error(error_msg)
@@ -234,7 +290,7 @@ class PiholeSyncService:
                             # Push config
                             if sync_config:
                                 if not await client.patch_config(sync_config):
-                                    error_msg = f"{target.name}: Failed to patch config"
+                                    error_msg = f"{target.name}: Failed to apply config"
                                     logger.error(error_msg)
                                     if len(all_errors) < max_errors:
                                         all_errors.append(error_msg)
@@ -271,10 +327,11 @@ class PiholeSyncService:
                 # Build items_synced summary (counts only, for display)
                 items_synced = {}
                 if source_config:
-                    items_synced.update(self._get_config_summary(source_config))
+                    items_synced.update(self._get_config_summary(source_config, source_type))
                 # Add metadata separately (not counted in "items" total)
                 items_synced['_teleporter_size_bytes'] = len(teleporter_data) if teleporter_data else 0
                 items_synced['_config_sections'] = list(sync_config.keys()) if sync_config else []
+                items_synced['_server_type'] = source_type
 
                 sync_history = SyncHistory(
                     sync_type=sync_type,

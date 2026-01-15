@@ -6,7 +6,7 @@ from sqlalchemy import select, func
 from sqlalchemy.dialects.postgresql import insert
 from .models import Query
 from .database import async_session_maker, cleanup_old_queries
-from .pihole_client import PiholeClient
+from .dns_client_factory import create_dns_client
 from .config import get_settings_sync, PiholeServer
 import time
 
@@ -69,8 +69,15 @@ class QueryIngestionService:
 
             logger.info(f"Ingesting queries from {server.name} (from {from_timestamp} to {until_timestamp})")
 
-            # Connect to Pi-hole
-            async with PiholeClient(server.url, server.password, server.name) as client:
+            # Connect to DNS server (Pi-hole or AdGuard)
+            client = create_dns_client(
+                server_type=server.server_type,
+                url=server.url,
+                password=server.password,
+                server_name=server.name,
+                username=server.username
+            )
+            async with client:
                 # Authenticate
                 if not await client.authenticate():
                     logger.error(f"Failed to authenticate with {server.name}")

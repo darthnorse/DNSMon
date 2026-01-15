@@ -19,6 +19,7 @@ export default function Settings() {
     name: '',
     url: '',
     password: '',
+    username: '',
     server_type: 'pihole',
     enabled: true,
     is_source: false,
@@ -181,6 +182,7 @@ export default function Settings() {
       name: server.name,
       url: server.url,
       password: '', // Don't populate password when editing (it's masked in API response)
+      username: server.username || '',
       server_type: server.server_type || 'pihole',
       enabled: server.enabled,
       is_source: server.is_source,
@@ -215,6 +217,7 @@ export default function Settings() {
       name: '',
       url: '',
       password: '',
+      username: '',
       server_type: 'pihole',
       enabled: true,
       is_source: false,
@@ -618,7 +621,15 @@ export default function Settings() {
                   <select
                     id="server_type"
                     value={serverFormData.server_type}
-                    onChange={(e) => setServerFormData({ ...serverFormData, server_type: e.target.value as ServerType })}
+                    onChange={(e) => {
+                      const newType = e.target.value as ServerType;
+                      setServerFormData({
+                        ...serverFormData,
+                        server_type: newType,
+                        // Clear username when switching to Pi-hole (Pi-hole doesn't use username)
+                        username: newType === 'pihole' ? '' : serverFormData.username
+                      });
+                    }}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                   >
                     <option value="pihole">Pi-hole</option>
@@ -638,6 +649,24 @@ export default function Settings() {
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                   />
                 </div>
+                {serverFormData.server_type === 'adguard' && (
+                  <div>
+                    <label htmlFor="server_username" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Username
+                    </label>
+                    <input
+                      type="text"
+                      id="server_username"
+                      value={serverFormData.username || ''}
+                      onChange={(e) => setServerFormData({ ...serverFormData, username: e.target.value })}
+                      placeholder="admin"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      AdGuard Home username (defaults to 'admin' if empty)
+                    </p>
+                  </div>
+                )}
                 <div className="flex items-center">
                   <input
                     type="checkbox"
@@ -650,10 +679,13 @@ export default function Settings() {
                     Enabled
                   </label>
                 </div>
+                {/* Sync options - sync only works within the same server type */}
                 {(() => {
-                  // Check if another server is already source (not the one being edited)
+                  // Check if another server of the same type is already source
                   const anotherServerIsSource = servers.some(s =>
-                    s.is_source && (!editingServer || s.id !== editingServer.id)
+                    s.is_source &&
+                    s.server_type === serverFormData.server_type &&
+                    (!editingServer || s.id !== editingServer.id)
                   );
                   const sourceDisabled = serverFormData.sync_enabled || anotherServerIsSource;
                   const targetDisabled = serverFormData.is_source;
@@ -688,7 +720,7 @@ export default function Settings() {
                           Source (sync from this server)
                           {anotherServerIsSource && !serverFormData.sync_enabled && (
                             <span className="text-xs text-gray-400 dark:text-gray-500 ml-1">
-                              - another server is source
+                              - another {serverFormData.server_type} server is source
                             </span>
                           )}
                         </label>
@@ -721,6 +753,9 @@ export default function Settings() {
                           Sync target (receive syncs from source)
                         </label>
                       </div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Note: Sync only works between servers of the same type ({serverFormData.server_type === 'pihole' ? 'Pi-hole' : 'AdGuard'} to {serverFormData.server_type === 'pihole' ? 'Pi-hole' : 'AdGuard'})
+                      </p>
                     </>
                   );
                 })()}

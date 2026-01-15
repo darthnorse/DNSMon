@@ -12,11 +12,13 @@ logger = logging.getLogger(__name__)
 
 
 class PiholeServer(BaseModel):
-    """Configuration for a single Pi-hole server"""
+    """Configuration for a single DNS ad-blocker server (Pi-hole or AdGuard Home)"""
     id: Optional[int] = None
     name: str
     url: str
     password: str
+    username: Optional[str] = None  # For AdGuard Home (default: 'admin')
+    server_type: str = 'pihole'  # 'pihole' or 'adguard'
     enabled: bool = True
     display_order: int = 0
 
@@ -171,6 +173,8 @@ async def load_settings_from_db(db: AsyncSession) -> Settings:
             name=server.name,
             url=server.url,
             password=server.password,
+            username=server.username,
+            server_type=server.server_type or 'pihole',
             enabled=server.enabled,
             display_order=server.display_order
         )
