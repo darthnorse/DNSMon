@@ -1,0 +1,19 @@
+# Pidash Configuration File
+
+# Polling interval in seconds (how often to check Pihole for new queries)
+poll_interval_seconds: 60  # 1 minute
+
+# Data retention in days
+retention_days: 60
+
+# Pi-hole servers to monitor
+# NOTE: Passwords are stored in .env file as PIHOLE_PASSWORD_<NAME>
+# Example: PIHOLE_PASSWORD_PIHOLE1=your-password-here
+pihole_servers:
+  - name: "pihole1"
+    url: "http://192.168.1.100"
+    enabled: true
+
+  - name: "pihole2"
+    url: "http://192.168.1.101"
+    enabled: true

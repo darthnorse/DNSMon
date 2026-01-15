@@ -1,0 +1,35 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: dnsmon-postgres
+    network_mode: host
+    environment:
+      POSTGRES_DB: dnsmon
+      POSTGRES_USER: dnsmon
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    volumes:
+      - dnsmon_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dnsmon"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dnsmon-app
+    network_mode: host
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://dnsmon:${POSTGRES_PASSWORD:-changeme}@localhost:5432/dnsmon
+      TZ: ${TZ:-America/Denver}
+    # All other settings are now configured via the Settings page
+    restart: unless-stopped
+
+volumes:
+  dnsmon_postgres_data:

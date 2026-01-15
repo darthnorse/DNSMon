@@ -1,0 +1,16 @@
+# Development override for docker-compose
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+version: '3.8'
+
+services:
+  postgres:
+    # Expose postgres port for development tools
+    ports:
+      - "5432:5432"
+
+  app:
+    # Mount backend code for hot reload in development
+    volumes:
+      - ./config.yml:/app/config.yml
+      - ./backend:/app/backend
