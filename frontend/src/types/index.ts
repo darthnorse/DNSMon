@@ -68,6 +68,7 @@ export interface PiholeServer {
   password: string;
   username: string | null;
   server_type: ServerType;
+  skip_ssl_verify: boolean;
   enabled: boolean;
   display_order: number;
   is_source: boolean;
@@ -83,6 +84,7 @@ export interface PiholeServerCreate {
   password: string;
   username?: string;
   server_type?: ServerType;
+  skip_ssl_verify?: boolean;
   enabled?: boolean;
   is_source?: boolean;
   sync_enabled?: boolean;

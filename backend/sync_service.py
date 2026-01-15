@@ -17,7 +17,8 @@ def _create_client_from_server(server: PiholeServerModel):
         url=server.url,
         password=server.password,
         server_name=server.name,
-        username=server.username
+        username=server.username,
+        skip_ssl_verify=server.skip_ssl_verify or False
     )
 
 

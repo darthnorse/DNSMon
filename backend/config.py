@@ -19,6 +19,7 @@ class PiholeServer(BaseModel):
     password: str
     username: Optional[str] = None  # For AdGuard Home (default: 'admin')
     server_type: str = 'pihole'  # 'pihole' or 'adguard'
+    skip_ssl_verify: bool = False  # Skip SSL certificate verification for self-signed certs
     enabled: bool = True
     display_order: int = 0
 
@@ -175,6 +176,7 @@ async def load_settings_from_db(db: AsyncSession) -> Settings:
             password=server.password,
             username=server.username,
             server_type=server.server_type or 'pihole',
+            skip_ssl_verify=server.skip_ssl_verify or False,
             enabled=server.enabled,
             display_order=server.display_order
         )

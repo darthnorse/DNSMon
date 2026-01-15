@@ -766,6 +766,7 @@ class PiholeServerCreate(BaseModel):
     password: str
     username: Optional[str] = None  # For AdGuard Home (default: 'admin')
     server_type: str = 'pihole'  # 'pihole' or 'adguard'
+    skip_ssl_verify: bool = False  # Skip SSL certificate verification for self-signed certs
     enabled: bool = True
     is_source: bool = False
     sync_enabled: bool = False
@@ -802,6 +803,7 @@ class PiholeServerUpdate(BaseModel):
     password: Optional[str] = None
     username: Optional[str] = None  # For AdGuard Home
     server_type: Optional[str] = None
+    skip_ssl_verify: Optional[bool] = None  # Skip SSL certificate verification
     enabled: Optional[bool] = None
     is_source: Optional[bool] = None
     sync_enabled: Optional[bool] = None
@@ -983,6 +985,7 @@ async def create_pihole_server(
         password=server_data.password,
         username=server_data.username,
         server_type=server_data.server_type,
+        skip_ssl_verify=server_data.skip_ssl_verify,
         enabled=server_data.enabled,
         is_source=server_data.is_source,
         sync_enabled=server_data.sync_enabled,
@@ -1121,7 +1124,8 @@ async def test_pihole_connection(server_data: PiholeServerCreate):
             url=server_data.url,
             password=server_data.password,
             server_name=server_data.name,
-            username=server_data.username
+            username=server_data.username,
+            skip_ssl_verify=server_data.skip_ssl_verify
         )
         async with client:
             # Try to authenticate - this will verify the connection and credentials work
@@ -1350,7 +1354,8 @@ def create_client_from_server(server):
         url=server.url,
         password=server.password,
         server_name=server.name,
-        username=server.username
+        username=server.username,
+        skip_ssl_verify=server.skip_ssl_verify or False
     )
 
 

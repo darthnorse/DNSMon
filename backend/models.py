@@ -196,6 +196,7 @@ class PiholeServerModel(Base):
     password = Column(Text, nullable=False)
     username = Column(String(100), nullable=True)  # For AdGuard Home (default: 'admin')
     server_type = Column(String(20), default='pihole')  # 'pihole' or 'adguard'
+    skip_ssl_verify = Column(Boolean, default=False)  # Skip SSL certificate verification for self-signed certs
     enabled = Column(Boolean, default=True)
     display_order = Column(Integer, default=0)
 
@@ -228,6 +229,7 @@ class PiholeServerModel(Base):
             'password': '********' if mask_password else self.password,
             'username': self.username,
             'server_type': self.server_type or 'pihole',
+            'skip_ssl_verify': self.skip_ssl_verify or False,
             'enabled': self.enabled,
             'display_order': self.display_order,
             'is_source': self.is_source,

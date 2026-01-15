@@ -75,7 +75,8 @@ class QueryIngestionService:
                 url=server.url,
                 password=server.password,
                 server_name=server.name,
-                username=server.username
+                username=server.username,
+                skip_ssl_verify=server.skip_ssl_verify
             )
             async with client:
                 # Authenticate

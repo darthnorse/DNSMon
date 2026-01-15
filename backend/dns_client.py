@@ -17,7 +17,7 @@ class DNSBlockerClient(ABC):
     this class and implement the required abstract methods.
     """
 
-    def __init__(self, url: str, password: str, server_name: str, **kwargs):
+    def __init__(self, url: str, password: str, server_name: str, skip_ssl_verify: bool = False, **kwargs):
         """
         Initialize the DNS blocker client.
 
@@ -25,11 +25,13 @@ class DNSBlockerClient(ABC):
             url: Base URL of the DNS blocker server
             password: Authentication password
             server_name: Display name for logging purposes
+            skip_ssl_verify: If True, skip SSL certificate verification (for self-signed certs)
             **kwargs: Additional client-specific arguments
         """
         self.url = url.rstrip('/')
         self.password = password
         self.server_name = server_name
+        self.skip_ssl_verify = skip_ssl_verify
 
     @abstractmethod
     async def __aenter__(self):

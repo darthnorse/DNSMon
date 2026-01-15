@@ -13,10 +13,10 @@ logger = logging.getLogger(__name__)
 class PiholeClient(DNSBlockerClient):
     """Client for interacting with Pi-hole v6 REST API"""
 
-    def __init__(self, url: str, password: str, server_name: str, **kwargs):
-        super().__init__(url, password, server_name, **kwargs)
+    def __init__(self, url: str, password: str, server_name: str, skip_ssl_verify: bool = False, **kwargs):
+        super().__init__(url, password, server_name, skip_ssl_verify=skip_ssl_verify, **kwargs)
         self.session_info = {"sid": None, "csrf": None, "auth_time": None}
-        self.client = httpx.AsyncClient(timeout=30.0)
+        self.client = httpx.AsyncClient(timeout=30.0, verify=not skip_ssl_verify)
 
     # ========== Capability Properties ==========
 

@@ -21,6 +21,7 @@ export default function Settings() {
     password: '',
     username: '',
     server_type: 'pihole',
+    skip_ssl_verify: false,
     enabled: true,
     is_source: false,
     sync_enabled: false
@@ -184,6 +185,7 @@ export default function Settings() {
       password: '', // Don't populate password when editing (it's masked in API response)
       username: server.username || '',
       server_type: server.server_type || 'pihole',
+      skip_ssl_verify: server.skip_ssl_verify || false,
       enabled: server.enabled,
       is_source: server.is_source,
       sync_enabled: server.sync_enabled
@@ -219,6 +221,7 @@ export default function Settings() {
       password: '',
       username: '',
       server_type: 'pihole',
+      skip_ssl_verify: false,
       enabled: true,
       is_source: false,
       sync_enabled: false
@@ -677,6 +680,18 @@ export default function Settings() {
                   />
                   <label htmlFor="server_enabled" className="ml-2 text-sm text-gray-700 dark:text-gray-300">
                     Enabled
+                  </label>
+                </div>
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    id="server_skip_ssl_verify"
+                    checked={serverFormData.skip_ssl_verify || false}
+                    onChange={(e) => setServerFormData({ ...serverFormData, skip_ssl_verify: e.target.checked })}
+                    className="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                  />
+                  <label htmlFor="server_skip_ssl_verify" className="ml-2 text-sm text-gray-700 dark:text-gray-300">
+                    Skip SSL verification (for self-signed certificates)
                   </label>
                 </div>
                 {/* Sync options - sync only works within the same server type */}

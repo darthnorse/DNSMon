@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 class AdGuardHomeClient(DNSBlockerClient):
     """Client for interacting with AdGuard Home REST API"""
 
-    def __init__(self, url: str, password: str, server_name: str, username: str = "admin", **kwargs):
+    def __init__(self, url: str, password: str, server_name: str, username: str = "admin", skip_ssl_verify: bool = False, **kwargs):
         """
         Initialize the AdGuard Home client.
 
@@ -28,10 +28,11 @@ class AdGuardHomeClient(DNSBlockerClient):
             password: Authentication password
             server_name: Display name for logging
             username: Username for Basic Auth (default: 'admin')
+            skip_ssl_verify: If True, skip SSL certificate verification (for self-signed certs)
         """
-        super().__init__(url, password, server_name, **kwargs)
+        super().__init__(url, password, server_name, skip_ssl_verify=skip_ssl_verify, **kwargs)
         self.username = username
-        self.client = httpx.AsyncClient(timeout=30.0)
+        self.client = httpx.AsyncClient(timeout=30.0, verify=not skip_ssl_verify)
 
     async def __aenter__(self):
         return self
