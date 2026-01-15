@@ -12,6 +12,7 @@ import type { BlockingStatus } from './types';
 // Duration options for blocking disable
 const DURATION_OPTIONS = [
   { label: 'Indefinitely', value: undefined },
+  { label: '1 minute', value: 1 },
   { label: '5 minutes', value: 5 },
   { label: '15 minutes', value: 15 },
   { label: '30 minutes', value: 30 },

@@ -1634,89 +1634,6 @@ async def get_blocking_status(db: AsyncSession = Depends(get_db)):
     return {"servers": statuses}
 
 
-@app.post("/api/blocking/{server_id}")
-async def set_blocking_for_server(server_id: int, data: BlockingSetRequest, db: AsyncSession = Depends(get_db)):
-    """Enable or disable blocking for a specific DNS server"""
-    from .models import PiholeServerModel, BlockingOverride
-
-    # Get server
-    stmt = select(PiholeServerModel).where(PiholeServerModel.id == server_id)
-    result = await db.execute(stmt)
-    server = result.scalar_one_or_none()
-
-    if not server:
-        raise HTTPException(status_code=404, detail="Server not found")
-
-    if not server.enabled:
-        raise HTTPException(status_code=400, detail="Server is disabled")
-
-    # Calculate timer in seconds if duration provided
-    timer_seconds = data.duration_minutes * 60 if data.duration_minutes and not data.enabled else None
-
-    try:
-        async with create_client_from_server(server) as client:
-            if not await client.authenticate():
-                raise HTTPException(status_code=500, detail=f"Failed to authenticate with {server.name}")
-
-            success = await client.set_blocking(data.enabled, timer_seconds)
-            if not success:
-                raise HTTPException(status_code=500, detail=f"Failed to set blocking on {server.name}")
-
-            # Track blocking override in database
-            if not data.enabled:
-                # Clear any existing pending overrides for this server
-                existing_stmt = select(BlockingOverride).where(
-                    BlockingOverride.server_id == server_id,
-                    BlockingOverride.enabled_at.is_(None)
-                )
-                existing_result = await db.execute(existing_stmt)
-                for existing in existing_result.scalars():
-                    existing.enabled_at = datetime.now(timezone.utc)
-
-                # Create new override record
-                auto_enable_at = None
-                if data.duration_minutes:
-                    auto_enable_at = datetime.now(timezone.utc) + timedelta(minutes=data.duration_minutes)
-
-                override = BlockingOverride(
-                    server_id=server_id,
-                    auto_enable_at=auto_enable_at,
-                    disabled_by='user'
-                )
-                db.add(override)
-                await db.commit()
-
-                return {
-                    "success": True,
-                    "server_id": server_id,
-                    "blocking": False,
-                    "auto_enable_at": auto_enable_at.isoformat() if auto_enable_at else None
-                }
-            else:
-                # Mark any pending overrides as completed
-                existing_stmt = select(BlockingOverride).where(
-                    BlockingOverride.server_id == server_id,
-                    BlockingOverride.enabled_at.is_(None)
-                )
-                existing_result = await db.execute(existing_stmt)
-                for existing in existing_result.scalars():
-                    existing.enabled_at = datetime.now(timezone.utc)
-                await db.commit()
-
-                return {
-                    "success": True,
-                    "server_id": server_id,
-                    "blocking": True,
-                    "auto_enable_at": None
-                }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error setting blocking for {server.name}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @app.post("/api/blocking/all")
 async def set_blocking_for_all(data: BlockingSetRequest, db: AsyncSession = Depends(get_db)):
     """Enable or disable blocking for all enabled DNS servers"""
@@ -1804,6 +1721,89 @@ async def set_blocking_for_all(data: BlockingSetRequest, db: AsyncSession = Depe
         "results": results,
         "auto_enable_at": auto_enable_at.isoformat() if auto_enable_at else None
     }
+
+
+@app.post("/api/blocking/{server_id}")
+async def set_blocking_for_server(server_id: int, data: BlockingSetRequest, db: AsyncSession = Depends(get_db)):
+    """Enable or disable blocking for a specific DNS server"""
+    from .models import PiholeServerModel, BlockingOverride
+
+    # Get server
+    stmt = select(PiholeServerModel).where(PiholeServerModel.id == server_id)
+    result = await db.execute(stmt)
+    server = result.scalar_one_or_none()
+
+    if not server:
+        raise HTTPException(status_code=404, detail="Server not found")
+
+    if not server.enabled:
+        raise HTTPException(status_code=400, detail="Server is disabled")
+
+    # Calculate timer in seconds if duration provided
+    timer_seconds = data.duration_minutes * 60 if data.duration_minutes and not data.enabled else None
+
+    try:
+        async with create_client_from_server(server) as client:
+            if not await client.authenticate():
+                raise HTTPException(status_code=500, detail=f"Failed to authenticate with {server.name}")
+
+            success = await client.set_blocking(data.enabled, timer_seconds)
+            if not success:
+                raise HTTPException(status_code=500, detail=f"Failed to set blocking on {server.name}")
+
+            # Track blocking override in database
+            if not data.enabled:
+                # Clear any existing pending overrides for this server
+                existing_stmt = select(BlockingOverride).where(
+                    BlockingOverride.server_id == server_id,
+                    BlockingOverride.enabled_at.is_(None)
+                )
+                existing_result = await db.execute(existing_stmt)
+                for existing in existing_result.scalars():
+                    existing.enabled_at = datetime.now(timezone.utc)
+
+                # Create new override record
+                auto_enable_at = None
+                if data.duration_minutes:
+                    auto_enable_at = datetime.now(timezone.utc) + timedelta(minutes=data.duration_minutes)
+
+                override = BlockingOverride(
+                    server_id=server_id,
+                    auto_enable_at=auto_enable_at,
+                    disabled_by='user'
+                )
+                db.add(override)
+                await db.commit()
+
+                return {
+                    "success": True,
+                    "server_id": server_id,
+                    "blocking": False,
+                    "auto_enable_at": auto_enable_at.isoformat() if auto_enable_at else None
+                }
+            else:
+                # Mark any pending overrides as completed
+                existing_stmt = select(BlockingOverride).where(
+                    BlockingOverride.server_id == server_id,
+                    BlockingOverride.enabled_at.is_(None)
+                )
+                existing_result = await db.execute(existing_stmt)
+                for existing in existing_result.scalars():
+                    existing.enabled_at = datetime.now(timezone.utc)
+                await db.commit()
+
+                return {
+                    "success": True,
+                    "server_id": server_id,
+                    "blocking": True,
+                    "auto_enable_at": None
+                }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error setting blocking for {server.name}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/health")
