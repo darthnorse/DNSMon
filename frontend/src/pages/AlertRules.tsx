@@ -17,8 +17,6 @@ export default function AlertRules() {
     client_ip_pattern: '',
     client_hostname_pattern: '',
     exclude_domains: '',
-    notify_telegram: true,
-    telegram_chat_id: '',
     cooldown_minutes: 5,
     enabled: true,
   });
@@ -73,10 +71,6 @@ export default function AlertRules() {
       errors.push('Exclude domains must be 5000 characters or less');
     }
 
-    if (formData.telegram_chat_id && formData.telegram_chat_id.length > 100) {
-      errors.push('Telegram chat ID must be 100 characters or less');
-    }
-
     const cooldown = formData.cooldown_minutes ?? 5;
     if (cooldown < 0 || cooldown > 10080) {
       errors.push('Cooldown must be between 0 and 10080 minutes (7 days)');
@@ -115,8 +109,6 @@ export default function AlertRules() {
       client_ip_pattern: rule.client_ip_pattern || '',
       client_hostname_pattern: rule.client_hostname_pattern || '',
       exclude_domains: rule.exclude_domains || '',
-      notify_telegram: rule.notify_telegram,
-      telegram_chat_id: rule.telegram_chat_id || '',
       cooldown_minutes: rule.cooldown_minutes,
       enabled: rule.enabled,
     });
@@ -145,8 +137,6 @@ export default function AlertRules() {
       client_ip_pattern: '',
       client_hostname_pattern: '',
       exclude_domains: '',
-      notify_telegram: true,
-      telegram_chat_id: '',
       cooldown_minutes: 5,
       enabled: true,
     });
@@ -289,7 +279,7 @@ export default function AlertRules() {
               </p>
             </div>
 
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label htmlFor="cooldown_minutes" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Cooldown (minutes)
@@ -304,46 +294,17 @@ export default function AlertRules() {
                 />
               </div>
 
-              <div>
-                <label htmlFor="telegram_chat_id" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Telegram Chat ID (optional)
-                </label>
+              <div className="flex items-center pt-6">
                 <input
-                  type="text"
-                  id="telegram_chat_id"
-                  placeholder="Override default"
-                  value={formData.telegram_chat_id}
-                  onChange={(e) => setFormData({ ...formData, telegram_chat_id: e.target.value })}
-                  className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm px-3 py-2 border"
+                  type="checkbox"
+                  id="enabled"
+                  checked={formData.enabled}
+                  onChange={(e) => setFormData({ ...formData, enabled: e.target.checked })}
+                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                 />
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center">
-                  <input
-                    type="checkbox"
-                    id="notify_telegram"
-                    checked={formData.notify_telegram}
-                    onChange={(e) => setFormData({ ...formData, notify_telegram: e.target.checked })}
-                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                  />
-                  <label htmlFor="notify_telegram" className="ml-2 block text-sm text-gray-900 dark:text-gray-300">
-                    Notify Telegram
-                  </label>
-                </div>
-
-                <div className="flex items-center">
-                  <input
-                    type="checkbox"
-                    id="enabled"
-                    checked={formData.enabled}
-                    onChange={(e) => setFormData({ ...formData, enabled: e.target.checked })}
-                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                  />
-                  <label htmlFor="enabled" className="ml-2 block text-sm text-gray-900 dark:text-gray-300">
-                    Enabled
-                  </label>
-                </div>
+                <label htmlFor="enabled" className="ml-2 block text-sm text-gray-900 dark:text-gray-300">
+                  Enabled
+                </label>
               </div>
             </div>
 
@@ -404,7 +365,7 @@ export default function AlertRules() {
                         )}
                       </div>
                       <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                        Cooldown: {rule.cooldown_minutes} min | Telegram: {rule.notify_telegram ? 'Yes' : 'No'}
+                        Cooldown: {rule.cooldown_minutes} min
                       </div>
                     </div>
                     <div className="ml-4 flex space-x-2">

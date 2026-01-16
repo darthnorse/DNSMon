@@ -32,8 +32,6 @@ export interface AlertRuleCreate {
   client_ip_pattern?: string;
   client_hostname_pattern?: string;
   exclude_domains?: string;
-  notify_telegram?: boolean;
-  telegram_chat_id?: string;
   cooldown_minutes?: number;
   enabled?: boolean;
 }

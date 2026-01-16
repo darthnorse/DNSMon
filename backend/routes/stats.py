@@ -196,7 +196,7 @@ async def get_statistics(
         time_stmt = add_server_filter(time_stmt)
         time_result = await db.execute(time_stmt)
         queries_hourly = [
-            {"hour": (row[0].isoformat() + 'Z') if row[0] else "", "queries": row[1], "blocked": row[2]}
+            {"hour": row[0].strftime('%Y-%m-%dT%H:%M:%SZ') if row[0] else "", "queries": row[1], "blocked": row[2]}
             for row in time_result
         ]
         queries_daily = []
