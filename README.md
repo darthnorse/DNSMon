@@ -88,37 +88,67 @@ Includes sync history with detailed logs and error tracking.
 - Rate-limited login attempts
 - Secure password hashing (bcrypt)
 
-## Quick Start
+## Installation
 
-### Using Pre-built Images (Recommended)
+### Requirements
+- Docker and Docker Compose
+- Pi-hole v6 and/or AdGuard Home server(s)
+
+### Quick Start
+
+1. Create a directory and `docker-compose.yml`:
 
 ```bash
-# Create project directory
 mkdir dnsmon && cd dnsmon
+```
 
-# Download example files
-curl -O https://raw.githubusercontent.com/darthnorse/DNSMon/main/docker-compose.yml.example
-curl -O https://raw.githubusercontent.com/darthnorse/DNSMon/main/.env.example
+```yaml
+# docker-compose.yml
+services:
+  postgres:
+    image: postgres:16
+    container_name: dnsmon-postgres
+    environment:
+      POSTGRES_DB: dnsmon
+      POSTGRES_USER: dnsmon
+      POSTGRES_PASSWORD: changeme  # Change this!
+    volumes:
+      - dnsmon_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dnsmon"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
 
-# Configure
-cp docker-compose.yml.example docker-compose.yml
-cp .env.example .env
+  app:
+    image: ghcr.io/darthnorse/dnsmon:latest
+    container_name: dnsmon-app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://dnsmon:changeme@postgres:5432/dnsmon  # Match password above
+      TZ: America/Denver  # Your timezone
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
 
-# Edit .env and set a secure POSTGRES_PASSWORD
-nano .env
+volumes:
+  dnsmon_postgres_data:
+```
 
-# Start services
+2. Start the services:
+
+```bash
 docker compose up -d
 ```
 
-The application will be available at `http://localhost:8000`
+3. Open `http://localhost:8000` and create your admin account
 
-### First-Time Setup
+4. Go to **Settings** → **DNS Servers** to add your Pi-hole/AdGuard servers
 
-1. Navigate to `http://localhost:8000`
-2. Create your admin account on the setup wizard
-3. Go to **Settings** → **DNS Servers** to add your Pi-hole/AdGuard servers
-4. (Optional) Configure notification channels in **Settings** → **Notifications**
+That's it! DNSMon will start monitoring your DNS servers immediately.
 
 ## Configuration
 
@@ -269,7 +299,7 @@ Supported architectures:
 
 ## Development
 
-### Local Development
+For contributors who want to modify DNSMon:
 
 ```bash
 # Clone repository
@@ -294,7 +324,7 @@ npm install
 npm run dev
 ```
 
-### Building Docker Image
+To build a local Docker image:
 
 ```bash
 docker build -t dnsmon .
