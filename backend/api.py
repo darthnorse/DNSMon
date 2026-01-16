@@ -857,7 +857,8 @@ async def search_queries(
     to_date: Optional[str] = None,
     limit: int = QueryParam(100, le=1000, ge=1),
     offset: int = QueryParam(0, ge=0, le=1000000),  # Max 1 million offset to prevent abuse
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user)
 ):
     """
     Search DNS queries with flexible filtering.
@@ -943,7 +944,8 @@ async def count_queries(
     pihole_server: Optional[str] = None,
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user)
 ):
     """Get count of queries matching search criteria"""
     stmt = select(func.count(Query.id))
@@ -985,7 +987,10 @@ async def count_queries(
 
 
 @app.get("/api/stats", response_model=StatsResponse)
-async def get_stats(db: AsyncSession = Depends(get_db)):
+async def get_stats(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user)
+):
     """Get dashboard statistics"""
     now = datetime.now(timezone.utc)
     last_24h = now - timedelta(hours=24)
@@ -1066,7 +1071,8 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
 async def get_statistics(
     period: str = "24h",
     servers: Optional[str] = None,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user)
 ):
     """Get comprehensive statistics for the Statistics page.
 
@@ -1291,7 +1297,10 @@ async def get_statistics(
 
 # Alert rule endpoints
 @app.get("/api/alert-rules", response_model=List[AlertRuleResponse])
-async def get_alert_rules(db: AsyncSession = Depends(get_db)):
+async def get_alert_rules(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user)
+):
     """Get all alert rules"""
     stmt = select(AlertRule).order_by(AlertRule.created_at.desc())
     result = await db.execute(stmt)
@@ -1315,7 +1324,11 @@ async def get_alert_rules(db: AsyncSession = Depends(get_db)):
 
 
 @app.post("/api/alert-rules", response_model=AlertRuleResponse)
-async def create_alert_rule(rule: AlertRuleCreate, db: AsyncSession = Depends(get_db)):
+async def create_alert_rule(
+    rule: AlertRuleCreate,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user)
+):
     """Create a new alert rule"""
     db_rule = AlertRule(**rule.model_dump())
     db.add(db_rule)
@@ -1347,7 +1360,8 @@ async def create_alert_rule(rule: AlertRuleCreate, db: AsyncSession = Depends(ge
 async def update_alert_rule(
     rule_id: int,
     rule_update: AlertRuleCreate,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user)
 ):
     """Update an existing alert rule"""
     stmt = select(AlertRule).where(AlertRule.id == rule_id)
@@ -1390,7 +1404,11 @@ async def update_alert_rule(
 
 
 @app.delete("/api/alert-rules/{rule_id}")
-async def delete_alert_rule(rule_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_alert_rule(
+    rule_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user)
+):
     """Delete an alert rule"""
     stmt = select(AlertRule).where(AlertRule.id == rule_id)
     result = await db.execute(stmt)
@@ -1506,7 +1524,10 @@ class SettingsResponse(BaseModel):
 
 # Settings endpoints
 @app.get("/api/settings", response_model=SettingsResponse)
-async def get_all_settings(db: AsyncSession = Depends(get_db)):
+async def get_all_settings(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user)
+):
     """Get all application settings and Pi-hole servers"""
     from .models import AppSetting, PiholeServerModel
 
@@ -1530,7 +1551,8 @@ async def get_all_settings(db: AsyncSession = Depends(get_db)):
 async def update_app_setting(
     key: str,
     update: AppSettingUpdate,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user)
 ):
     """Update a single app setting"""
     from .models import AppSetting, SettingsChangelog
@@ -1584,7 +1606,10 @@ async def update_app_setting(
 
 # Pi-hole server endpoints
 @app.get("/api/settings/pihole-servers")
-async def get_pihole_servers(db: AsyncSession = Depends(get_db)):
+async def get_pihole_servers(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user)
+):
     """Get all Pi-hole servers"""
     from .models import PiholeServerModel
 
@@ -1598,7 +1623,8 @@ async def get_pihole_servers(db: AsyncSession = Depends(get_db)):
 @app.post("/api/settings/pihole-servers")
 async def create_pihole_server(
     server_data: PiholeServerCreate,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user)
 ):
     """Create a new Pi-hole server"""
     from .models import PiholeServerModel, SettingsChangelog
@@ -1669,7 +1695,8 @@ async def create_pihole_server(
 async def update_pihole_server(
     server_id: int,
     server_data: PiholeServerUpdate,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user)
 ):
     """Update Pi-hole server"""
     from .models import PiholeServerModel, SettingsChangelog
@@ -1728,7 +1755,8 @@ async def update_pihole_server(
 @app.delete("/api/settings/pihole-servers/{server_id}")
 async def delete_pihole_server(
     server_id: int,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user)
 ):
     """Delete Pi-hole server"""
     from .models import PiholeServerModel, SettingsChangelog
@@ -1762,7 +1790,10 @@ async def delete_pihole_server(
 
 
 @app.post("/api/settings/pihole-servers/test")
-async def test_pihole_connection(server_data: PiholeServerCreate):
+async def test_pihole_connection(
+    server_data: PiholeServerCreate,
+    _: User = Depends(get_current_user)
+):
     """Test connection to a DNS ad-blocker server (Pi-hole or AdGuard Home)"""
     from .dns_client_factory import create_dns_client
     import logging
@@ -1818,7 +1849,10 @@ async def test_pihole_connection(server_data: PiholeServerCreate):
 
 
 @app.post("/api/settings/telegram/test")
-async def test_telegram_connection(data: TelegramTestData):
+async def test_telegram_connection(
+    data: TelegramTestData,
+    _: User = Depends(get_current_user)
+):
     """Test Telegram bot connection"""
     from telegram import Bot
     from telegram.error import TelegramError
@@ -1883,7 +1917,7 @@ _restart_cooldown_seconds = 30
 
 
 @app.post("/api/settings/restart")
-async def trigger_restart():
+async def trigger_restart(_: User = Depends(get_current_user)):
     """Trigger container restart with rate limiting to prevent DoS"""
     import signal
     import asyncio
@@ -1919,7 +1953,7 @@ async def trigger_restart():
 # ========== Pi-hole Sync Endpoints ==========
 
 @app.get("/api/sync/preview")
-async def get_sync_preview():
+async def get_sync_preview(_: User = Depends(get_current_user)):
     """Preview what would be synced from source to targets"""
     from .sync_service import PiholeSyncService
 
@@ -1936,7 +1970,7 @@ async def get_sync_preview():
 
 
 @app.post("/api/sync/execute")
-async def execute_sync():
+async def execute_sync(_: User = Depends(get_current_user)):
     """Execute configuration sync from source to targets"""
     from .sync_service import PiholeSyncService
 
@@ -1956,7 +1990,10 @@ async def execute_sync():
 
 
 @app.get("/api/sync/history")
-async def get_sync_history(limit: int = QueryParam(20, ge=1, le=100)):
+async def get_sync_history(
+    limit: int = QueryParam(20, ge=1, le=100),
+    _: User = Depends(get_current_user)
+):
     """Get recent sync history"""
     from .sync_service import PiholeSyncService
 
@@ -2032,7 +2069,7 @@ async def get_all_enabled_servers():
 
 
 @app.get("/api/domains/whitelist")
-async def get_whitelist():
+async def get_whitelist(_: User = Depends(get_current_user)):
     """Get combined whitelist entries from all enabled DNS servers"""
     servers = await get_all_enabled_servers()
     all_domains = {}
@@ -2053,7 +2090,10 @@ async def get_whitelist():
 
 
 @app.post("/api/domains/whitelist")
-async def add_to_whitelist(data: DomainRequest):
+async def add_to_whitelist(
+    data: DomainRequest,
+    _: User = Depends(get_current_user)
+):
     """Add a domain to whitelist on all enabled DNS servers"""
     servers = await get_all_enabled_servers()
     results = []
@@ -2077,7 +2117,10 @@ async def add_to_whitelist(data: DomainRequest):
 
 
 @app.delete("/api/domains/whitelist/{domain:path}")
-async def remove_from_whitelist(domain: str):
+async def remove_from_whitelist(
+    domain: str,
+    _: User = Depends(get_current_user)
+):
     """Remove a domain from whitelist on all enabled DNS servers"""
     servers = await get_all_enabled_servers()
     results = []
@@ -2101,7 +2144,7 @@ async def remove_from_whitelist(domain: str):
 
 
 @app.get("/api/domains/blacklist")
-async def get_blacklist():
+async def get_blacklist(_: User = Depends(get_current_user)):
     """Get combined blacklist entries from all enabled DNS servers"""
     servers = await get_all_enabled_servers()
     all_domains = {}
@@ -2122,7 +2165,10 @@ async def get_blacklist():
 
 
 @app.post("/api/domains/blacklist")
-async def add_to_blacklist(data: DomainRequest):
+async def add_to_blacklist(
+    data: DomainRequest,
+    _: User = Depends(get_current_user)
+):
     """Add a domain to blacklist on all enabled DNS servers"""
     servers = await get_all_enabled_servers()
     results = []
@@ -2146,7 +2192,10 @@ async def add_to_blacklist(data: DomainRequest):
 
 
 @app.delete("/api/domains/blacklist/{domain:path}")
-async def remove_from_blacklist(domain: str):
+async def remove_from_blacklist(
+    domain: str,
+    _: User = Depends(get_current_user)
+):
     """Remove a domain from blacklist on all enabled DNS servers"""
     servers = await get_all_enabled_servers()
     results = []
@@ -2170,7 +2219,7 @@ async def remove_from_blacklist(domain: str):
 
 
 @app.get("/api/domains/regex-whitelist")
-async def get_regex_whitelist():
+async def get_regex_whitelist(_: User = Depends(get_current_user)):
     """Get all regex whitelist entries from source DNS server (Pi-hole only)"""
     source = await get_source_server()
     async with create_client_from_server(source) as client:
@@ -2183,7 +2232,10 @@ async def get_regex_whitelist():
 
 
 @app.delete("/api/domains/regex-whitelist/{pattern_id}")
-async def remove_from_regex_whitelist(pattern_id: int):
+async def remove_from_regex_whitelist(
+    pattern_id: int,
+    _: User = Depends(get_current_user)
+):
     """Remove a pattern from regex whitelist on source DNS server (Pi-hole only)"""
     source = await get_source_server()
     async with create_client_from_server(source) as client:
@@ -2198,7 +2250,7 @@ async def remove_from_regex_whitelist(pattern_id: int):
 
 
 @app.get("/api/domains/regex-blacklist")
-async def get_regex_blacklist():
+async def get_regex_blacklist(_: User = Depends(get_current_user)):
     """Get all regex blacklist entries from source DNS server (Pi-hole only)"""
     source = await get_source_server()
     async with create_client_from_server(source) as client:
@@ -2211,7 +2263,10 @@ async def get_regex_blacklist():
 
 
 @app.delete("/api/domains/regex-blacklist/{pattern_id}")
-async def remove_from_regex_blacklist(pattern_id: int):
+async def remove_from_regex_blacklist(
+    pattern_id: int,
+    _: User = Depends(get_current_user)
+):
     """Remove a pattern from regex blacklist on source DNS server (Pi-hole only)"""
     source = await get_source_server()
     async with create_client_from_server(source) as client:
@@ -2233,7 +2288,10 @@ class BlockingSetRequest(BaseModel):
 
 
 @app.get("/api/blocking/status")
-async def get_blocking_status(db: AsyncSession = Depends(get_db)):
+async def get_blocking_status(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user)
+):
     """Get blocking status for all enabled DNS servers"""
     from .models import PiholeServerModel, BlockingOverride
 
@@ -2289,7 +2347,11 @@ async def get_blocking_status(db: AsyncSession = Depends(get_db)):
 
 
 @app.post("/api/blocking/all")
-async def set_blocking_for_all(data: BlockingSetRequest, db: AsyncSession = Depends(get_db)):
+async def set_blocking_for_all(
+    data: BlockingSetRequest,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user)
+):
     """Enable or disable blocking for all enabled DNS servers"""
     from .models import PiholeServerModel, BlockingOverride
 
@@ -2378,7 +2440,12 @@ async def set_blocking_for_all(data: BlockingSetRequest, db: AsyncSession = Depe
 
 
 @app.post("/api/blocking/{server_id}")
-async def set_blocking_for_server(server_id: int, data: BlockingSetRequest, db: AsyncSession = Depends(get_db)):
+async def set_blocking_for_server(
+    server_id: int,
+    data: BlockingSetRequest,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user)
+):
     """Enable or disable blocking for a specific DNS server"""
     from .models import PiholeServerModel, BlockingOverride
 
