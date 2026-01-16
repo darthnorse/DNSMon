@@ -47,6 +47,7 @@ export interface Stats {
 }
 
 export interface QuerySearchParams {
+  search?: string;
   domain?: string;
   client_ip?: string;
   client_hostname?: string;

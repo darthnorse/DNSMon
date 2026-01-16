@@ -58,7 +58,7 @@ export default function Dashboard() {
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
       const searchResults = await queryApi.search({
-        domain: searchTerm || undefined,
+        search: searchTerm || undefined,
         from_date: sevenDaysAgo.toISOString(),
         limit: 100
       });
@@ -183,7 +183,7 @@ export default function Dashboard() {
             <div className="flex gap-2">
               <input
                 type="text"
-                placeholder="Search by domain..."
+                placeholder="Search domain, IP, or hostname..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="flex-1 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -249,7 +249,9 @@ export default function Dashboard() {
                   </div>
                   <div className="text-sm text-gray-600 dark:text-gray-300">
                     <div className="truncate">{query.client_hostname || query.client_ip}</div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400 truncate">{query.client_ip}</div>
+                    {query.client_hostname && (
+                      <div className="text-xs text-gray-500 dark:text-gray-400 truncate">{query.client_ip}</div>
+                    )}
                   </div>
                   <div className="flex justify-between items-center">
                     <div className="text-xs text-gray-500 dark:text-gray-400">
@@ -351,7 +353,9 @@ export default function Dashboard() {
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-300">
                           <div className="truncate">{query.client_hostname || query.client_ip}</div>
-                          <div className="text-xs text-gray-500 dark:text-gray-400 truncate">{query.client_ip}</div>
+                          {query.client_hostname && (
+                            <div className="text-xs text-gray-500 dark:text-gray-400 truncate">{query.client_ip}</div>
+                          )}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm">
                           <span

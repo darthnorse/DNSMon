@@ -3,7 +3,7 @@ Query search routes
 """
 from fastapi import APIRouter, Depends, HTTPException, Query as QueryParam
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, or_
 from typing import Optional, List
 from datetime import datetime
 
@@ -24,6 +24,7 @@ router = APIRouter(prefix="/api", tags=["queries"])
 
 @router.get("/queries", response_model=List[QueryResponse])
 async def search_queries(
+    search: Optional[str] = QueryParam(None, max_length=255),
     domain: Optional[str] = QueryParam(None, max_length=255),
     client_ip: Optional[str] = QueryParam(None, max_length=45),
     client_hostname: Optional[str] = QueryParam(None, max_length=255),
@@ -37,11 +38,23 @@ async def search_queries(
 ):
     """
     Search DNS queries with flexible filtering.
-    Supports partial matching on domain, client_ip, and client_hostname.
+    - search: searches across domain, client_ip, and client_hostname (OR)
+    - domain/client_ip/client_hostname: specific field filters (AND)
     """
     stmt = select(Query)
     conditions = []
 
+    # General search across multiple fields (OR)
+    if search:
+        escaped_search = escape_sql_like(search)
+        search_pattern = f"%{escaped_search}%"
+        conditions.append(or_(
+            Query.domain.ilike(search_pattern, escape='\\'),
+            Query.client_ip.ilike(search_pattern, escape='\\'),
+            Query.client_hostname.ilike(search_pattern, escape='\\')
+        ))
+
+    # Specific field filters (AND)
     if domain:
         escaped_domain = escape_sql_like(domain)
         conditions.append(Query.domain.ilike(f"%{escaped_domain}%", escape='\\'))
