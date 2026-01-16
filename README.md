@@ -49,10 +49,27 @@ A comprehensive web-based dashboard for monitoring and managing multiple Pi-hole
 - Per-channel enable/disable and error tracking
 
 ### Configuration Sync
-- Designate a "source" server for configuration
-- Sync whitelist, blacklist, and regex lists to target servers
-- Automatic or manual sync triggers
-- Sync history with detailed logs
+Designate a "source" server and sync its configuration to target servers automatically or on-demand.
+
+**Pi-hole syncs:**
+- Gravity database (via Teleporter):
+  - Adlists (blocklists/subscriptions)
+  - Whitelist and blacklist domains
+  - Regex whitelist and blacklist
+  - Groups and group assignments
+  - Client definitions and group memberships
+- DNS settings:
+  - Local DNS records (A/AAAA)
+  - CNAME records
+  - Upstream DNS servers
+  - Conditional forwarding rules
+
+**AdGuard Home syncs:**
+- User filtering rules
+- DNS configuration
+- Upstream servers
+
+Includes sync history with detailed logs and error tracking.
 
 ### Blocking Control
 - Enable/disable blocking per server or globally
