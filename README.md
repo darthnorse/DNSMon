@@ -1,253 +1,334 @@
 # DNSMon - DNS Ad-Blocker Monitor
 
-A comprehensive web-based dashboard for monitoring multiple Pi-hole v6 (and soon AdGuard Home) servers with advanced search capabilities and customizable alerting to Telegram.
+A comprehensive web-based dashboard for monitoring and managing multiple Pi-hole v6 and AdGuard Home servers with real-time alerts, configuration sync, and multi-channel notifications.
+
+![Dashboard](https://img.shields.io/badge/Dashboard-React-61DAFB?style=flat-square&logo=react)
+![Backend](https://img.shields.io/badge/Backend-FastAPI-009688?style=flat-square&logo=fastapi)
+![Database](https://img.shields.io/badge/Database-PostgreSQL-4169E1?style=flat-square&logo=postgresql)
+![Docker](https://img.shields.io/badge/Docker-Multi--arch-2496ED?style=flat-square&logo=docker)
 
 ## Features
 
-- **Multi-Server Support**: Monitor multiple Pi-hole v6 servers from a single dashboard
-- **Real-time Ingestion**: Polls Pi-hole REST APIs every 5 minutes for DNS query logs
-- **Advanced Search**: Search queries by domain, client IP, client hostname, with date range filtering
-- **Statistics Dashboard**: View query counts, top domains, top clients, and server breakdowns with charts
-- **Flexible Alerting**: Create custom alert rules with wildcard pattern matching
-  - Match on domain patterns (e.g., `*porn*`, `*.adult.*`)
-  - Match on client IP patterns (e.g., `192.168.1.*`)
-  - Match on client hostname patterns (e.g., `*laptop*`)
-  - Exclude specific domains from alerts
-  - Configurable cooldown periods to prevent alert spam
-- **Telegram Notifications**: Receive instant alerts via Telegram bot
-- **Data Retention**: Configurable retention period (default 60 days)
-- **Modern UI**: React-based frontend with charts and responsive design
+### Multi-Server Support
+- **Pi-hole v6** - Full REST API integration
+- **AdGuard Home** - Native API support
+- Monitor unlimited servers from a single dashboard
+- Per-server statistics and health monitoring
 
-## Architecture
+### Real-time Query Monitoring
+- Automatic query ingestion with configurable polling intervals
+- Advanced search across domain, client IP, and hostname
+- Date range filtering with pagination
+- Query status tracking (allowed, blocked, cached)
 
-- **Backend**: Python FastAPI with async support
-- **Database**: PostgreSQL for query storage
-- **Frontend**: React with TypeScript, Recharts for visualization
-- **Deployment**: Docker Compose (2 containers: app + postgres)
+### Comprehensive Statistics
+- Query counts (today, week, month, all-time)
+- Block rate percentages
+- Hourly/daily query trends with charts
+- Top domains and top blocked domains
+- Top clients with hostname resolution
+- Per-server breakdown with blocked/cached counts
+- New client detection
 
-## Requirements
+### Flexible Alert System
+- Pattern-based rules with wildcard support:
+  - Domain patterns (e.g., `*porn*`, `*.gambling.*`)
+  - Client IP patterns (e.g., `192.168.1.*`)
+  - Client hostname patterns (e.g., `*kids-tablet*`)
+- Exclusion patterns to reduce false positives
+- Configurable cooldown periods to prevent alert spam
+- Batched notifications for multiple matches
 
-- Docker and Docker Compose
-- Pi-hole v6 server(s) with REST API enabled
-- (Optional) Telegram bot token and chat ID for notifications
+### Multi-Channel Notifications
+- **Telegram** - Bot integration with chat ID support
+- **Pushover** - Priority and sound customization
+- **Ntfy** - Self-hosted or ntfy.sh
+- **Discord** - Webhook integration
+- **Webhook** - Generic HTTP webhooks (POST/PUT/GET)
+- Custom message templates with variables
+- Per-channel enable/disable and error tracking
 
-## Setup
+### Configuration Sync
+- Designate a "source" server for configuration
+- Sync whitelist, blacklist, and regex lists to target servers
+- Automatic or manual sync triggers
+- Sync history with detailed logs
 
-### 1. Clone or Download
+### Blocking Control
+- Enable/disable blocking per server or globally
+- Timed disable with automatic re-enable
+- Real-time blocking status display
+
+### Domain Management
+- View and manage whitelist/blacklist across all servers
+- Quick whitelist/blacklist actions from query results
+- Regex list support (Pi-hole)
+
+### Security
+- Built-in authentication with session management
+- Admin and regular user roles
+- OIDC/SSO integration (Google, Authentik, Keycloak, etc.)
+- Rate-limited login attempts
+- Secure password hashing (bcrypt)
+
+## Quick Start
+
+### Using Pre-built Images (Recommended)
 
 ```bash
-git clone <your-repo-url>
-cd dnsmon
-```
+# Create project directory
+mkdir dnsmon && cd dnsmon
 
-### 2. Create Configuration Files
+# Download example files
+curl -O https://raw.githubusercontent.com/darthnorse/DNSMon/main/docker-compose.yml.example
+curl -O https://raw.githubusercontent.com/darthnorse/DNSMon/main/.env.example
 
-Copy the example files:
-
-```bash
-cp config.yml.example config.yml
+# Configure
+cp docker-compose.yml.example docker-compose.yml
 cp .env.example .env
-```
 
-### 3. Configure Pi-hole Servers
+# Edit .env and set a secure POSTGRES_PASSWORD
+nano .env
 
-Edit `config.yml`:
-
-```yaml
-poll_interval_seconds: 300  # 5 minutes
-retention_days: 60
-
-pihole_servers:
-  - name: "pihole1"
-    url: "http://192.168.1.100"
-    password: "your-pihole-password"
-    enabled: true
-
-  - name: "pihole2"
-    url: "http://192.168.1.101"
-    password: "your-pihole-password"
-    enabled: true
-```
-
-### 4. Configure Environment Variables
-
-Edit `.env`:
-
-```bash
-# Postgres password (change this!)
-POSTGRES_PASSWORD=your_secure_password_here
-
-# Telegram configuration (optional)
-TELEGRAM_BOT_TOKEN=your-bot-token-here
-TELEGRAM_CHAT_ID=your-chat-id-here
-```
-
-### 5. Build and Start
-
-```bash
-# Build the Docker images
-docker-compose build
-
-# Start the services
-docker-compose up -d
+# Start services
+docker compose up -d
 ```
 
 The application will be available at `http://localhost:8000`
 
-### 6. Access the Dashboard
+### First-Time Setup
 
-Open your browser and navigate to:
-- Dashboard: `http://localhost:8000/`
-- Search: `http://localhost:8000/search`
-- Alert Rules: `http://localhost:8000/alerts`
+1. Navigate to `http://localhost:8000`
+2. Create your admin account on the setup wizard
+3. Go to **Settings** → **DNS Servers** to add your Pi-hole/AdGuard servers
+4. (Optional) Configure notification channels in **Settings** → **Notifications**
 
-## Getting Telegram Bot Credentials
+## Configuration
 
-### Create a Bot
+All configuration is done through the web UI - no config files needed!
 
-1. Open Telegram and search for `@BotFather`
-2. Send `/newbot` and follow the instructions
-3. Copy the bot token (format: `123456789:ABCdefGHIjklMNOpqrsTUVwxyz`)
+### Environment Variables
 
-### Get Your Chat ID
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `POSTGRES_PASSWORD` | PostgreSQL password | `changeme` |
+| `TZ` | Timezone for display | `UTC` |
+| `DNSMON_SECRET_KEY` | Session signing key (recommended for production) | Auto-generated |
+| `DNSMON_COOKIE_SECURE` | Set to `true` if behind HTTPS | `false` |
 
-1. Start a conversation with your bot
-2. Send any message to the bot
-3. Visit: `https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getUpdates`
-4. Find the `"chat":{"id":` field - this is your chat ID
+### Adding DNS Servers
 
-## Usage
+1. Go to **Settings** → **DNS Servers**
+2. Click **Add Server**
+3. Enter:
+   - **Name**: Friendly name (e.g., "Primary Pi-hole")
+   - **Type**: Pi-hole or AdGuard Home
+   - **URL**: Server URL (e.g., `http://192.168.1.100`)
+   - **Password/API Key**: Your server's password
+4. Click **Test Connection** to verify
+5. Save and the server will start being monitored
+
+### Setting Up Notifications
+
+1. Go to **Settings** → **Notifications**
+2. Click **Add Channel**
+3. Choose your notification type and configure:
+
+#### Telegram
+1. Create a bot via [@BotFather](https://t.me/botfather)
+2. Get your chat ID by messaging [@userinfobot](https://t.me/userinfobot)
+3. Enter bot token and chat ID
+
+#### Pushover
+1. Create an application at [pushover.net](https://pushover.net)
+2. Enter your app token and user key
+
+#### Discord
+1. Create a webhook in your Discord channel settings
+2. Paste the webhook URL
+
+#### Ntfy
+1. Choose a topic name
+2. Optionally specify a self-hosted server URL
 
 ### Creating Alert Rules
 
-1. Navigate to the "Alert Rules" page
-2. Click "Create Rule"
-3. Configure your rule:
-   - **Name**: Descriptive name for the rule
-   - **Domain Pattern**: Match domains with wildcards (e.g., `*porn*`, `*.gambling.*`)
-   - **Client IP Pattern**: Match specific clients (e.g., `192.168.1.100` or `192.168.1.*`)
-   - **Client Hostname Pattern**: Match by hostname (e.g., `*kids-laptop*`)
-   - **Exclude Domains**: JSON array of domains to exclude from alerts
-   - **Cooldown**: Minutes to wait between alerts for the same rule
-4. Click "Create Rule"
+1. Go to **Alert Rules**
+2. Click **Create Rule**
+3. Configure patterns:
+   - **Domain Pattern**: `*adult*,*porn*,*.xxx` (comma-separated)
+   - **Client IP Pattern**: `192.168.1.100` or `192.168.1.*`
+   - **Exclude Domains**: `safe-site.com,another-safe.com`
+4. Set cooldown period (minutes between alerts)
+5. Save - alerts will be sent to all enabled notification channels
 
-### Searching Queries
+## Architecture
 
-1. Navigate to the "Search" page
-2. Enter search criteria:
-   - Domain (partial match supported)
-   - Client IP (partial match supported)
-   - Client Hostname (partial match supported)
-   - Pi-hole Server
-   - Date range
-3. Click "Search"
-
-Results show all matching queries with pagination support.
-
-## Development
-
-### Running Locally (without Docker)
-
-#### Backend
-
-```bash
-# Install dependencies
-pip install -r requirements.txt
-
-# Set environment variables
-export DATABASE_URL=postgresql://dnsmon:changeme@localhost:5432/dnsmon
-export TELEGRAM_BOT_TOKEN=your-token
-export TELEGRAM_CHAT_ID=your-chat-id
-
-# Start PostgreSQL (via Docker or locally)
-docker run -d -p 5432:5432 -e POSTGRES_DB=dnsmon -e POSTGRES_USER=dnsmon -e POSTGRES_PASSWORD=changeme postgres:16-alpine
-
-# Run the application
-python -m backend.main
+```
+┌─────────────────┐
+│     Browser     │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐      ┌─────────────────┐
+│   DNSMon App    │◄────►│   PostgreSQL    │
+│  (FastAPI +     │      │   (Data Store)  │
+│   React SPA)    │      └─────────────────┘
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────────────────────────┐
+│         DNS Ad-Blockers             │
+│  ┌─────────┐  ┌─────────┐          │
+│  │ Pi-hole │  │ AdGuard │  • • •   │
+│  │   v6    │  │  Home   │          │
+│  └─────────┘  └─────────┘          │
+└─────────────────────────────────────┘
 ```
 
-#### Frontend
+- **Backend**: Python FastAPI with async SQLAlchemy
+- **Frontend**: React 18 with TypeScript and Tailwind CSS
+- **Database**: PostgreSQL 16 with timezone-aware timestamps
+- **Scheduler**: APScheduler for background tasks
+
+## Docker Images
+
+Pre-built multi-architecture images are available on GitHub Container Registry:
 
 ```bash
-cd frontend
-
-# Install dependencies
-npm install
-
-# Start development server
-npm run dev
+docker pull ghcr.io/darthnorse/dnsmon:latest
 ```
 
-The frontend will be available at `http://localhost:3000` and will proxy API requests to `http://localhost:8000`.
-
-### Building Frontend for Production
-
-```bash
-cd frontend
-npm run build
-```
-
-The built files will be in `frontend/build/` and will be served by the FastAPI app.
-
-## Database Schema
-
-### Queries Table
-- Stores all DNS queries with timestamp, domain, client IP, client hostname
-- Indexed for fast searching on domain, client_ip, client_hostname, timestamp
-
-### Alert Rules Table
-- Stores alert rule configurations with patterns and notification settings
-
-### Alert History Table
-- Tracks when alerts were triggered to implement cooldown logic
+Supported architectures:
+- `linux/amd64` (x86 64-bit)
+- `linux/arm64` (ARM 64-bit, e.g., Raspberry Pi 4)
+- `linux/arm/v7` (ARM 32-bit, e.g., Raspberry Pi 3)
 
 ## API Endpoints
 
+### Authentication
+- `POST /api/auth/login` - Login
+- `POST /api/auth/logout` - Logout
+- `GET /api/auth/check` - Check auth status
+
+### Queries
 - `GET /api/queries` - Search queries with filters
 - `GET /api/queries/count` - Count matching queries
+
+### Statistics
 - `GET /api/stats` - Dashboard statistics
-- `GET /api/alert-rules` - List all alert rules
-- `POST /api/alert-rules` - Create alert rule
-- `PUT /api/alert-rules/{id}` - Update alert rule
-- `DELETE /api/alert-rules/{id}` - Delete alert rule
-- `GET /api/health` - Health check
+- `GET /api/statistics` - Detailed statistics with time series
+
+### Alert Rules
+- `GET /api/alert-rules` - List rules
+- `POST /api/alert-rules` - Create rule
+- `PUT /api/alert-rules/{id}` - Update rule
+- `DELETE /api/alert-rules/{id}` - Delete rule
+
+### Notification Channels
+- `GET /api/notification-channels` - List channels
+- `POST /api/notification-channels` - Create channel
+- `POST /api/notification-channels/{id}/test` - Send test notification
+
+### Settings
+- `GET /api/settings` - Get all settings
+- `POST /api/settings/pihole-servers` - Add DNS server
+- `POST /api/settings/pihole-servers/test` - Test connection
+
+### Blocking Control
+- `GET /api/blocking/status` - Get blocking status
+- `POST /api/blocking/{server_id}` - Set blocking for server
+- `POST /api/blocking/all` - Set blocking for all servers
+
+### Domain Management
+- `GET /api/domains/whitelist` - Get whitelist
+- `POST /api/domains/whitelist` - Add to whitelist
+- `POST /api/domains/blacklist` - Add to blacklist
+
+### Sync
+- `GET /api/sync/preview` - Preview sync changes
+- `POST /api/sync/execute` - Execute sync
+- `GET /api/sync/history` - Get sync history
+
+## Development
+
+### Local Development
+
+```bash
+# Clone repository
+git clone https://github.com/darthnorse/DNSMon.git
+cd DNSMon
+
+# Start PostgreSQL
+docker run -d -p 5432:5432 \
+  -e POSTGRES_DB=dnsmon \
+  -e POSTGRES_USER=dnsmon \
+  -e POSTGRES_PASSWORD=changeme \
+  postgres:16
+
+# Backend
+pip install -r requirements.txt
+export DATABASE_URL=postgresql://dnsmon:changeme@localhost:5432/dnsmon
+python -m backend.main
+
+# Frontend (separate terminal)
+cd frontend
+npm install
+npm run dev
+```
+
+### Building Docker Image
+
+```bash
+docker build -t dnsmon .
+```
 
 ## Troubleshooting
 
 ### No queries appearing
+1. Check server configuration in Settings → DNS Servers
+2. Verify credentials with "Test Connection"
+3. Check logs: `docker compose logs app`
+4. Ensure your DNS server's API is accessible
 
-1. Check Pi-hole server configuration in `config.yml`
-2. Verify Pi-hole password is correct
-3. Check logs: `docker-compose logs app`
-4. Ensure Pi-hole v6 REST API is accessible
+### Notifications not working
+1. Verify channel configuration in Settings → Notifications
+2. Use "Send Test" to verify connectivity
+3. Check for error messages on the channel card
+4. Ensure your notification service credentials are correct
 
-### Telegram notifications not working
-
-1. Verify bot token and chat ID in `.env`
-2. Ensure bot is started (send `/start` to your bot)
-3. Check logs for errors: `docker-compose logs app`
+### Login issues
+1. Clear browser cookies and try again
+2. Check if rate limiting is active (wait 60 seconds)
+3. Reset password via database if needed
 
 ### Database connection errors
+1. Ensure PostgreSQL is running: `docker compose ps`
+2. Check password matches in `.env` and compose file
+3. Restart services: `docker compose restart`
 
-1. Ensure PostgreSQL container is running: `docker-compose ps`
-2. Check database password matches in `.env` and `docker-compose.yml`
-3. Restart services: `docker-compose restart`
+## Performance
 
-## Performance Notes
-
-- With 250k queries/day, the database will store approximately 15M queries over 60 days
-- PostgreSQL handles this easily with proper indexing
-- Consider adjusting retention period based on your needs and disk space
+- Tested with 250k+ queries/day
+- Efficient bulk insert with duplicate detection
+- Configurable data retention (default 60 days)
+- Connection pooling for database efficiency
+- Background task scheduling with overlap prevention
 
 ## License
 
-MIT License - See LICENSE file for details
+MIT License - See [LICENSE](LICENSE) file for details.
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit issues and pull requests.
 
 ## Credits
 
 Built with:
-- FastAPI
-- PostgreSQL
-- React
-- Recharts
-- Tailwind CSS
+- [FastAPI](https://fastapi.tiangolo.com/) - Modern Python web framework
+- [React](https://react.dev/) - UI library
+- [PostgreSQL](https://www.postgresql.org/) - Database
+- [Tailwind CSS](https://tailwindcss.com/) - Styling
+- [Recharts](https://recharts.org/) - Charts
+- [SQLAlchemy](https://www.sqlalchemy.org/) - ORM
