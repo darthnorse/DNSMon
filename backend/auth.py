@@ -134,10 +134,7 @@ async def cleanup_expired_sessions(db: AsyncSession) -> int:
     stmt = delete(Session).where(Session.expires_at < utcnow())
     result = await db.execute(stmt)
     await db.commit()
-    deleted = result.rowcount
-    if deleted > 0:
-        logger.info(f"Cleaned up {deleted} expired sessions")
-    return deleted
+    return result.rowcount
 
 
 # ============================================================================
