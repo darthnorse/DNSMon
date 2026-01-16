@@ -21,7 +21,9 @@ from .auth import (
     hash_password, verify_password, create_session, delete_session,
     set_session_cookie, clear_session_cookie, get_current_user,
     get_current_user_optional, require_admin, require_setup_incomplete,
-    is_setup_complete, get_user_count,
+    is_setup_complete, get_user_count, get_client_ip,
+    # Rate limiting
+    check_login_rate_limit, record_login_attempt,
     # OIDC functions
     generate_oidc_state, store_oidc_state, get_oidc_state, get_oidc_provider,
     discover_oidc_config, create_oidc_authorization_url, exchange_oidc_code,
@@ -342,6 +344,15 @@ async def login(
     db: AsyncSession = Depends(get_db)
 ):
     """Login with username and password"""
+    # Rate limiting
+    client_ip = get_client_ip(request)
+    if not check_login_rate_limit(client_ip):
+        logger.warning(f"Rate limit exceeded for IP: {client_ip}")
+        raise HTTPException(status_code=429, detail="Too many login attempts. Please try again later.")
+
+    # Record this attempt (for rate limiting)
+    record_login_attempt(client_ip)
+
     # Check if setup is complete
     if not await is_setup_complete(db):
         raise HTTPException(status_code=400, detail="Setup not complete. Please create an admin account first.")
@@ -365,7 +376,7 @@ async def login(
     session = await create_session(db, user, request)
     set_session_cookie(response, session)
 
-    logger.info(f"User '{user.username}' logged in")
+    logger.info(f"User '{user.username}' logged in from {client_ip}")
     return {"message": "Login successful", "user": user.to_dict()}
 
 

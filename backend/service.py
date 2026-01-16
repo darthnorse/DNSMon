@@ -8,6 +8,8 @@ from .ingestion import QueryIngestionService
 from .alerts import AlertEngine
 from .notifications import TelegramNotifier
 from .sync_service import PiholeSyncService
+from .auth import cleanup_expired_sessions
+from .database import async_session_maker
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +119,16 @@ class DNSMonService:
         except Exception as e:
             logger.error(f"Error in sync task: {e}", exc_info=True)
 
+    async def session_cleanup_task(self):
+        """Periodic cleanup of expired sessions"""
+        try:
+            async with async_session_maker() as db:
+                deleted = await cleanup_expired_sessions(db)
+                if deleted > 0:
+                    logger.info(f"Cleaned up {deleted} expired sessions")
+        except Exception as e:
+            logger.error(f"Error in session cleanup task: {e}", exc_info=True)
+
     def start_scheduler(self):
         """Start background scheduler"""
         # Schedule ingestion and alerting
@@ -143,6 +155,15 @@ class DNSMonService:
             trigger=IntervalTrigger(seconds=self.settings.sync_interval_seconds),
             id='sync',
             name='Sync Pi-hole configurations',
+            replace_existing=True
+        )
+
+        # Schedule session cleanup (hourly)
+        self.scheduler.add_job(
+            self.session_cleanup_task,
+            trigger=IntervalTrigger(hours=1),
+            id='session_cleanup',
+            name='Cleanup expired sessions',
             replace_existing=True
         )
 

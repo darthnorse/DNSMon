@@ -270,6 +270,65 @@ _oidc_states: Dict[str, Dict[str, Any]] = {}
 OIDC_STATE_EXPIRY_MINUTES = 10
 
 
+# ============================================================================
+# Rate Limiting (Login)
+# ============================================================================
+
+# In-memory rate limit tracking (cleared on restart)
+# For production with multiple instances, use Redis
+_login_attempts: Dict[str, list] = {}
+
+LOGIN_RATE_LIMIT_ATTEMPTS = 5  # Max attempts
+LOGIN_RATE_LIMIT_WINDOW_SECONDS = 60  # Window in seconds
+
+
+def check_login_rate_limit(ip_address: str) -> bool:
+    """
+    Check if IP address is rate limited.
+    Returns True if allowed, False if rate limited.
+    """
+    now = utcnow()
+    cutoff = now - timedelta(seconds=LOGIN_RATE_LIMIT_WINDOW_SECONDS)
+
+    # Get attempts for this IP
+    attempts = _login_attempts.get(ip_address, [])
+
+    # Filter to only recent attempts
+    recent_attempts = [t for t in attempts if t > cutoff]
+
+    # Update stored attempts
+    _login_attempts[ip_address] = recent_attempts
+
+    # Check if under limit
+    return len(recent_attempts) < LOGIN_RATE_LIMIT_ATTEMPTS
+
+
+def record_login_attempt(ip_address: str) -> None:
+    """Record a login attempt for rate limiting."""
+    now = utcnow()
+    if ip_address not in _login_attempts:
+        _login_attempts[ip_address] = []
+    _login_attempts[ip_address].append(now)
+
+    # Cleanup old entries periodically (every 100th call)
+    if len(_login_attempts) > 100:
+        cleanup_login_attempts()
+
+
+def cleanup_login_attempts() -> None:
+    """Remove expired login attempt records."""
+    cutoff = utcnow() - timedelta(seconds=LOGIN_RATE_LIMIT_WINDOW_SECONDS * 2)
+    expired_ips = []
+    for ip, attempts in _login_attempts.items():
+        recent = [t for t in attempts if t > cutoff]
+        if not recent:
+            expired_ips.append(ip)
+        else:
+            _login_attempts[ip] = recent
+    for ip in expired_ips:
+        _login_attempts.pop(ip, None)
+
+
 def generate_oidc_state() -> str:
     """Generate a cryptographically secure state parameter for OIDC."""
     return secrets.token_urlsafe(32)
