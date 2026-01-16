@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { settingsApi, syncApi } from '../utils/api';
-import type { PiholeServer, PiholeServerCreate, ServerType } from '../types';
+import { settingsApi, syncApi, oidcProviderApi } from '../utils/api';
+import { useAuth } from '../contexts/AuthContext';
+import type { PiholeServer, PiholeServerCreate, ServerType, OIDCProvider, OIDCProviderCreate } from '../types';
 
-type TabType = 'servers' | 'telegram' | 'polling' | 'sync' | 'advanced';
+type TabType = 'servers' | 'telegram' | 'polling' | 'sync' | 'oidc' | 'advanced';
 
 export default function Settings() {
   const [activeTab, setActiveTab] = useState<TabType>('servers');
@@ -52,6 +53,28 @@ export default function Settings() {
   // CORS settings
   const [corsOrigins, setCorsOrigins] = useState<string>('');
 
+  // OIDC providers
+  const { user } = useAuth();
+  const [oidcProviders, setOidcProviders] = useState<OIDCProvider[]>([]);
+  const [showOidcForm, setShowOidcForm] = useState(false);
+  const [editingOidc, setEditingOidc] = useState<OIDCProvider | null>(null);
+  const [oidcFormData, setOidcFormData] = useState<OIDCProviderCreate>({
+    name: '',
+    display_name: '',
+    issuer_url: '',
+    client_id: '',
+    client_secret: '',
+    scopes: 'openid profile email',
+    username_claim: 'preferred_username',
+    email_claim: 'email',
+    display_name_claim: 'name',
+    groups_claim: '',
+    admin_group: '',
+    enabled: true,
+  });
+  const [testingOidc, setTestingOidc] = useState(false);
+  const [oidcTestResult, setOidcTestResult] = useState<{ success: boolean; message: string } | null>(null);
+
   // Restart modal state
   const [showRestartModal, setShowRestartModal] = useState(false);
   const [restarting, setRestarting] = useState(false);
@@ -78,6 +101,13 @@ export default function Settings() {
       handleLoadSyncHistory();
     }
   }, [activeTab]);
+
+  // Load OIDC providers when OIDC tab becomes active
+  useEffect(() => {
+    if (activeTab === 'oidc' && user?.is_admin) {
+      loadOidcProviders();
+    }
+  }, [activeTab, user?.is_admin]);
 
   const loadSettings = async () => {
     try {
@@ -472,6 +502,168 @@ export default function Settings() {
     }
   };
 
+  // OIDC Provider CRUD
+  const loadOidcProviders = async () => {
+    try {
+      const providers = await oidcProviderApi.getAll();
+      setOidcProviders(providers);
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { detail?: string } } };
+      console.error('Failed to load OIDC providers:', error.response?.data?.detail);
+    }
+  };
+
+  const validateOidcProvider = (data: OIDCProviderCreate, isEdit: boolean = false): string[] => {
+    const errors: string[] = [];
+
+    if (!data.name || data.name.trim().length === 0) {
+      errors.push('Provider name is required');
+    } else if (!/^[a-z0-9_-]+$/.test(data.name)) {
+      errors.push('Provider name must be lowercase alphanumeric with underscores and dashes only');
+    }
+
+    if (!data.display_name || data.display_name.trim().length === 0) {
+      errors.push('Display name is required');
+    }
+
+    if (!data.issuer_url || data.issuer_url.trim().length === 0) {
+      errors.push('Issuer URL is required');
+    } else if (!data.issuer_url.startsWith('http://') && !data.issuer_url.startsWith('https://')) {
+      errors.push('Issuer URL must start with http:// or https://');
+    }
+
+    if (!data.client_id || data.client_id.trim().length === 0) {
+      errors.push('Client ID is required');
+    }
+
+    // Client secret required for new providers, optional for edits (empty = keep existing)
+    if (!isEdit && (!data.client_secret || data.client_secret.trim().length === 0)) {
+      errors.push('Client secret is required');
+    }
+
+    return errors;
+  };
+
+  const handleOidcSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    const errors = validateOidcProvider(oidcFormData, !!editingOidc);
+    if (errors.length > 0) {
+      setError(errors.join('. '));
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setError(null);
+
+      if (editingOidc) {
+        await oidcProviderApi.update(editingOidc.id, oidcFormData);
+      } else {
+        await oidcProviderApi.create(oidcFormData);
+      }
+
+      await loadOidcProviders();
+      handleCancelOidcForm();
+      setSuccessMessage('OIDC provider saved successfully');
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { detail?: string } } };
+      setError(error.response?.data?.detail || 'Failed to save OIDC provider');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleEditOidc = (provider: OIDCProvider) => {
+    setEditingOidc(provider);
+    setOidcFormData({
+      name: provider.name,
+      display_name: provider.display_name,
+      issuer_url: provider.issuer_url,
+      client_id: provider.client_id,
+      client_secret: '',  // Don't copy masked value - leave empty to keep current
+      scopes: provider.scopes,
+      username_claim: provider.username_claim,
+      email_claim: provider.email_claim,
+      display_name_claim: provider.display_name_claim,
+      groups_claim: provider.groups_claim || '',
+      admin_group: provider.admin_group || '',
+      enabled: provider.enabled,
+    });
+    setShowOidcForm(true);
+    setError(null);
+    setOidcTestResult(null);
+  };
+
+  const handleDeleteOidc = async (id: number) => {
+    if (!window.confirm('Are you sure you want to delete this OIDC provider?')) {
+      return;
+    }
+
+    try {
+      setSaving(true);
+      await oidcProviderApi.delete(id);
+      await loadOidcProviders();
+      setSuccessMessage('OIDC provider deleted successfully');
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { detail?: string } } };
+      setError(error.response?.data?.detail || 'Failed to delete OIDC provider');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCancelOidcForm = () => {
+    setShowOidcForm(false);
+    setEditingOidc(null);
+    setOidcFormData({
+      name: '',
+      display_name: '',
+      issuer_url: '',
+      client_id: '',
+      client_secret: '',
+      scopes: 'openid profile email',
+      username_claim: 'preferred_username',
+      email_claim: 'email',
+      display_name_claim: 'name',
+      groups_claim: '',
+      admin_group: '',
+      enabled: true,
+    });
+    setError(null);
+    setOidcTestResult(null);
+  };
+
+  const handleTestOidcProvider = async () => {
+    const errors = validateOidcProvider(oidcFormData, !!editingOidc);
+    if (errors.length > 0) {
+      setError(errors.join('. '));
+      return;
+    }
+
+    try {
+      setTestingOidc(true);
+      setError(null);
+      setOidcTestResult(null);
+
+      const result = await oidcProviderApi.test(oidcFormData);
+      setOidcTestResult(result);
+
+      if (!result.success) {
+        setError(result.message);
+      }
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { detail?: string } } };
+      setOidcTestResult({
+        success: false,
+        message: error.response?.data?.detail || 'Test connection failed'
+      });
+      setError(error.response?.data?.detail || 'Test connection failed');
+    } finally {
+      setTestingOidc(false);
+    }
+  };
+
   const handleRestart = async () => {
     try {
       setRestarting(true);
@@ -520,6 +712,7 @@ export default function Settings() {
     { id: 'telegram' as TabType, label: 'Telegram' },
     { id: 'polling' as TabType, label: 'Polling & Retention' },
     { id: 'sync' as TabType, label: 'Sync' },
+    ...(user?.is_admin ? [{ id: 'oidc' as TabType, label: 'OIDC' }] : []),
     { id: 'advanced' as TabType, label: 'Advanced' },
   ];
 
@@ -1217,6 +1410,306 @@ export default function Settings() {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {activeTab === 'oidc' && user?.is_admin && (
+        <div>
+          <div className="flex justify-between items-center mb-4">
+            <div>
+              <h2 className="text-lg font-medium text-gray-900 dark:text-white">OIDC Providers</h2>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                Configure single sign-on with Authentik, Authelia, PocketID, or other OIDC providers
+              </p>
+            </div>
+            {!showOidcForm && !editingOidc && (
+              <button
+                onClick={() => setShowOidcForm(true)}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium"
+              >
+                Add Provider
+              </button>
+            )}
+          </div>
+
+          {(showOidcForm || editingOidc) && (
+            <form onSubmit={handleOidcSubmit} className="mb-6 bg-gray-50 dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+              <h3 className="text-md font-medium text-gray-900 dark:text-white mb-4">
+                {editingOidc ? 'Edit OIDC Provider' : 'Add New OIDC Provider'}
+              </h3>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="oidc_name" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Provider Name <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    id="oidc_name"
+                    value={oidcFormData.name}
+                    onChange={(e) => setOidcFormData({ ...oidcFormData, name: e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, '') })}
+                    placeholder="authentik"
+                    disabled={!!editingOidc}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white disabled:opacity-50"
+                  />
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Lowercase, alphanumeric, underscores and dashes</p>
+                </div>
+
+                <div>
+                  <label htmlFor="oidc_display_name" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Display Name <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    id="oidc_display_name"
+                    value={oidcFormData.display_name}
+                    onChange={(e) => setOidcFormData({ ...oidcFormData, display_name: e.target.value })}
+                    placeholder="Login with Authentik"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label htmlFor="oidc_issuer_url" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Issuer URL <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    id="oidc_issuer_url"
+                    value={oidcFormData.issuer_url}
+                    onChange={(e) => setOidcFormData({ ...oidcFormData, issuer_url: e.target.value })}
+                    placeholder="https://auth.example.com/application/o/dnsmon/"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  />
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">The OIDC issuer URL (discovery document will be fetched from .well-known/openid-configuration)</p>
+                </div>
+
+                <div>
+                  <label htmlFor="oidc_client_id" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Client ID <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    id="oidc_client_id"
+                    value={oidcFormData.client_id}
+                    onChange={(e) => setOidcFormData({ ...oidcFormData, client_id: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="oidc_client_secret" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Client Secret <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="password"
+                    id="oidc_client_secret"
+                    value={oidcFormData.client_secret}
+                    onChange={(e) => setOidcFormData({ ...oidcFormData, client_secret: e.target.value })}
+                    placeholder={editingOidc ? "Enter new secret to change" : ""}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="oidc_scopes" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Scopes
+                  </label>
+                  <input
+                    type="text"
+                    id="oidc_scopes"
+                    value={oidcFormData.scopes}
+                    onChange={(e) => setOidcFormData({ ...oidcFormData, scopes: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  />
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Default: openid profile email</p>
+                </div>
+
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    id="oidc_enabled"
+                    checked={oidcFormData.enabled}
+                    onChange={(e) => setOidcFormData({ ...oidcFormData, enabled: e.target.checked })}
+                    className="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                  />
+                  <label htmlFor="oidc_enabled" className="ml-2 text-sm text-gray-700 dark:text-gray-300">
+                    Enabled
+                  </label>
+                </div>
+              </div>
+
+              {/* Claim Mappings */}
+              <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-600">
+                <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-3">Claim Mappings</h4>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label htmlFor="oidc_username_claim" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Username Claim
+                    </label>
+                    <input
+                      type="text"
+                      id="oidc_username_claim"
+                      value={oidcFormData.username_claim}
+                      onChange={(e) => setOidcFormData({ ...oidcFormData, username_claim: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label htmlFor="oidc_email_claim" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Email Claim
+                    </label>
+                    <input
+                      type="text"
+                      id="oidc_email_claim"
+                      value={oidcFormData.email_claim}
+                      onChange={(e) => setOidcFormData({ ...oidcFormData, email_claim: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label htmlFor="oidc_display_name_claim" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Display Name Claim
+                    </label>
+                    <input
+                      type="text"
+                      id="oidc_display_name_claim"
+                      value={oidcFormData.display_name_claim}
+                      onChange={(e) => setOidcFormData({ ...oidcFormData, display_name_claim: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Group-based Admin */}
+              <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-600">
+                <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-3">Group-based Admin Assignment (Optional)</h4>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                  Automatically grant admin privileges to users in a specific group
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label htmlFor="oidc_groups_claim" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Groups Claim
+                    </label>
+                    <input
+                      type="text"
+                      id="oidc_groups_claim"
+                      value={oidcFormData.groups_claim}
+                      onChange={(e) => setOidcFormData({ ...oidcFormData, groups_claim: e.target.value })}
+                      placeholder="groups"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label htmlFor="oidc_admin_group" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Admin Group Name
+                    </label>
+                    <input
+                      type="text"
+                      id="oidc_admin_group"
+                      value={oidcFormData.admin_group}
+                      onChange={(e) => setOidcFormData({ ...oidcFormData, admin_group: e.target.value })}
+                      placeholder="dnsmon-admins"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {oidcTestResult && (
+                <div className={`mt-4 px-4 py-3 rounded ${
+                  oidcTestResult.success
+                    ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200'
+                    : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-800 dark:text-red-200'
+                }`}>
+                  {oidcTestResult.success ? '✓ ' : '✗ '}{oidcTestResult.message}
+                </div>
+              )}
+
+              <div className="flex space-x-3 mt-6">
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white rounded-md text-sm font-medium"
+                >
+                  {saving ? 'Saving...' : 'Save'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleTestOidcProvider}
+                  disabled={testingOidc || saving}
+                  className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white rounded-md text-sm font-medium"
+                >
+                  {testingOidc ? 'Testing...' : 'Test Connection'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCancelOidcForm}
+                  className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
+
+          {!showOidcForm && !editingOidc && (
+            <div className="space-y-3">
+              {oidcProviders.length === 0 ? (
+                <p className="text-gray-500 dark:text-gray-400 text-center py-8">
+                  No OIDC providers configured. Add your first provider to enable single sign-on.
+                </p>
+              ) : (
+                oidcProviders.map((provider) => (
+                  <div key={provider.id} className="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-lg font-medium text-gray-900 dark:text-white">{provider.display_name}</h3>
+                          <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${
+                            provider.enabled
+                              ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300'
+                              : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
+                          }`}>
+                            {provider.enabled ? 'Enabled' : 'Disabled'}
+                          </span>
+                        </div>
+                        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{provider.issuer_url}</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                          Name: {provider.name} | Client ID: {provider.client_id.substring(0, 20)}...
+                        </p>
+                        {provider.admin_group && (
+                          <p className="text-xs text-purple-600 dark:text-purple-400 mt-1">
+                            Admin group: {provider.admin_group}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex space-x-2">
+                        <button
+                          onClick={() => handleEditOidc(provider)}
+                          className="px-3 py-1 text-sm text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => handleDeleteOidc(provider.id)}
+                          disabled={saving}
+                          className="px-3 py-1 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
         </div>
       )}
 

@@ -1,21 +1,23 @@
 """
 Authentication service for DNSMon.
-Handles password hashing, session management, and auth dependencies.
+Handles password hashing, session management, OIDC, and auth dependencies.
 """
 
 import os
 import secrets
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from typing import Optional, Dict, Any
+from urllib.parse import urlencode
 
+import httpx
 from fastapi import Request, Response, HTTPException, Depends
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from passlib.context import CryptContext
 
 from .database import get_db
-from .models import User, Session, utcnow
+from .models import User, Session, OIDCProvider, utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -255,3 +257,272 @@ async def require_setup_incomplete(
     """
     if await is_setup_complete(db):
         raise HTTPException(status_code=400, detail="Setup already complete")
+
+
+# ============================================================================
+# OIDC Support
+# ============================================================================
+
+# In-memory state storage (simple approach - cleared on restart)
+# For production with multiple instances, use Redis or database
+_oidc_states: Dict[str, Dict[str, Any]] = {}
+
+OIDC_STATE_EXPIRY_MINUTES = 10
+
+
+def generate_oidc_state() -> str:
+    """Generate a cryptographically secure state parameter for OIDC."""
+    return secrets.token_urlsafe(32)
+
+
+def store_oidc_state(state: str, provider_name: str, redirect_uri: str) -> None:
+    """Store OIDC state for validation during callback."""
+    _oidc_states[state] = {
+        'provider_name': provider_name,
+        'redirect_uri': redirect_uri,
+        'created_at': utcnow(),
+    }
+    # Clean up old states
+    cleanup_oidc_states()
+
+
+def get_oidc_state(state: str) -> Optional[Dict[str, Any]]:
+    """Retrieve and remove OIDC state (one-time use)."""
+    data = _oidc_states.pop(state, None)
+    if not data:
+        return None
+    # Check expiry
+    if utcnow() - data['created_at'] > timedelta(minutes=OIDC_STATE_EXPIRY_MINUTES):
+        return None
+    return data
+
+
+def cleanup_oidc_states() -> None:
+    """Remove expired OIDC states."""
+    cutoff = utcnow() - timedelta(minutes=OIDC_STATE_EXPIRY_MINUTES)
+    expired = [k for k, v in _oidc_states.items() if v['created_at'] < cutoff]
+    for k in expired:
+        _oidc_states.pop(k, None)
+
+
+async def get_oidc_provider(db: AsyncSession, name: str) -> Optional[OIDCProvider]:
+    """Get an enabled OIDC provider by name."""
+    stmt = select(OIDCProvider).where(
+        OIDCProvider.name == name,
+        OIDCProvider.enabled == True
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+async def discover_oidc_config(issuer_url: str) -> Dict[str, Any]:
+    """Fetch OIDC discovery document from issuer."""
+    discovery_url = f"{issuer_url.rstrip('/')}/.well-known/openid-configuration"
+    async with httpx.AsyncClient() as client:
+        response = await client.get(discovery_url, timeout=10.0)
+        response.raise_for_status()
+        return response.json()
+
+
+async def create_oidc_authorization_url(
+    provider: OIDCProvider,
+    redirect_uri: str,
+    state: str
+) -> str:
+    """Create the authorization URL for OIDC redirect."""
+    try:
+        config = await discover_oidc_config(provider.issuer_url)
+        auth_endpoint = config['authorization_endpoint']
+    except Exception as e:
+        logger.error(f"Failed to discover OIDC config for {provider.name}: {e}")
+        raise HTTPException(status_code=502, detail="Failed to contact identity provider")
+
+    params = {
+        'client_id': provider.client_id,
+        'response_type': 'code',
+        'scope': provider.scopes,
+        'redirect_uri': redirect_uri,
+        'state': state,
+    }
+
+    return f"{auth_endpoint}?{urlencode(params)}"
+
+
+async def exchange_oidc_code(
+    provider: OIDCProvider,
+    code: str,
+    redirect_uri: str
+) -> Dict[str, Any]:
+    """Exchange authorization code for tokens and user info."""
+    try:
+        config = await discover_oidc_config(provider.issuer_url)
+    except Exception as e:
+        logger.error(f"Failed to discover OIDC config for {provider.name}: {e}")
+        raise HTTPException(status_code=502, detail="Failed to contact identity provider")
+
+    token_endpoint = config['token_endpoint']
+    userinfo_endpoint = config.get('userinfo_endpoint')
+
+    # Exchange code for tokens
+    async with httpx.AsyncClient() as client:
+        token_response = await client.post(
+            token_endpoint,
+            data={
+                'grant_type': 'authorization_code',
+                'code': code,
+                'redirect_uri': redirect_uri,
+                'client_id': provider.client_id,
+                'client_secret': provider.client_secret,
+            },
+            timeout=10.0
+        )
+        if token_response.status_code != 200:
+            logger.error(f"Token exchange failed: {token_response.text}")
+            raise HTTPException(status_code=401, detail="Authentication failed")
+
+        tokens = token_response.json()
+
+        # Get user info (prefer userinfo endpoint, fall back to ID token claims)
+        user_info = {}
+        if userinfo_endpoint and 'access_token' in tokens:
+            try:
+                userinfo_response = await client.get(
+                    userinfo_endpoint,
+                    headers={'Authorization': f"Bearer {tokens['access_token']}"},
+                    timeout=10.0
+                )
+                if userinfo_response.status_code == 200:
+                    user_info = userinfo_response.json()
+            except Exception as e:
+                logger.warning(f"Failed to fetch userinfo: {e}")
+
+        # If no userinfo, try to decode ID token (basic decode, not full validation)
+        if not user_info and 'id_token' in tokens:
+            try:
+                import base64
+                import json
+                # Simple JWT decode (payload is second segment)
+                payload = tokens['id_token'].split('.')[1]
+                # Add padding if needed
+                payload += '=' * (4 - len(payload) % 4)
+                user_info = json.loads(base64.urlsafe_b64decode(payload))
+            except Exception as e:
+                logger.warning(f"Failed to decode id_token: {e}")
+
+        return {
+            'tokens': tokens,
+            'user_info': user_info,
+        }
+
+
+def extract_oidc_claims(provider: OIDCProvider, user_info: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract user claims from OIDC user info based on provider configuration."""
+    username = user_info.get(provider.username_claim) or user_info.get('sub')
+    email = user_info.get(provider.email_claim)
+    display_name = user_info.get(provider.display_name_claim)
+    groups = user_info.get(provider.groups_claim, []) if provider.groups_claim else []
+
+    # Determine if user should be admin based on group membership
+    is_admin = False
+    if provider.admin_group and groups:
+        if isinstance(groups, list):
+            is_admin = provider.admin_group in groups
+        elif isinstance(groups, str):
+            is_admin = provider.admin_group == groups
+
+    return {
+        'username': username,
+        'email': email,
+        'display_name': display_name,
+        'groups': groups,
+        'is_admin': is_admin,
+        'sub': user_info.get('sub'),
+    }
+
+
+async def find_or_create_oidc_user(
+    db: AsyncSession,
+    provider: OIDCProvider,
+    claims: Dict[str, Any]
+) -> User:
+    """Find existing user or create new one from OIDC claims."""
+    sub = claims.get('sub')
+    if not sub:
+        raise HTTPException(status_code=400, detail="Missing 'sub' claim from identity provider")
+
+    # First, try to find user by OIDC subject
+    stmt = select(User).where(
+        User.oidc_provider == provider.name,
+        User.oidc_subject == sub
+    )
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+
+    if user:
+        # Update user info from latest claims
+        if claims.get('email'):
+            user.email = claims['email'].lower()
+        if claims.get('display_name'):
+            user.display_name = claims['display_name']
+        # Update admin status if group-based admin is configured
+        if provider.admin_group:
+            user.is_admin = claims.get('is_admin', False)
+        user.last_login_at = utcnow()
+        await db.commit()
+        await db.refresh(user)
+        return user
+
+    # Try to find by username (for linking existing local accounts)
+    username = claims.get('username')
+    if username:
+        stmt = select(User).where(User.username == username.lower())
+        result = await db.execute(stmt)
+        existing_user = result.scalar_one_or_none()
+        if existing_user:
+            # Link OIDC to existing account
+            existing_user.oidc_provider = provider.name
+            existing_user.oidc_subject = sub
+            if claims.get('email') and not existing_user.email:
+                existing_user.email = claims['email'].lower()
+            if claims.get('display_name') and not existing_user.display_name:
+                existing_user.display_name = claims['display_name']
+            existing_user.last_login_at = utcnow()
+            await db.commit()
+            await db.refresh(existing_user)
+            logger.info(f"Linked OIDC {provider.name} to existing user {existing_user.username}")
+            return existing_user
+
+    # Create new user
+    # Generate unique username if needed
+    base_username = (username or sub).lower()
+    # Remove invalid characters
+    import re
+    base_username = re.sub(r'[^a-z0-9_-]', '', base_username)[:50]
+    if not base_username:
+        base_username = 'user'
+
+    final_username = base_username
+    counter = 1
+    while True:
+        stmt = select(User).where(User.username == final_username)
+        result = await db.execute(stmt)
+        if not result.scalar_one_or_none():
+            break
+        final_username = f"{base_username}{counter}"
+        counter += 1
+
+    new_user = User(
+        username=final_username,
+        email=claims.get('email', '').lower() if claims.get('email') else None,
+        display_name=claims.get('display_name'),
+        oidc_provider=provider.name,
+        oidc_subject=sub,
+        is_admin=claims.get('is_admin', False),
+        is_active=True,
+    )
+    db.add(new_user)
+    await db.commit()
+    await db.refresh(new_user)
+
+    logger.info(f"Created new user {new_user.username} from OIDC {provider.name}")
+    return new_user

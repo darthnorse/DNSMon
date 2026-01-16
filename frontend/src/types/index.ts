@@ -221,3 +221,60 @@ export interface UserUpdate {
   is_active?: boolean;
   is_admin?: boolean;
 }
+
+// ============================================================================
+// OIDC Types
+// ============================================================================
+
+export interface OIDCProviderPublic {
+  name: string;
+  display_name: string;
+}
+
+export interface OIDCProvider {
+  id: number;
+  name: string;
+  display_name: string;
+  issuer_url: string;
+  client_id: string;
+  client_secret: string;
+  scopes: string;
+  username_claim: string;
+  email_claim: string;
+  display_name_claim: string;
+  groups_claim: string | null;
+  admin_group: string | null;
+  enabled: boolean;
+  display_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OIDCProviderCreate {
+  name: string;
+  display_name: string;
+  issuer_url: string;
+  client_id: string;
+  client_secret: string;
+  scopes?: string;
+  username_claim?: string;
+  email_claim?: string;
+  display_name_claim?: string;
+  groups_claim?: string;
+  admin_group?: string;
+  enabled?: boolean;
+}
+
+export interface OIDCProviderUpdate {
+  display_name?: string;
+  issuer_url?: string;
+  client_id?: string;
+  client_secret?: string;
+  scopes?: string;
+  username_claim?: string;
+  email_claim?: string;
+  display_name_claim?: string;
+  groups_claim?: string;
+  admin_group?: string;
+  enabled?: boolean;
+}

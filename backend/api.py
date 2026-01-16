@@ -1,24 +1,31 @@
 from fastapi import FastAPI, Depends, HTTPException, Query as QueryParam, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_
 from typing import Optional, List
 from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel, Field as PydanticField, field_validator
 import os
+import re
 import logging
 
+from urllib.parse import quote
+
 from .database import get_db, init_db
-from .models import Query, AlertRule, AlertHistory, User, Session as SessionModel
+from .models import Query, AlertRule, AlertHistory, User, Session as SessionModel, OIDCProvider
 from .config import get_settings
 from .service import get_service
 from .auth import (
     hash_password, verify_password, create_session, delete_session,
     set_session_cookie, clear_session_cookie, get_current_user,
     get_current_user_optional, require_admin, require_setup_incomplete,
-    is_setup_complete, get_user_count
+    is_setup_complete, get_user_count,
+    # OIDC functions
+    generate_oidc_state, store_oidc_state, get_oidc_state, get_oidc_provider,
+    discover_oidc_config, create_oidc_authorization_url, exchange_oidc_code,
+    extract_oidc_claims, find_or_create_oidc_user
 )
 
 logger = logging.getLogger(__name__)
@@ -385,6 +392,328 @@ async def get_me(
 ) -> UserResponse:
     """Get current authenticated user"""
     return UserResponse(**user.to_dict())
+
+
+# ============================================================================
+# OIDC Authentication Endpoints
+# ============================================================================
+
+class OIDCProviderPublic(BaseModel):
+    """Public OIDC provider info for login page"""
+    name: str
+    display_name: str
+
+
+class OIDCProviderResponse(BaseModel):
+    """Full OIDC provider info (admin)"""
+    id: int
+    name: str
+    display_name: str
+    issuer_url: str
+    client_id: str
+    client_secret: str  # Will be masked
+    scopes: str
+    username_claim: str
+    email_claim: str
+    display_name_claim: str
+    groups_claim: Optional[str]
+    admin_group: Optional[str]
+    enabled: bool
+    display_order: int
+    created_at: Optional[str]
+    updated_at: Optional[str]
+
+
+class OIDCProviderCreate(BaseModel):
+    name: str = PydanticField(min_length=1, max_length=100)
+    display_name: str = PydanticField(min_length=1, max_length=255)
+    issuer_url: str = PydanticField(min_length=1, max_length=500)
+    client_id: str = PydanticField(min_length=1, max_length=255)
+    client_secret: str = PydanticField(min_length=1)
+    scopes: str = 'openid profile email'
+    username_claim: str = 'preferred_username'
+    email_claim: str = 'email'
+    display_name_claim: str = 'name'
+    groups_claim: Optional[str] = None
+    admin_group: Optional[str] = None
+    enabled: bool = True
+    display_order: int = 0
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        if not re.match(r'^[a-z0-9_-]+$', v):
+            raise ValueError("Name can only contain lowercase letters, numbers, underscores, and hyphens")
+        return v.lower()
+
+    @field_validator('issuer_url')
+    @classmethod
+    def validate_issuer_url(cls, v: str) -> str:
+        if not v.startswith('http://') and not v.startswith('https://'):
+            raise ValueError("Issuer URL must start with http:// or https://")
+        return v.rstrip('/')
+
+
+class OIDCProviderUpdate(BaseModel):
+    display_name: Optional[str] = PydanticField(default=None, max_length=255)
+    issuer_url: Optional[str] = PydanticField(default=None, max_length=500)
+    client_id: Optional[str] = PydanticField(default=None, max_length=255)
+    client_secret: Optional[str] = None
+    scopes: Optional[str] = None
+    username_claim: Optional[str] = None
+    email_claim: Optional[str] = None
+    display_name_claim: Optional[str] = None
+    groups_claim: Optional[str] = None
+    admin_group: Optional[str] = None
+    enabled: Optional[bool] = None
+    display_order: Optional[int] = None
+
+
+@app.get("/api/auth/oidc/providers")
+async def list_oidc_providers_public(
+    db: AsyncSession = Depends(get_db)
+) -> List[OIDCProviderPublic]:
+    """List enabled OIDC providers for login page (public)"""
+    stmt = select(OIDCProvider).where(OIDCProvider.enabled == True).order_by(OIDCProvider.display_order)
+    result = await db.execute(stmt)
+    providers = result.scalars().all()
+    return [OIDCProviderPublic(name=p.name, display_name=p.display_name) for p in providers]
+
+
+@app.get("/api/auth/oidc/{provider_name}/authorize")
+async def oidc_authorize(
+    provider_name: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Start OIDC authorization flow - redirects to provider"""
+    provider = await get_oidc_provider(db, provider_name)
+    if not provider:
+        raise HTTPException(status_code=404, detail="OIDC provider not found")
+
+    # Build callback URL
+    callback_url = str(request.base_url).rstrip('/') + f"/api/auth/oidc/{provider_name}/callback"
+
+    # Generate and store state
+    state = generate_oidc_state()
+    store_oidc_state(state, provider_name, callback_url)
+
+    # Create authorization URL
+    auth_url = await create_oidc_authorization_url(provider, callback_url, state)
+
+    # Redirect to provider
+    return RedirectResponse(url=auth_url, status_code=302)
+
+
+@app.get("/api/auth/oidc/{provider_name}/callback")
+async def oidc_callback(
+    provider_name: str,
+    request: Request,
+    response: Response,
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+    error_description: Optional[str] = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """Handle OIDC callback - exchanges code for tokens and creates session"""
+    # Check for error from provider
+    if error:
+        logger.warning(f"OIDC error from {provider_name}: {error} - {error_description}")
+        # Redirect to login with error (URL-encode to handle special characters)
+        error_msg = quote(error_description or error, safe='')
+        return RedirectResponse(url=f"/login?error={error_msg}", status_code=302)
+
+    if not code or not state:
+        return RedirectResponse(url="/login?error=Invalid+callback+parameters", status_code=302)
+
+    # Validate state
+    state_data = get_oidc_state(state)
+    if not state_data:
+        return RedirectResponse(url="/login?error=Invalid+or+expired+state", status_code=302)
+
+    if state_data['provider_name'] != provider_name:
+        return RedirectResponse(url="/login?error=State+provider+mismatch", status_code=302)
+
+    # Get provider
+    provider = await get_oidc_provider(db, provider_name)
+    if not provider:
+        return RedirectResponse(url="/login?error=Provider+not+found", status_code=302)
+
+    try:
+        # Exchange code for tokens
+        token_data = await exchange_oidc_code(provider, code, state_data['redirect_uri'])
+
+        # Extract claims
+        claims = extract_oidc_claims(provider, token_data['user_info'])
+
+        # Find or create user
+        user = await find_or_create_oidc_user(db, provider, claims)
+
+        if not user.is_active:
+            return RedirectResponse(url="/login?error=Account+is+disabled", status_code=302)
+
+        # Create session
+        session = await create_session(db, user, request)
+
+        # Redirect to app with session cookie
+        redirect_response = RedirectResponse(url="/", status_code=302)
+        set_session_cookie(redirect_response, session)
+        return redirect_response
+
+    except HTTPException as e:
+        logger.error(f"OIDC callback error: {e.detail}")
+        error_msg = quote(str(e.detail), safe='')
+        return RedirectResponse(url=f"/login?error={error_msg}", status_code=302)
+    except Exception as e:
+        logger.error(f"OIDC callback error: {e}")
+        return RedirectResponse(url="/login?error=Authentication+failed", status_code=302)
+
+
+# ============================================================================
+# OIDC Provider Management (Admin only)
+# ============================================================================
+
+@app.get("/api/oidc-providers")
+async def list_oidc_providers(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_admin)
+) -> List[OIDCProviderResponse]:
+    """List all OIDC providers (admin only)"""
+    stmt = select(OIDCProvider).order_by(OIDCProvider.display_order)
+    result = await db.execute(stmt)
+    providers = result.scalars().all()
+    return [OIDCProviderResponse(**p.to_dict(mask_secret=True)) for p in providers]
+
+
+@app.post("/api/oidc-providers")
+async def create_oidc_provider(
+    data: OIDCProviderCreate,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin)
+) -> OIDCProviderResponse:
+    """Create a new OIDC provider (admin only)"""
+    # Check if name exists
+    stmt = select(OIDCProvider).where(OIDCProvider.name == data.name)
+    result = await db.execute(stmt)
+    if result.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Provider name already exists")
+
+    provider = OIDCProvider(
+        name=data.name,
+        display_name=data.display_name,
+        issuer_url=data.issuer_url,
+        client_id=data.client_id,
+        client_secret=data.client_secret,
+        scopes=data.scopes,
+        username_claim=data.username_claim,
+        email_claim=data.email_claim,
+        display_name_claim=data.display_name_claim,
+        groups_claim=data.groups_claim,
+        admin_group=data.admin_group,
+        enabled=data.enabled,
+        display_order=data.display_order,
+    )
+    db.add(provider)
+    await db.commit()
+    await db.refresh(provider)
+
+    logger.info(f"Admin '{admin.username}' created OIDC provider '{provider.name}'")
+    return OIDCProviderResponse(**provider.to_dict(mask_secret=True))
+
+
+@app.put("/api/oidc-providers/{provider_id}")
+async def update_oidc_provider(
+    provider_id: int,
+    data: OIDCProviderUpdate,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin)
+) -> OIDCProviderResponse:
+    """Update an OIDC provider (admin only)"""
+    stmt = select(OIDCProvider).where(OIDCProvider.id == provider_id)
+    result = await db.execute(stmt)
+    provider = result.scalar_one_or_none()
+
+    if not provider:
+        raise HTTPException(status_code=404, detail="OIDC provider not found")
+
+    # Update fields
+    if data.display_name is not None:
+        provider.display_name = data.display_name
+    if data.issuer_url is not None:
+        provider.issuer_url = data.issuer_url.rstrip('/')
+    if data.client_id is not None:
+        provider.client_id = data.client_id
+    if data.client_secret:  # Only update if provided (not empty)
+        provider.client_secret = data.client_secret
+    if data.scopes is not None:
+        provider.scopes = data.scopes
+    if data.username_claim is not None:
+        provider.username_claim = data.username_claim
+    if data.email_claim is not None:
+        provider.email_claim = data.email_claim
+    if data.display_name_claim is not None:
+        provider.display_name_claim = data.display_name_claim
+    if data.groups_claim is not None:
+        provider.groups_claim = data.groups_claim or None
+    if data.admin_group is not None:
+        provider.admin_group = data.admin_group or None
+    if data.enabled is not None:
+        provider.enabled = data.enabled
+    if data.display_order is not None:
+        provider.display_order = data.display_order
+
+    await db.commit()
+    await db.refresh(provider)
+
+    logger.info(f"Admin '{admin.username}' updated OIDC provider '{provider.name}'")
+    return OIDCProviderResponse(**provider.to_dict(mask_secret=True))
+
+
+@app.delete("/api/oidc-providers/{provider_id}")
+async def delete_oidc_provider(
+    provider_id: int,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin)
+):
+    """Delete an OIDC provider (admin only)"""
+    stmt = select(OIDCProvider).where(OIDCProvider.id == provider_id)
+    result = await db.execute(stmt)
+    provider = result.scalar_one_or_none()
+
+    if not provider:
+        raise HTTPException(status_code=404, detail="OIDC provider not found")
+
+    provider_name = provider.name
+    await db.delete(provider)
+    await db.commit()
+
+    logger.info(f"Admin '{admin.username}' deleted OIDC provider '{provider_name}'")
+    return {"message": f"OIDC provider '{provider_name}' deleted"}
+
+
+@app.post("/api/oidc-providers/test")
+async def test_oidc_provider(
+    data: OIDCProviderCreate,
+    _: User = Depends(require_admin)
+):
+    """Test OIDC provider configuration by fetching discovery document"""
+    try:
+        config = await discover_oidc_config(data.issuer_url)
+        return {
+            "success": True,
+            "message": "Successfully connected to OIDC provider",
+            "endpoints": {
+                "authorization": config.get('authorization_endpoint'),
+                "token": config.get('token_endpoint'),
+                "userinfo": config.get('userinfo_endpoint'),
+            }
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"Failed to connect: {str(e)}"
+        }
 
 
 # ============================================================================

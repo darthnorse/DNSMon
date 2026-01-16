@@ -19,6 +19,10 @@ import type {
   SetupRequest,
   UserCreate,
   UserUpdate,
+  OIDCProviderPublic,
+  OIDCProvider,
+  OIDCProviderCreate,
+  OIDCProviderUpdate,
 } from '../types';
 
 const API_BASE_URL = '/api';
@@ -269,6 +273,17 @@ export const authApi = {
     const response = await api.get<User>('/auth/me');
     return response.data;
   },
+
+  // Get enabled OIDC providers (public, for login page)
+  getOIDCProviders: async (): Promise<OIDCProviderPublic[]> => {
+    const response = await api.get<OIDCProviderPublic[]>('/auth/oidc/providers');
+    return response.data;
+  },
+
+  // Start OIDC login flow - returns the authorization URL
+  getOIDCAuthorizeUrl: (providerName: string): string => {
+    return `${API_BASE_URL}/auth/oidc/${encodeURIComponent(providerName)}/authorize`;
+  },
 };
 
 // ============================================================================
@@ -297,6 +312,47 @@ export const userApi = {
   // Delete a user
   delete: async (id: number): Promise<void> => {
     await api.delete(`/users/${id}`);
+  },
+};
+
+// ============================================================================
+// OIDC Provider Management API (Admin only)
+// ============================================================================
+
+export const oidcProviderApi = {
+  // Get all OIDC providers (admin view with secrets)
+  getAll: async (): Promise<OIDCProvider[]> => {
+    const response = await api.get<OIDCProvider[]>('/oidc-providers');
+    return response.data;
+  },
+
+  // Get a single OIDC provider
+  get: async (id: number): Promise<OIDCProvider> => {
+    const response = await api.get<OIDCProvider>(`/oidc-providers/${id}`);
+    return response.data;
+  },
+
+  // Create a new OIDC provider
+  create: async (data: OIDCProviderCreate): Promise<OIDCProvider> => {
+    const response = await api.post<OIDCProvider>('/oidc-providers', data);
+    return response.data;
+  },
+
+  // Update an OIDC provider
+  update: async (id: number, data: OIDCProviderUpdate): Promise<OIDCProvider> => {
+    const response = await api.put<OIDCProvider>(`/oidc-providers/${id}`, data);
+    return response.data;
+  },
+
+  // Delete an OIDC provider
+  delete: async (id: number): Promise<void> => {
+    await api.delete(`/oidc-providers/${id}`);
+  },
+
+  // Test OIDC provider configuration
+  test: async (data: OIDCProviderCreate): Promise<{ success: boolean; message: string }> => {
+    const response = await api.post<{ success: boolean; message: string }>('/oidc-providers/test', data);
+    return response.data;
   },
 };
 
