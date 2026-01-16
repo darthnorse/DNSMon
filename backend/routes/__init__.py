@@ -12,6 +12,7 @@ from .settings import router as settings_router
 from .sync import router as sync_router
 from .domains import router as domains_router
 from .blocking import router as blocking_router
+from .notifications import router as notifications_router
 
 __all__ = [
     'auth_router',
@@ -24,4 +25,5 @@ __all__ = [
     'sync_router',
     'domains_router',
     'blocking_router',
+    'notifications_router',
 ]

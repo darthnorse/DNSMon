@@ -28,8 +28,11 @@ services:
     environment:
       DATABASE_URL: postgresql://dnsmon:${POSTGRES_PASSWORD:-changeme}@localhost:5432/dnsmon
       TZ: ${TZ:-America/Denver}
+    volumes:
+      - dnsmon_logs:/app/logs
     # All other settings are now configured via the Settings page
     restart: unless-stopped
 
 volumes:
   dnsmon_postgres_data:
+  dnsmon_logs:

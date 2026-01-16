@@ -23,6 +23,11 @@ import type {
   OIDCProvider,
   OIDCProviderCreate,
   OIDCProviderUpdate,
+  NotificationChannel,
+  NotificationChannelCreate,
+  NotificationChannelUpdate,
+  TemplateVariablesResponse,
+  ChannelTypesResponse,
 } from '../types';
 
 const API_BASE_URL = '/api';
@@ -113,15 +118,6 @@ export const settingsApi = {
   // Trigger application restart
   restart: async (): Promise<void> => {
     await api.post('/settings/restart');
-  },
-
-  // Test Telegram connection
-  testTelegram: async (bot_token: string, chat_id: string): Promise<{ success: boolean; message: string }> => {
-    const response = await api.post<{ success: boolean; message: string }>('/settings/telegram/test', {
-      bot_token,
-      chat_id
-    });
-    return response.data;
   },
 
   // Pi-hole server operations
@@ -352,6 +348,59 @@ export const oidcProviderApi = {
   // Test OIDC provider configuration
   test: async (data: OIDCProviderCreate): Promise<{ success: boolean; message: string }> => {
     const response = await api.post<{ success: boolean; message: string }>('/oidc-providers/test', data);
+    return response.data;
+  },
+};
+
+// ============================================================================
+// Notification Channel API
+// ============================================================================
+
+export const notificationChannelApi = {
+  // Get all notification channels
+  getAll: async (): Promise<NotificationChannel[]> => {
+    const response = await api.get<NotificationChannel[]>('/notification-channels');
+    return response.data;
+  },
+
+  // Get a single notification channel
+  get: async (id: number): Promise<NotificationChannel> => {
+    const response = await api.get<NotificationChannel>(`/notification-channels/${id}`);
+    return response.data;
+  },
+
+  // Create a new notification channel
+  create: async (data: NotificationChannelCreate): Promise<NotificationChannel> => {
+    const response = await api.post<NotificationChannel>('/notification-channels', data);
+    return response.data;
+  },
+
+  // Update a notification channel
+  update: async (id: number, data: NotificationChannelUpdate): Promise<NotificationChannel> => {
+    const response = await api.put<NotificationChannel>(`/notification-channels/${id}`, data);
+    return response.data;
+  },
+
+  // Delete a notification channel
+  delete: async (id: number): Promise<void> => {
+    await api.delete(`/notification-channels/${id}`);
+  },
+
+  // Test a notification channel
+  test: async (id: number): Promise<{ success: boolean; message: string }> => {
+    const response = await api.post<{ success: boolean; message: string }>(`/notification-channels/${id}/test`);
+    return response.data;
+  },
+
+  // Get available template variables
+  getTemplateVariables: async (): Promise<TemplateVariablesResponse> => {
+    const response = await api.get<TemplateVariablesResponse>('/notification-channels/template-variables');
+    return response.data;
+  },
+
+  // Get available channel types
+  getChannelTypes: async (): Promise<ChannelTypesResponse> => {
+    const response = await api.get<ChannelTypesResponse>('/notification-channels/channel-types');
     return response.data;
   },
 };

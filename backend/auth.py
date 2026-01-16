@@ -31,7 +31,7 @@ SESSION_COOKIE_NAME = "dnsmon_session"
 
 # Secret key for cookie signing (should be set via environment variable)
 SECRET_KEY = os.getenv("PIDASH_SECRET_KEY", secrets.token_hex(32))
-COOKIE_SECURE = os.getenv("PIDASH_COOKIE_SECURE", "true").lower() == "true"
+COOKIE_SECURE = os.getenv("PIDASH_COOKIE_SECURE", "false").lower() == "true"
 
 
 # ============================================================================

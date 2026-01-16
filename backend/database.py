@@ -41,6 +41,49 @@ async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
+    # Run migrations
+    await migrate_telegram_to_channels()
+
+
+async def migrate_telegram_to_channels():
+    """Migrate existing Telegram settings to notification_channels table"""
+    import logging
+    from sqlalchemy import select
+    from .models import AppSetting, NotificationChannel
+
+    logger = logging.getLogger(__name__)
+
+    async with async_session_maker() as session:
+        # Get existing Telegram settings
+        stmt = select(AppSetting).where(AppSetting.key.in_([
+            'telegram_bot_token', 'telegram_chat_id'
+        ]))
+        result = await session.execute(stmt)
+        settings = {s.key: s.value for s in result.scalars()}
+
+        bot_token = settings.get('telegram_bot_token')
+        chat_id = settings.get('telegram_chat_id')
+
+        if bot_token and chat_id:
+            # Check if already migrated
+            existing = await session.execute(
+                select(NotificationChannel).where(
+                    NotificationChannel.channel_type == 'telegram',
+                    NotificationChannel.name == 'Telegram (migrated)'
+                )
+            )
+            if not existing.scalar_one_or_none():
+                # Create channel from existing settings
+                channel = NotificationChannel(
+                    name="Telegram (migrated)",
+                    channel_type="telegram",
+                    config={"bot_token": bot_token, "chat_id": chat_id},
+                    enabled=True,
+                )
+                session.add(channel)
+                await session.commit()
+                logger.info("Migrated Telegram settings to notification_channels")
+
 
 async def cleanup_old_queries(days: int = 60):
     """Delete queries older than specified days"""

@@ -1,17 +1,19 @@
 import asyncio
 import logging
+import resource
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 from .config import get_settings_sync
 from .ingestion import QueryIngestionService
 from .alerts import AlertEngine
-from .notifications import TelegramNotifier
+from .notifications import NotificationService, AlertContext
 from .sync_service import PiholeSyncService
 from .auth import cleanup_expired_sessions
 from .database import async_session_maker
 
 logger = logging.getLogger(__name__)
+memory_logger = logging.getLogger('dnsmon.memory')
 
 
 class DNSMonService:
@@ -22,7 +24,7 @@ class DNSMonService:
         self.scheduler = AsyncIOScheduler()
         self.ingestion_service = QueryIngestionService()
         self.alert_engine = AlertEngine()
-        self.notifier = TelegramNotifier()
+        self.notification_service = NotificationService()
         self.sync_service = PiholeSyncService()
         self._started = False  # Track if service has been started
         self._initial_ingestion_task = None  # Track initial ingestion task
@@ -79,8 +81,10 @@ class DNSMonService:
                         )
 
                         if alert_history_id:
-                            # Send batched notification
-                            success = await self.notifier.send_batch_alert(queries, rule)
+                            # Send batched notification to all enabled channels
+                            results = await self.notification_service.send_batch_alert(queries, rule)
+                            # Consider notification successful if at least one channel succeeded
+                            success = any(results.values()) if results else False
 
                             # Update alert status
                             await self.alert_engine.update_alert_status(
@@ -94,8 +98,15 @@ class DNSMonService:
                 tasks = [process_rule_batch(rule_id, queries) for rule_id, queries in matches_by_rule.items()]
                 await asyncio.gather(*tasks, return_exceptions=True)
 
+            # Log memory usage to dedicated file (persists across container restarts)
+            rusage = resource.getrusage(resource.RUSAGE_SELF)
+            memory_logger.info(f"RSS: {rusage.ru_maxrss / 1024:.1f} MB | queries_ingested: {count}")
+
         except Exception as e:
             logger.error(f"Error in ingest_and_alert: {e}", exc_info=True)
+            # Still log memory on error
+            rusage = resource.getrusage(resource.RUSAGE_SELF)
+            memory_logger.info(f"RSS: {rusage.ru_maxrss / 1024:.1f} MB | error: {str(e)[:100]}")
 
     async def cleanup_task(self):
         """Periodic cleanup of old data"""
@@ -137,7 +148,10 @@ class DNSMonService:
             trigger=IntervalTrigger(seconds=self.settings.poll_interval_seconds),
             id='ingest_and_alert',
             name='Ingest queries and check alerts',
-            replace_existing=True
+            replace_existing=True,
+            max_instances=1,  # Prevent job overlap if previous run is slow
+            coalesce=True,    # Combine missed runs into one
+            misfire_grace_time=30  # Skip if more than 30s late
         )
 
         # Schedule daily cleanup
@@ -146,7 +160,9 @@ class DNSMonService:
             trigger=IntervalTrigger(hours=24),
             id='cleanup',
             name='Cleanup old queries',
-            replace_existing=True
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True
         )
 
         # Schedule Pi-hole configuration sync (separate from query ingestion)
@@ -155,7 +171,9 @@ class DNSMonService:
             trigger=IntervalTrigger(seconds=self.settings.sync_interval_seconds),
             id='sync',
             name='Sync Pi-hole configurations',
-            replace_existing=True
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True
         )
 
         # Schedule session cleanup (hourly)
@@ -164,7 +182,9 @@ class DNSMonService:
             trigger=IntervalTrigger(hours=1),
             id='session_cleanup',
             name='Cleanup expired sessions',
-            replace_existing=True
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True
         )
 
         self.scheduler.start()
@@ -184,10 +204,6 @@ class DNSMonService:
             return
 
         logger.info("Starting DNSMon service...")
-
-        # Test Telegram connection
-        if self.notifier.bot:
-            await self.notifier.test_connection()
 
         # Start scheduler
         self.start_scheduler()
@@ -222,10 +238,6 @@ class DNSMonService:
 
         # Shutdown scheduler
         self.scheduler.shutdown()
-
-        # Shutdown Telegram notifier to release bot resources
-        if self.notifier:
-            await self.notifier.shutdown()
 
         # Clear alert engine caches to free memory
         await self.alert_engine.invalidate_cache()

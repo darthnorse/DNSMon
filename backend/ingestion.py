@@ -33,7 +33,15 @@ class QueryIngestionService:
         self.settings = get_settings_sync()
 
     async def _get_last_query_timestamp(self, server_name: str) -> int:
-        """Get the timestamp of the last query for a server from the database"""
+        """Get the timestamp of the last query for a server from the database.
+
+        Caps the lookback to max_catchup_seconds to prevent fetching huge amounts
+        of data after extended downtime.
+        """
+        now = int(time.time())
+        max_lookback = self.settings.max_catchup_seconds
+        min_allowed_timestamp = now - max_lookback
+
         async with async_session_maker() as session:
             # Use SQLAlchemy ORM instead of raw SQL for better type safety
             from sqlalchemy import func, select, cast, BigInteger
@@ -47,10 +55,18 @@ class QueryIngestionService:
             epoch_timestamp = result.scalar()
 
             if epoch_timestamp:
-                return int(epoch_timestamp)
+                last_timestamp = int(epoch_timestamp)
+                # Cap lookback to max_catchup_seconds
+                if last_timestamp < min_allowed_timestamp:
+                    logger.warning(
+                        f"Last query for {server_name} was {now - last_timestamp}s ago, "
+                        f"capping lookback to {max_lookback}s (some queries may be missed)"
+                    )
+                    return min_allowed_timestamp
+                return last_timestamp
             else:
                 # No queries yet, use lookback period
-                return int(time.time()) - self.settings.query_lookback_seconds
+                return now - self.settings.query_lookback_seconds
 
     async def ingest_from_server(self, server: PiholeServer) -> Tuple[int, List[IngestedQuery]]:
         """Ingest queries from a single Pi-hole server.
@@ -225,6 +241,10 @@ class QueryIngestionService:
         """Ingest queries from all configured Pi-hole servers.
         Returns (total_count, all_ingested_queries).
         """
+        # Reload settings to pick up any newly added servers
+        from .config import get_settings
+        self.settings = await get_settings()
+
         total_count = 0
         all_queries: List[IngestedQuery] = []
 

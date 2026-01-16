@@ -123,18 +123,22 @@ export default function StatisticsPage() {
     { name: 'Blocked', value: stats.blocked_today, color: '#EF4444' },
   ];
 
-  // Prepare time series data
+  // Prepare time series data (filter out entries with invalid timestamps)
   const timeData = period === '24h'
-    ? stats.queries_hourly.map(item => ({
-        ...item,
-        time: format(new Date(item.hour), 'HH:mm'),
-        allowed: item.queries - item.blocked,
-      }))
-    : stats.queries_daily.map(item => ({
-        ...item,
-        time: format(new Date(item.date), 'MM/dd'),
-        allowed: item.queries - item.blocked,
-      }));
+    ? stats.queries_hourly
+        .filter(item => item.hour && item.hour !== '')
+        .map(item => ({
+          ...item,
+          time: format(new Date(item.hour), 'HH:mm'),
+          allowed: item.queries - item.blocked,
+        }))
+    : stats.queries_daily
+        .filter(item => item.date && item.date !== '')
+        .map(item => ({
+          ...item,
+          time: format(new Date(item.date), 'MM/dd'),
+          allowed: item.queries - item.blocked,
+        }));
 
   // Format large numbers
   const formatNumber = (num: number): string => {

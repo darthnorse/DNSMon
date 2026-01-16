@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Index, BigInteger, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Index, BigInteger, ForeignKey, JSON
 from sqlalchemy.ext.declarative import declarative_base
 
 Base = declarative_base()
@@ -461,6 +461,64 @@ class OIDCProvider(Base):
             'admin_group': self.admin_group,
             'enabled': self.enabled,
             'display_order': self.display_order,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class NotificationChannel(Base):
+    """Notification channel configuration for alerts"""
+    __tablename__ = "notification_channels"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False)
+    channel_type = Column(String(50), nullable=False)  # telegram, pushover, ntfy, webhook, discord
+    config = Column(JSON, nullable=False, default=dict)  # Channel-specific configuration
+    message_template = Column(Text, nullable=True)  # Custom message template with variables
+    enabled = Column(Boolean, default=True)
+
+    # Failure tracking
+    last_success_at = Column(DateTime(timezone=True), nullable=True)
+    last_error = Column(Text, nullable=True)
+    last_error_at = Column(DateTime(timezone=True), nullable=True)
+    consecutive_failures = Column(Integer, default=0)
+
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        Index('idx_notification_channels_enabled', 'enabled'),
+        Index('idx_notification_channels_type', 'channel_type'),
+    )
+
+    def to_dict(self, mask_secrets: bool = True):
+        """
+        Serialize to dictionary.
+
+        Args:
+            mask_secrets: If True (default), mask sensitive fields in config for security.
+        """
+        config = self.config or {}
+        if mask_secrets:
+            # Mask sensitive fields based on channel type
+            masked_config = config.copy()
+            sensitive_fields = ['bot_token', 'api_key', 'user_key', 'app_token', 'auth_token', 'password', 'secret', 'webhook_url']
+            for field in sensitive_fields:
+                if field in masked_config:
+                    masked_config[field] = '********'
+            config = masked_config
+
+        return {
+            'id': self.id,
+            'name': self.name,
+            'channel_type': self.channel_type,
+            'config': config,
+            'message_template': self.message_template,
+            'enabled': self.enabled,
+            'last_success_at': self.last_success_at.isoformat() if self.last_success_at else None,
+            'last_error': self.last_error,
+            'last_error_at': self.last_error_at.isoformat() if self.last_error_at else None,
+            'consecutive_failures': self.consecutive_failures,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }

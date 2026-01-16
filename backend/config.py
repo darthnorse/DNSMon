@@ -69,6 +69,7 @@ class Settings(BaseModel):
     query_lookback_seconds: int = Field(default=65, ge=10, le=3600)
     sync_interval_seconds: int = Field(default=900, ge=60, le=86400)  # 15 min default, 1 min to 24 hours
     retention_days: int = Field(default=60, ge=1, le=365)
+    max_catchup_seconds: int = Field(default=300, ge=60, le=3600)  # 5 min default, max lookback after downtime
     cors_origins: List[str] = Field(default_factory=lambda: ["http://localhost:3000"])
     pihole_servers: List[PiholeServer] = Field(default_factory=list)
 
@@ -129,6 +130,13 @@ async def bootstrap_settings_if_needed(db: AsyncSession):
                 value='60',
                 value_type='int',
                 description='Days to retain query data (1-365)',
+                requires_restart=False
+            ),
+            AppSetting(
+                key='max_catchup_seconds',
+                value='300',
+                value_type='int',
+                description='Maximum lookback window when catching up after downtime (60-3600 seconds)',
                 requires_restart=False
             ),
             AppSetting(
@@ -193,6 +201,7 @@ async def load_settings_from_db(db: AsyncSession) -> Settings:
             query_lookback_seconds=app_settings.get('query_lookback_seconds', 65),
             sync_interval_seconds=app_settings.get('sync_interval_seconds', 900),
             retention_days=app_settings.get('retention_days', 60),
+            max_catchup_seconds=app_settings.get('max_catchup_seconds', 300),
             cors_origins=app_settings.get('cors_origins', ["http://localhost:3000"]),
             pihole_servers=pihole_servers
         )

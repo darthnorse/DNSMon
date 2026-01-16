@@ -1,5 +1,5 @@
 """
-Settings routes - app settings, Pi-hole servers, Telegram test, restart
+Settings routes - app settings, Pi-hole servers, restart
 """
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,8 +15,7 @@ import logging
 from ..database import get_db
 from ..models import User, AppSetting, PiholeServerModel, SettingsChangelog
 from ..schemas import (
-    AppSettingUpdate, PiholeServerCreate, PiholeServerUpdate,
-    TelegramTestData, SettingsResponse
+    AppSettingUpdate, PiholeServerCreate, PiholeServerUpdate, SettingsResponse
 )
 from ..auth import get_current_user
 from ..config import get_settings
@@ -316,63 +315,6 @@ async def test_pihole_connection(
                 "success": False,
                 "message": "Connection test failed. Please check your configuration and try again."
             }
-
-
-@router.post("/telegram/test")
-async def test_telegram_connection(
-    data: TelegramTestData,
-    _: User = Depends(get_current_user)
-):
-    """Test Telegram bot connection"""
-    from telegram import Bot
-    from telegram.error import TelegramError
-
-    bot_token = data.bot_token
-    chat_id = data.chat_id
-
-    bot = None
-    try:
-        bot = Bot(token=bot_token)
-        chat_id_int = int(chat_id)
-        await bot.send_message(
-            chat_id=chat_id_int,
-            text="✓ DNSMon test connection successful! Your Telegram notifications are configured correctly.",
-            parse_mode='HTML'
-        )
-        return {
-            "success": True,
-            "message": f"Successfully sent test message to chat {chat_id}"
-        }
-    except TelegramError as e:
-        error_msg = str(e)
-        if "Unauthorized" in error_msg or "token" in error_msg.lower():
-            return {
-                "success": False,
-                "message": "Invalid bot token. Please check your token."
-            }
-        elif "chat not found" in error_msg.lower() or "CHAT_ID_INVALID" in error_msg:
-            return {
-                "success": False,
-                "message": "Invalid chat ID. Please check your chat ID."
-            }
-        else:
-            logger.error(f"Telegram test failed with error: {error_msg}", exc_info=True)
-            return {
-                "success": False,
-                "message": "Telegram connection test failed. Please verify your bot token and chat ID."
-            }
-    except Exception as e:
-        logger.error(f"Telegram test failed with exception: {e}", exc_info=True)
-        return {
-            "success": False,
-            "message": "Connection test failed. Please check your configuration and try again."
-        }
-    finally:
-        if bot:
-            try:
-                await bot.shutdown()
-            except Exception:
-                pass
 
 
 @router.post("/restart")

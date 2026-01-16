@@ -320,11 +320,6 @@ class PiholeServerUpdate(BaseModel):
     sync_enabled: Optional[bool] = None
 
 
-class TelegramTestData(BaseModel):
-    bot_token: str = PydanticField(min_length=1)
-    chat_id: str = PydanticField(min_length=1)
-
-
 class SettingsResponse(BaseModel):
     app_settings: dict
     pihole_servers: List[dict]

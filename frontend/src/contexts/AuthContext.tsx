@@ -11,6 +11,7 @@ interface AuthContextType {
   logout: () => Promise<void>;
   checkAuth: () => Promise<AuthCheckResponse>;
   setUser: (user: User | null) => void;
+  setSetupComplete: (complete: boolean) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -76,6 +77,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         logout,
         checkAuth,
         setUser,
+        setSetupComplete,
       }}
     >
       {children}

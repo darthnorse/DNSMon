@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { settingsApi, syncApi, oidcProviderApi } from '../utils/api';
 import { useAuth } from '../contexts/AuthContext';
+import NotificationsSettings from '../components/NotificationsSettings';
 import type { PiholeServer, PiholeServerCreate, ServerType, OIDCProvider, OIDCProviderCreate } from '../types';
 
-type TabType = 'servers' | 'telegram' | 'polling' | 'sync' | 'oidc' | 'advanced';
+type TabType = 'servers' | 'notifications' | 'polling' | 'sync' | 'oidc' | 'advanced';
 
 export default function Settings() {
   const [activeTab, setActiveTab] = useState<TabType>('servers');
@@ -28,18 +29,12 @@ export default function Settings() {
     sync_enabled: false
   });
 
-  // Telegram settings
-  const [telegramData, setTelegramData] = useState({
-    bot_token: '',
-    chat_id: ''
-  });
-  const [hasExistingToken, setHasExistingToken] = useState(false);
-
   // Polling & Retention settings
   const [pollingData, setPollingData] = useState({
     poll_interval_seconds: 60,
     query_lookback_seconds: 65,
-    retention_days: 60
+    retention_days: 60,
+    max_catchup_seconds: 300
   });
 
   // Sync settings
@@ -115,18 +110,11 @@ export default function Settings() {
       const data = await settingsApi.get();
 
       // Populate form states
-      const existingToken = String(data.app_settings.telegram_bot_token?.value || '');
-      setHasExistingToken(existingToken.length > 0);
-
-      setTelegramData({
-        bot_token: '',  // Don't show existing token for security
-        chat_id: String(data.app_settings.telegram_chat_id?.value || ''),
-      });
-
       setPollingData({
         poll_interval_seconds: Number(data.app_settings.poll_interval_seconds?.value || 60),
         query_lookback_seconds: Number(data.app_settings.query_lookback_seconds?.value || 65),
         retention_days: Number(data.app_settings.retention_days?.value || 60),
+        max_catchup_seconds: Number(data.app_settings.max_catchup_seconds?.value || 300),
       });
 
       setSyncInterval(Number(data.app_settings.sync_interval_seconds?.value || 900));
@@ -291,67 +279,6 @@ export default function Settings() {
   };
 
   // Settings save handlers
-  const handleSaveTelegram = async () => {
-    try {
-      setSaving(true);
-      setError(null);
-
-      if (telegramData.bot_token.trim()) {
-        await settingsApi.updateSetting('telegram_bot_token', telegramData.bot_token);
-      }
-      await settingsApi.updateSetting('telegram_chat_id', telegramData.chat_id);
-
-      setSuccessMessage('Telegram settings saved successfully');
-      await loadSettings();
-    } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      setError(error.response?.data?.detail || 'Failed to save settings');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleTestTelegram = async () => {
-    // If bot token field is empty but we have an existing token, we need to tell the user
-    if (!telegramData.bot_token.trim() && hasExistingToken) {
-      setError('Please enter your bot token to test the connection (existing token is hidden for security)');
-      return;
-    }
-
-    if (!telegramData.bot_token.trim()) {
-      setError('Bot token is required to test connection');
-      return;
-    }
-    if (!telegramData.chat_id.trim()) {
-      setError('Chat ID is required to test connection');
-      return;
-    }
-
-    try {
-      setTesting(true);
-      setError(null);
-      setTestResult(null);
-
-      const result = await settingsApi.testTelegram(telegramData.bot_token, telegramData.chat_id);
-      setTestResult(result);
-
-      if (result.success) {
-        setSuccessMessage(result.message);
-      } else {
-        setError(result.message);
-      }
-    } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      setTestResult({
-        success: false,
-        message: error.response?.data?.detail || 'Test connection failed'
-      });
-      setError(error.response?.data?.detail || 'Test connection failed');
-    } finally {
-      setTesting(false);
-    }
-  };
-
   const handleSavePolling = async () => {
     const errors: string[] = [];
 
@@ -363,6 +290,9 @@ export default function Settings() {
     }
     if (pollingData.retention_days < 1 || pollingData.retention_days > 365) {
       errors.push('Retention days must be between 1 and 365');
+    }
+    if (pollingData.max_catchup_seconds < 60 || pollingData.max_catchup_seconds > 3600) {
+      errors.push('Max catchup must be between 60 and 3600 seconds');
     }
 
     if (errors.length > 0) {
@@ -383,6 +313,7 @@ export default function Settings() {
       if (result2.requires_restart) needsRestart = true;
 
       await settingsApi.updateSetting('retention_days', String(pollingData.retention_days));
+      await settingsApi.updateSetting('max_catchup_seconds', String(pollingData.max_catchup_seconds));
 
       if (needsRestart) {
         setShowRestartModal(true);
@@ -709,7 +640,7 @@ export default function Settings() {
 
   const tabs = [
     { id: 'servers' as TabType, label: 'DNS Servers' },
-    { id: 'telegram' as TabType, label: 'Telegram' },
+    { id: 'notifications' as TabType, label: 'Notifications' },
     { id: 'polling' as TabType, label: 'Polling & Retention' },
     { id: 'sync' as TabType, label: 'Sync' },
     ...(user?.is_admin ? [{ id: 'oidc' as TabType, label: 'OIDC' }] : []),
@@ -1066,73 +997,11 @@ export default function Settings() {
         </div>
       )}
 
-      {activeTab === 'telegram' && (
-        <div className="max-w-2xl">
-          <h2 className="text-lg font-medium text-gray-900 dark:text-white mb-4">Telegram Notifications</h2>
-          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-            Leave empty to disable Telegram notifications
-          </p>
-
-          <div className="space-y-4">
-            <div>
-              <label htmlFor="bot_token" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Bot Token {hasExistingToken && <span className="text-green-600 dark:text-green-400 text-xs">(configured ✓)</span>}
-              </label>
-              <input
-                type="password"
-                id="bot_token"
-                value={telegramData.bot_token}
-                onChange={(e) => setTelegramData({ ...telegramData, bot_token: e.target.value })}
-                placeholder={hasExistingToken ? "Leave empty to keep existing token" : "Enter Telegram bot token"}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-              />
-              {hasExistingToken && (
-                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  For security, the existing token is not displayed. Leave empty to keep it, or enter a new token to update.
-                </p>
-              )}
-            </div>
-            <div>
-              <label htmlFor="chat_id" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Default Chat ID
-              </label>
-              <input
-                type="text"
-                id="chat_id"
-                value={telegramData.chat_id}
-                onChange={(e) => setTelegramData({ ...telegramData, chat_id: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-              />
-            </div>
-          </div>
-
-          {testResult && (
-            <div className={`mt-4 px-4 py-3 rounded ${
-              testResult.success
-                ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200'
-                : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-800 dark:text-red-200'
-            }`}>
-              {testResult.success ? '✓ ' : '✗ '}{testResult.message}
-            </div>
-          )}
-
-          <div className="flex space-x-3 mt-6">
-            <button
-              onClick={handleSaveTelegram}
-              disabled={saving}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white rounded-md text-sm font-medium"
-            >
-              {saving ? 'Saving...' : 'Save Telegram Settings'}
-            </button>
-            <button
-              onClick={handleTestTelegram}
-              disabled={testing || saving}
-              className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white rounded-md text-sm font-medium"
-            >
-              {testing ? 'Testing...' : 'Test Connection'}
-            </button>
-          </div>
-        </div>
+      {activeTab === 'notifications' && (
+        <NotificationsSettings
+          onError={setError}
+          onSuccess={setSuccessMessage}
+        />
       )}
 
       {activeTab === 'polling' && (
@@ -1187,6 +1056,23 @@ export default function Settings() {
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
               />
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">1 - 365 days</p>
+            </div>
+            <div>
+              <label htmlFor="max_catchup_seconds" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Max Catchup (seconds)
+              </label>
+              <input
+                type="number"
+                id="max_catchup_seconds"
+                min="60"
+                max="3600"
+                value={pollingData.max_catchup_seconds}
+                onChange={(e) => setPollingData({ ...pollingData, max_catchup_seconds: parseInt(e.target.value, 10) || 300 })}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              />
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Maximum lookback after downtime (60 - 3600 seconds). Prevents fetching huge amounts of data after extended outages.
+              </p>
             </div>
           </div>
 

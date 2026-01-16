@@ -1,197 +1,439 @@
 import logging
-from typing import Optional, List
-from datetime import datetime
-from telegram import Bot
-from telegram.error import TelegramError
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Optional, List, Dict, Any, Tuple
+import httpx
+
 from .models import Query, AlertRule
-from .config import get_settings_sync
 
 logger = logging.getLogger(__name__)
 
+# HTTP timeout for all notification requests (seconds)
+HTTP_TIMEOUT = 10.0
 
-class TelegramNotifier:
-    """Service for sending Telegram notifications"""
+# Message length limits per channel
+MESSAGE_LIMITS = {
+    'telegram': 4096,
+    'discord': 2000,
+    'pushover': 1024,
+    'ntfy': 4096,
+    'webhook': None,  # No limit
+}
 
-    def __init__(self):
-        self.settings = get_settings_sync()
-        self.bot: Optional[Bot] = None
+DEFAULT_TEMPLATE = """Alert: {rule_name}
+Domain: {domain}
+Client: {client_ip}"""
 
-        if self.settings.telegram_bot_token:
-            try:
-                self.bot = Bot(token=self.settings.telegram_bot_token)
-            except Exception as e:
-                logger.error(f"Failed to initialize Telegram bot: {e}")
 
-    def _escape_html(self, text: str) -> str:
-        """Escape HTML characters for Telegram"""
-        # Only need to escape: < > &
-        text = text.replace('&', '&amp;')
-        text = text.replace('<', '&lt;')
-        text = text.replace('>', '&gt;')
-        return text
+@dataclass
+class AlertContext:
+    """Context for rendering alert templates"""
+    domain: str
+    client_ip: str
+    client_hostname: Optional[str]
+    rule_name: str
+    server_name: str
+    timestamp: str
+    query_type: str
+    status: str
+    count: int
+    answer: Optional[str] = None
 
-    async def send_alert(self, query: Query, rule: AlertRule) -> bool:
-        """Send alert notification for a matched query"""
-        if not self.bot:
-            logger.warning("Telegram bot not configured, skipping notification")
-            return False
 
-        if not rule.notify_telegram:
-            return True  # Rule doesn't want Telegram notifications
+class NotificationSender(ABC):
+    """Base class for notification senders"""
 
-        # Determine chat ID
-        chat_id = rule.telegram_chat_id or self.settings.telegram_chat_id
-        if not chat_id:
-            logger.error("No Telegram chat ID configured")
-            return False
+    channel_type: str = ""
 
-        try:
-            # Convert chat_id to integer (Telegram API requires int)
-            try:
-                chat_id_int = int(chat_id)
-            except (ValueError, TypeError):
-                logger.error(f"Invalid chat_id format: {chat_id}")
-                return False
+    @abstractmethod
+    async def send(self, message: str, config: dict) -> Tuple[bool, Optional[str]]:
+        """Send notification. Returns (success, error_message)"""
+        pass
 
-            # Format message
-            message = self._format_alert_message(query, rule)
+    @abstractmethod
+    def validate_config(self, config: dict) -> List[str]:
+        """Returns list of validation errors, empty if valid"""
+        pass
 
-            # Send message
-            await self.bot.send_message(
-                chat_id=chat_id_int,
-                text=message,
-                parse_mode='HTML'
-            )
 
-            logger.info(f"Sent Telegram alert for rule '{rule.name}'")
-            return True
+class TelegramSender(NotificationSender):
+    """Telegram notification sender using HTTP API"""
+    channel_type = "telegram"
 
-        except TelegramError as e:
-            logger.error(f"Failed to send Telegram message: {e}")
-            return False
-        except Exception as e:
-            logger.error(f"Unexpected error sending Telegram message: {e}")
-            return False
+    async def send(self, message: str, config: dict) -> Tuple[bool, Optional[str]]:
+        bot_token = config.get('bot_token')
+        chat_id = config.get('chat_id')
 
-    def _format_alert_message(self, query: Query, rule: AlertRule) -> str:
-        """Format alert message for Telegram"""
-        timestamp = query.timestamp.strftime("%b %d, %Y %H:%M:%S")
-
-        # Build client info
-        client_info = query.client_ip
-        if query.client_hostname:
-            client_info = f"{query.client_ip} ({query.client_hostname})"
-
-        # Escape HTML characters
-        domain = self._escape_html(query.domain)
-        client_info = self._escape_html(client_info)
-        rule_name = self._escape_html(rule.name)
-
-        message = f"🚨 <b>Alert: {rule_name}</b>\n\n"
-        message += f"<b>Time:</b> {timestamp}\n"
-        message += f"<b>Domain:</b> <code>{domain}</code>\n"
-        message += f"<b>Client:</b> <code>{client_info}</code>\n"
-        message += f"<b>Server:</b> {query.pihole_server}\n"
-
-        if rule.description:
-            desc = self._escape_html(rule.description)
-            message += f"\n<i>{desc}</i>"
-
-        # Telegram has 4096 character limit
-        if len(message) > 4096:
-            message = message[:4090] + "\n...[truncated]"
-
-        return message
-
-    async def send_batch_alert(self, queries: List, rule: AlertRule) -> bool:
-        """Send a batched alert for multiple matches"""
-        if not self.bot or not queries:
-            return False
-
-        if not rule.notify_telegram:
-            return True
-
-        chat_id = rule.telegram_chat_id or self.settings.telegram_chat_id
-        if not chat_id:
-            return False
+        if not bot_token or not chat_id:
+            return False, "Missing bot_token or chat_id"
 
         try:
-            # Convert chat_id to integer (Telegram API requires int)
-            try:
-                chat_id_int = int(chat_id)
-            except (ValueError, TypeError):
-                logger.error(f"Invalid chat_id format: {chat_id}")
-                return False
-
-            # Format batch message
-            message = self._format_batch_message(queries, rule)
-
-            await self.bot.send_message(
-                chat_id=chat_id_int,
-                text=message,
-                parse_mode='HTML'
-            )
-
-            logger.info(f"Sent batch Telegram alert for rule '{rule.name}' ({len(queries)} matches)")
-            return True
-
-        except TelegramError as e:
-            logger.error(f"Failed to send batch Telegram message: {e}")
-            return False
+            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+                response = await client.post(
+                    f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                    json={"chat_id": chat_id, "text": message}
+                )
+                if response.status_code == 200:
+                    return True, None
+                else:
+                    return False, f"HTTP {response.status_code}: {response.text[:200]}"
+        except httpx.TimeoutException:
+            return False, "Request timed out"
         except Exception as e:
-            logger.error(f"Unexpected error sending batch message: {e}")
-            return False
+            return False, str(e)
 
-    def _format_batch_message(self, queries: List, rule: AlertRule) -> str:
-        """Format batch alert message matching pihole.png format"""
-        from datetime import datetime, timezone
+    def validate_config(self, config: dict) -> List[str]:
+        errors = []
+        if not config.get('bot_token'):
+            errors.append('bot_token is required')
+        if not config.get('chat_id'):
+            errors.append('chat_id is required')
+        return errors
 
-        # Get first query's timestamp and server for header
+
+class PushoverSender(NotificationSender):
+    """Pushover notification sender"""
+    channel_type = "pushover"
+
+    async def send(self, message: str, config: dict) -> Tuple[bool, Optional[str]]:
+        app_token = config.get('app_token')
+        user_key = config.get('user_key')
+
+        if not app_token or not user_key:
+            return False, "Missing app_token or user_key"
+
+        try:
+            data = {
+                "token": app_token,
+                "user": user_key,
+                "message": message,
+            }
+            if config.get('priority') not in (None, ''):
+                data["priority"] = int(config['priority'])
+            if config.get('sound'):
+                data["sound"] = config['sound']
+            if config.get('title'):
+                data["title"] = config['title']
+
+            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+                response = await client.post(
+                    "https://api.pushover.net/1/messages.json",
+                    data=data
+                )
+                if response.status_code == 200:
+                    return True, None
+                else:
+                    return False, f"HTTP {response.status_code}: {response.text[:200]}"
+        except httpx.TimeoutException:
+            return False, "Request timed out"
+        except Exception as e:
+            return False, str(e)
+
+    def validate_config(self, config: dict) -> List[str]:
+        errors = []
+        if not config.get('app_token'):
+            errors.append('app_token is required')
+        if not config.get('user_key'):
+            errors.append('user_key is required')
+        priority = config.get('priority')
+        if priority is not None and priority != '':
+            try:
+                if not (-2 <= int(priority) <= 2):
+                    errors.append('priority must be between -2 and 2')
+            except (ValueError, TypeError):
+                errors.append('priority must be a number between -2 and 2')
+        return errors
+
+
+class NtfySender(NotificationSender):
+    """Ntfy notification sender"""
+    channel_type = "ntfy"
+
+    async def send(self, message: str, config: dict) -> Tuple[bool, Optional[str]]:
+        server_url = config.get('server_url', 'https://ntfy.sh').rstrip('/')
+        topic = config.get('topic')
+
+        if not topic:
+            return False, "Missing topic"
+
+        headers = {}
+        if config.get('priority'):
+            headers["Priority"] = str(config['priority'])
+        if config.get('title'):
+            headers["Title"] = config['title']
+        if config.get('auth_token'):
+            headers["Authorization"] = f"Bearer {config['auth_token']}"
+
+        try:
+            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+                response = await client.post(
+                    f"{server_url}/{topic}",
+                    content=message,
+                    headers=headers
+                )
+                if response.status_code == 200:
+                    return True, None
+                else:
+                    return False, f"HTTP {response.status_code}: {response.text[:200]}"
+        except httpx.TimeoutException:
+            return False, "Request timed out"
+        except Exception as e:
+            return False, str(e)
+
+    def validate_config(self, config: dict) -> List[str]:
+        errors = []
+        if not config.get('topic'):
+            errors.append('topic is required')
+        priority = config.get('priority')
+        if priority is not None and priority != '':
+            try:
+                if not (1 <= int(priority) <= 5):
+                    errors.append('priority must be between 1 and 5')
+            except (ValueError, TypeError):
+                errors.append('priority must be a number between 1 and 5')
+        return errors
+
+
+class DiscordSender(NotificationSender):
+    """Discord webhook notification sender"""
+    channel_type = "discord"
+
+    async def send(self, message: str, config: dict) -> Tuple[bool, Optional[str]]:
+        webhook_url = config.get('webhook_url')
+        if not webhook_url:
+            return False, "Missing webhook_url"
+
+        try:
+            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+                response = await client.post(
+                    webhook_url,
+                    json={"content": message}
+                )
+                if response.status_code in (200, 204):
+                    return True, None
+                else:
+                    return False, f"HTTP {response.status_code}: {response.text[:200]}"
+        except httpx.TimeoutException:
+            return False, "Request timed out"
+        except Exception as e:
+            return False, str(e)
+
+    def validate_config(self, config: dict) -> List[str]:
+        errors = []
+        webhook_url = config.get('webhook_url', '')
+        if not webhook_url:
+            errors.append('webhook_url is required')
+        elif not (webhook_url.startswith('https://discord.com/api/webhooks/') or
+                  webhook_url.startswith('https://discordapp.com/api/webhooks/')):
+            errors.append('Invalid Discord webhook URL')
+        return errors
+
+
+class WebhookSender(NotificationSender):
+    """Generic webhook notification sender"""
+    channel_type = "webhook"
+
+    async def send(self, message: str, config: dict) -> Tuple[bool, Optional[str]]:
+        url = config.get('url')
+        if not url:
+            return False, "Missing url"
+
+        method = config.get('method', 'POST').upper()
+        headers = config.get('headers', {}).copy()
+        headers.setdefault('Content-Type', 'application/json')
+
+        body = {
+            "message": message,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "source": "dnsmon"
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+                if method == 'GET':
+                    response = await client.get(url, headers=headers, params={"message": message})
+                else:
+                    response = await client.request(method, url, json=body, headers=headers)
+
+                if response.status_code < 400:
+                    return True, None
+                else:
+                    return False, f"HTTP {response.status_code}: {response.text[:200]}"
+        except httpx.TimeoutException:
+            return False, "Request timed out"
+        except Exception as e:
+            return False, str(e)
+
+    def validate_config(self, config: dict) -> List[str]:
+        errors = []
+        url = config.get('url', '')
+        if not url:
+            errors.append('url is required')
+        elif not url.startswith(('http://', 'https://')):
+            errors.append('url must start with http:// or https://')
+        method = config.get('method', 'POST').upper()
+        if method not in ('GET', 'POST', 'PUT'):
+            errors.append('method must be GET, POST, or PUT')
+        return errors
+
+
+# Registry of senders
+SENDERS: Dict[str, NotificationSender] = {
+    'telegram': TelegramSender(),
+    'pushover': PushoverSender(),
+    'ntfy': NtfySender(),
+    'discord': DiscordSender(),
+    'webhook': WebhookSender(),
+}
+
+
+def render_template(template: Optional[str], context: AlertContext) -> str:
+    """Render a message template with the given context"""
+    if not template:
+        template = DEFAULT_TEMPLATE
+
+    # Replace all variables with safe defaults for None values
+    replacements = {
+        '{domain}': context.domain or '',
+        '{client_ip}': context.client_ip or '',
+        '{client_hostname}': context.client_hostname or 'unknown',
+        '{rule_name}': context.rule_name or '',
+        '{server_name}': context.server_name or '',
+        '{timestamp}': context.timestamp or '',
+        '{query_type}': context.query_type or '',
+        '{status}': context.status or '',
+        '{count}': str(context.count),
+        '{answer}': context.answer or '',
+    }
+
+    message = template
+    for var, value in replacements.items():
+        message = message.replace(var, value)
+
+    return message
+
+
+def truncate_message(message: str, channel_type: str) -> str:
+    """Truncate message to fit channel limits"""
+    limit = MESSAGE_LIMITS.get(channel_type)
+    if limit and len(message) > limit:
+        return message[:limit - 15] + "... [truncated]"
+    return message
+
+
+class NotificationService:
+    """Service for sending notifications to all enabled channels"""
+
+    async def send_alert(self, context: AlertContext) -> Dict[int, bool]:
+        """Send alert to all enabled notification channels.
+        Returns dict of {channel_id: success}"""
+        from .database import async_session_maker
+        from .models import NotificationChannel
+        from sqlalchemy import select
+
+        results = {}
+
+        async with async_session_maker() as session:
+            stmt = select(NotificationChannel).where(NotificationChannel.enabled == True)
+            result = await session.execute(stmt)
+            channels = result.scalars().all()
+
+            for channel in channels:
+                sender = SENDERS.get(channel.channel_type)
+                if not sender:
+                    logger.warning(f"Unknown channel type: {channel.channel_type}")
+                    results[channel.id] = False
+                    continue
+
+                try:
+                    message = render_template(channel.message_template, context)
+                    message = truncate_message(message, channel.channel_type)
+
+                    success, error = await sender.send(message, channel.config)
+                    results[channel.id] = success
+
+                    # Update channel status
+                    now = datetime.now(timezone.utc)
+                    if success:
+                        channel.last_success_at = now
+                        channel.last_error = None
+                        channel.last_error_at = None
+                        channel.consecutive_failures = 0
+                        logger.info(f"Sent notification to channel {channel.name}")
+                    else:
+                        channel.last_error = error
+                        channel.last_error_at = now
+                        channel.consecutive_failures += 1
+                        logger.warning(f"Failed to send to channel {channel.name}: {error}")
+
+                except Exception as e:
+                    logger.error(f"Error sending to channel {channel.name}: {e}")
+                    channel.last_error = str(e)
+                    channel.last_error_at = datetime.now(timezone.utc)
+                    channel.consecutive_failures += 1
+                    results[channel.id] = False
+
+            await session.commit()
+
+        return results
+
+    async def send_batch_alert(self, queries: List, rule: AlertRule) -> Dict[int, bool]:
+        """Send batched alert for multiple queries to all enabled channels.
+        Returns dict of {channel_id: success}"""
+        if not queries:
+            return {}
+
         first_query = queries[0]
-        timestamp = first_query.timestamp.strftime("%b %d, %Y %H:%M:%S")
-        server = first_query.pihole_server
+        context = AlertContext(
+            domain=first_query.domain,
+            client_ip=first_query.client_ip,
+            client_hostname=first_query.client_hostname,
+            rule_name=rule.name,
+            server_name=first_query.pihole_server,
+            timestamp=first_query.timestamp.strftime("%Y-%m-%d %H:%M:%S") if first_query.timestamp else "",
+            query_type=first_query.query_type or "",
+            status=first_query.status or "",
+            count=len(queries),
+        )
 
-        # Header with timestamp
-        message = f"{timestamp} ({server})\n\n"
+        return await self.send_alert(context)
 
-        # List all domain-client pairs (like the screenshot)
-        for query in queries:
-            domain = self._escape_html(query.domain)
-            client_info = query.client_ip
-            if query.client_hostname:
-                client_info = f"{query.client_ip} ({query.client_hostname})"
-            client_info = self._escape_html(client_info)
+    async def send_to_channel(self, channel_id: int, context: AlertContext) -> Tuple[bool, Optional[str]]:
+        """Send alert to a specific channel. Returns (success, error_message)"""
+        from .database import async_session_maker
+        from .models import NotificationChannel
+        from sqlalchemy import select
 
-            message += f"{domain} - {client_info}\n"
+        async with async_session_maker() as session:
+            stmt = select(NotificationChannel).where(NotificationChannel.id == channel_id)
+            result = await session.execute(stmt)
+            channel = result.scalar_one_or_none()
 
-        # Telegram has 4096 character limit
-        if len(message) > 4096:
-            truncate_at = 4050
-            message = message[:truncate_at]
-            # Count how many we're truncating
-            remaining = len(queries) - message.count('\n') + 2
-            message += f"\n...and {remaining} more"
+            if not channel:
+                return False, "Channel not found"
 
-        return message
+            sender = SENDERS.get(channel.channel_type)
+            if not sender:
+                return False, f"Unknown channel type: {channel.channel_type}"
 
-    async def test_connection(self) -> bool:
-        """Test Telegram bot connection"""
-        if not self.bot:
-            return False
+            message = render_template(channel.message_template, context)
+            message = truncate_message(message, channel.channel_type)
 
-        try:
-            me = await self.bot.get_me()
-            logger.info(f"Connected to Telegram bot: @{me.username}")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to connect to Telegram: {e}")
-            return False
+            success, error = await sender.send(message, channel.config)
 
-    async def shutdown(self):
-        """Clean up Telegram bot resources"""
-        if self.bot:
-            try:
-                await self.bot.shutdown()
-                logger.info("Telegram bot shutdown complete")
-            except Exception as e:
-                logger.error(f"Error shutting down Telegram bot: {e}")
+            # Update channel status
+            now = datetime.now(timezone.utc)
+            if success:
+                channel.last_success_at = now
+                channel.last_error = None
+                channel.last_error_at = None
+                channel.consecutive_failures = 0
+            else:
+                channel.last_error = error
+                channel.last_error_at = now
+                channel.consecutive_failures += 1
+
+            await session.commit()
+
+            return success, error

@@ -11,8 +11,19 @@ export default function Setup() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const { setupComplete, setUser } = useAuth();
+  const { setupComplete, setUser, setSetupComplete } = useAuth();
   const navigate = useNavigate();
+
+  // Apply dark mode on mount (default to dark if not set)
+  useEffect(() => {
+    const saved = localStorage.getItem('darkMode');
+    const isDark = saved !== null ? JSON.parse(saved) : true;
+    if (isDark) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, []);
 
   // Redirect if setup is already complete
   useEffect(() => {
@@ -59,6 +70,7 @@ export default function Setup() {
         email: email.trim() || undefined,
       });
       setUser(user);
+      setSetupComplete(true);
       navigate('/', { replace: true });
     } catch (err: unknown) {
       const error = err as { response?: { data?: { detail?: string } } };

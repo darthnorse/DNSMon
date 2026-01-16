@@ -278,3 +278,70 @@ export interface OIDCProviderUpdate {
   admin_group?: string;
   enabled?: boolean;
 }
+
+// ============================================================================
+// Notification Channel Types
+// ============================================================================
+
+export type NotificationChannelType = 'telegram' | 'pushover' | 'ntfy' | 'webhook' | 'discord';
+
+export interface NotificationChannel {
+  id: number;
+  name: string;
+  channel_type: NotificationChannelType;
+  config: Record<string, unknown>;
+  message_template: string | null;
+  enabled: boolean;
+  last_success_at: string | null;
+  last_error: string | null;
+  last_error_at: string | null;
+  consecutive_failures: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NotificationChannelCreate {
+  name: string;
+  channel_type: NotificationChannelType;
+  config: Record<string, unknown>;
+  message_template?: string;
+  enabled?: boolean;
+}
+
+export interface NotificationChannelUpdate {
+  name?: string;
+  config?: Record<string, unknown>;
+  message_template?: string;
+  enabled?: boolean;
+}
+
+export interface TemplateVariable {
+  name: string;
+  description: string;
+  example: string;
+}
+
+export interface ChannelTypeConfigField {
+  name: string;
+  label: string;
+  type: 'text' | 'password' | 'number' | 'select';
+  required: boolean;
+  placeholder?: string;
+  options?: string[];
+}
+
+export interface ChannelTypeInfo {
+  type: NotificationChannelType;
+  name: string;
+  icon: string;
+  config_fields: ChannelTypeConfigField[];
+}
+
+export interface TemplateVariablesResponse {
+  variables: TemplateVariable[];
+  default_template: string;
+}
+
+export interface ChannelTypesResponse {
+  channel_types: ChannelTypeInfo[];
+}

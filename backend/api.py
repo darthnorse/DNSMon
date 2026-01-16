@@ -24,6 +24,7 @@ from .routes import (
     sync_router,
     domains_router,
     blocking_router,
+    notifications_router,
 )
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,7 @@ app.include_router(settings_router)
 app.include_router(sync_router)
 app.include_router(domains_router)
 app.include_router(blocking_router)
+app.include_router(notifications_router)
 
 
 @app.on_event("startup")
