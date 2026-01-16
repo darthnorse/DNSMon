@@ -240,7 +240,7 @@ async def test_channel(
         client_hostname="test-device.local",
         rule_name="Test Alert",
         server_name="pihole1",
-        timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
         query_type="A",
         status="Blocked",
         count=1,

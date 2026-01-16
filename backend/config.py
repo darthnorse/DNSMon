@@ -63,8 +63,6 @@ class Settings(BaseModel):
     database_url: str
 
     # From database
-    telegram_bot_token: Optional[str] = None
-    telegram_chat_id: Optional[str] = None
     poll_interval_seconds: int = Field(default=60, ge=10, le=3600)
     query_lookback_seconds: int = Field(default=65, ge=10, le=3600)
     sync_interval_seconds: int = Field(default=900, ge=60, le=86400)  # 15 min default, 1 min to 24 hours
@@ -89,21 +87,8 @@ async def bootstrap_settings_if_needed(db: AsyncSession):
         logger.info("Bootstrapping default settings...")
 
         # Insert default app settings
+        # Note: telegram_bot_token and telegram_chat_id were removed - use NotificationChannel instead
         defaults = [
-            AppSetting(
-                key='telegram_bot_token',
-                value='',
-                value_type='string',
-                description='Telegram bot token for notifications',
-                requires_restart=False
-            ),
-            AppSetting(
-                key='telegram_chat_id',
-                value='',
-                value_type='string',
-                description='Default Telegram chat ID',
-                requires_restart=False
-            ),
             AppSetting(
                 key='poll_interval_seconds',
                 value='60',
@@ -195,8 +180,6 @@ async def load_settings_from_db(db: AsyncSession) -> Settings:
     try:
         settings = Settings(
             database_url=database_url,
-            telegram_bot_token=app_settings.get('telegram_bot_token') or None,
-            telegram_chat_id=app_settings.get('telegram_chat_id') or None,
             poll_interval_seconds=app_settings.get('poll_interval_seconds', 60),
             query_lookback_seconds=app_settings.get('query_lookback_seconds', 65),
             sync_interval_seconds=app_settings.get('sync_interval_seconds', 900),

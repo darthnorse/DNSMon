@@ -30,8 +30,9 @@ DEFAULT_SESSION_HOURS = 24
 SESSION_COOKIE_NAME = "dnsmon_session"
 
 # Secret key for cookie signing (should be set via environment variable)
-SECRET_KEY = os.getenv("PIDASH_SECRET_KEY", secrets.token_hex(32))
-COOKIE_SECURE = os.getenv("PIDASH_COOKIE_SECURE", "false").lower() == "true"
+# Supports both DNSMON_* (preferred) and legacy PIDASH_* names for backwards compatibility
+SECRET_KEY = os.getenv("DNSMON_SECRET_KEY") or os.getenv("PIDASH_SECRET_KEY") or secrets.token_hex(32)
+COOKIE_SECURE = (os.getenv("DNSMON_COOKIE_SECURE") or os.getenv("PIDASH_COOKIE_SECURE", "false")).lower() == "true"
 
 
 # ============================================================================

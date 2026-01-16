@@ -48,23 +48,8 @@ class AlertRuleCreate(BaseModel):
     client_ip_pattern: Optional[str] = PydanticField(default=None, max_length=500)
     client_hostname_pattern: Optional[str] = PydanticField(default=None, max_length=500)
     exclude_domains: Optional[str] = PydanticField(default=None, max_length=5000)
-    notify_telegram: bool = True
-    telegram_chat_id: Optional[str] = PydanticField(default=None, max_length=100)
     cooldown_minutes: int = PydanticField(default=5, ge=0, le=10080)  # 0 to 7 days
     enabled: bool = True
-
-    @field_validator('telegram_chat_id')
-    @classmethod
-    def validate_telegram_chat_id(cls, v: Optional[str]) -> Optional[str]:
-        """Validate that telegram_chat_id is numeric if provided"""
-        if v is None or v == '':
-            return v
-        v = v.strip()
-        try:
-            int(v)
-        except ValueError:
-            raise ValueError("telegram_chat_id must be numeric")
-        return v
 
 
 class AlertRuleResponse(BaseModel):
@@ -75,8 +60,6 @@ class AlertRuleResponse(BaseModel):
     client_ip_pattern: Optional[str]
     client_hostname_pattern: Optional[str]
     exclude_domains: Optional[str]
-    notify_telegram: bool
-    telegram_chat_id: Optional[str]
     cooldown_minutes: int
     enabled: bool
     created_at: str

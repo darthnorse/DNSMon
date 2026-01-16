@@ -65,10 +65,6 @@ class AlertRule(Base):
     # Exclusion patterns
     exclude_domains = Column(Text, nullable=True)  # JSON array of domains to exclude
 
-    # Notification settings
-    notify_telegram = Column(Boolean, default=True)
-    telegram_chat_id = Column(String(100), nullable=True)  # Override default chat
-
     # Alert throttling
     cooldown_minutes = Column(Integer, default=5)  # Min time between batch alerts for same rule
 
@@ -85,8 +81,6 @@ class AlertRule(Base):
             'client_ip_pattern': self.client_ip_pattern,
             'client_hostname_pattern': self.client_hostname_pattern,
             'exclude_domains': self.exclude_domains,
-            'notify_telegram': self.notify_telegram,
-            'telegram_chat_id': self.telegram_chat_id,
             'cooldown_minutes': self.cooldown_minutes,
             'enabled': self.enabled,
             'created_at': self.created_at.isoformat() if self.created_at else None,
