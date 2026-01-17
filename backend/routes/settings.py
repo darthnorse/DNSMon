@@ -17,7 +17,7 @@ from ..models import User, AppSetting, PiholeServerModel, SettingsChangelog
 from ..schemas import (
     AppSettingUpdate, PiholeServerCreate, PiholeServerUpdate, SettingsResponse
 )
-from ..auth import get_current_user
+from ..auth import get_current_user, require_admin
 from ..config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -54,7 +54,7 @@ async def update_app_setting(
     key: str,
     update: AppSettingUpdate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user)
+    _: User = Depends(require_admin)
 ):
     """Update a single app setting"""
     stmt = select(AppSetting).where(AppSetting.key == key)
@@ -116,7 +116,7 @@ async def get_servers(
 async def create_server(
     server_data: PiholeServerCreate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user)
+    _: User = Depends(require_admin)
 ):
     """Create a new Pi-hole server"""
     # Check for duplicate name
@@ -187,7 +187,7 @@ async def update_server(
     server_id: int,
     server_data: PiholeServerUpdate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user)
+    _: User = Depends(require_admin)
 ):
     """Update Pi-hole server"""
     stmt = select(PiholeServerModel).where(PiholeServerModel.id == server_id)
@@ -245,7 +245,7 @@ async def update_server(
 async def delete_server(
     server_id: int,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user)
+    _: User = Depends(require_admin)
 ):
     """Delete Pi-hole server"""
     stmt = select(PiholeServerModel).where(PiholeServerModel.id == server_id)
@@ -276,7 +276,7 @@ async def delete_server(
 @router.post("/pihole-servers/test")
 async def test_pihole_connection(
     server_data: PiholeServerCreate,
-    _: User = Depends(get_current_user)
+    _: User = Depends(require_admin)
 ):
     """Test connection to a DNS ad-blocker server (Pi-hole or AdGuard Home)"""
     from ..dns_client_factory import create_dns_client
@@ -327,7 +327,7 @@ async def test_pihole_connection(
 
 
 @router.post("/restart")
-async def trigger_restart(_: User = Depends(get_current_user)):
+async def trigger_restart(_: User = Depends(require_admin)):
     """Trigger container restart with rate limiting to prevent DoS"""
     import time
 

@@ -7,7 +7,7 @@ import logging
 
 from ..models import User, PiholeServerModel
 from ..schemas import DomainRequest
-from ..auth import get_current_user
+from ..auth import get_current_user, require_admin
 from ..database import async_session_maker
 from ..utils import create_client_from_server
 
@@ -71,7 +71,7 @@ async def get_whitelist(_: User = Depends(get_current_user)):
 @router.post("/whitelist")
 async def add_to_whitelist(
     data: DomainRequest,
-    _: User = Depends(get_current_user)
+    _: User = Depends(require_admin)
 ):
     """Add a domain to whitelist on all enabled DNS servers"""
     servers = await get_all_enabled_servers()
@@ -98,7 +98,7 @@ async def add_to_whitelist(
 @router.delete("/whitelist/{domain:path}")
 async def remove_from_whitelist(
     domain: str,
-    _: User = Depends(get_current_user)
+    _: User = Depends(require_admin)
 ):
     """Remove a domain from whitelist on all enabled DNS servers"""
     servers = await get_all_enabled_servers()
@@ -146,7 +146,7 @@ async def get_blacklist(_: User = Depends(get_current_user)):
 @router.post("/blacklist")
 async def add_to_blacklist(
     data: DomainRequest,
-    _: User = Depends(get_current_user)
+    _: User = Depends(require_admin)
 ):
     """Add a domain to blacklist on all enabled DNS servers"""
     servers = await get_all_enabled_servers()
@@ -173,7 +173,7 @@ async def add_to_blacklist(
 @router.delete("/blacklist/{domain:path}")
 async def remove_from_blacklist(
     domain: str,
-    _: User = Depends(get_current_user)
+    _: User = Depends(require_admin)
 ):
     """Remove a domain from blacklist on all enabled DNS servers"""
     servers = await get_all_enabled_servers()
@@ -213,7 +213,7 @@ async def get_regex_whitelist(_: User = Depends(get_current_user)):
 @router.delete("/regex-whitelist/{pattern_id}")
 async def remove_from_regex_whitelist(
     pattern_id: int,
-    _: User = Depends(get_current_user)
+    _: User = Depends(require_admin)
 ):
     """Remove a pattern from regex whitelist on source DNS server (Pi-hole only)"""
     source = await get_source_server()
@@ -244,7 +244,7 @@ async def get_regex_blacklist(_: User = Depends(get_current_user)):
 @router.delete("/regex-blacklist/{pattern_id}")
 async def remove_from_regex_blacklist(
     pattern_id: int,
-    _: User = Depends(get_current_user)
+    _: User = Depends(require_admin)
 ):
     """Remove a pattern from regex blacklist on source DNS server (Pi-hole only)"""
     source = await get_source_server()

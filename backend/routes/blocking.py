@@ -10,7 +10,7 @@ import logging
 from ..database import get_db
 from ..models import User, PiholeServerModel, BlockingOverride
 from ..schemas import BlockingSetRequest
-from ..auth import get_current_user
+from ..auth import get_current_user, require_admin
 from ..utils import create_client_from_server
 
 logger = logging.getLogger(__name__)
@@ -79,7 +79,7 @@ async def get_blocking_status(
 async def set_blocking_for_all(
     data: BlockingSetRequest,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user)
+    _: User = Depends(require_admin)
 ):
     """Enable or disable blocking for all enabled DNS servers"""
     # Get all enabled servers
@@ -171,7 +171,7 @@ async def set_blocking_for_server(
     server_id: int,
     data: BlockingSetRequest,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user)
+    _: User = Depends(require_admin)
 ):
     """Enable or disable blocking for a specific DNS server"""
     # Get server

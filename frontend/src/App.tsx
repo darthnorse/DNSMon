@@ -43,10 +43,12 @@ function Navigation({ darkMode, toggleDarkMode }: { darkMode: boolean; toggleDar
     { path: '/', label: 'Dashboard' },
     { path: '/search', label: 'Search' },
     { path: '/statistics', label: 'Statistics' },
-    { path: '/lists', label: 'Lists' },
-    { path: '/alerts', label: 'Alert Rules' },
-    { path: '/settings', label: 'Settings' },
-    ...(user?.is_admin ? [{ path: '/users', label: 'Users' }] : []),
+    ...(user?.is_admin ? [
+      { path: '/lists', label: 'Lists' },
+      { path: '/alerts', label: 'Alert Rules' },
+      { path: '/settings', label: 'Settings' },
+      { path: '/users', label: 'Users' },
+    ] : []),
   ];
 
   // Load blocking status on mount and poll every 10s
@@ -235,47 +237,53 @@ function Navigation({ darkMode, toggleDarkMode }: { darkMode: boolean; toggleDar
                       )}
                     </div>
 
-                    {/* Action Section */}
-                    {anyDisabled ? (
-                      /* Enable button when disabled */
-                      <div className="p-3">
-                        <button
-                          onClick={handleEnable}
-                          disabled={blockingLoading}
-                          className="w-full px-3 py-2 text-sm bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 transition-colors font-medium"
-                        >
-                          {blockingLoading ? 'Enabling...' : 'Enable Blocking'}
-                        </button>
-                      </div>
-                    ) : (
-                      /* Disable controls when enabled */
-                      <>
-                        <div className="p-3 border-b border-gray-200 dark:border-gray-700">
-                          <label className="block text-sm text-gray-700 dark:text-gray-300 mb-1">
-                            Disable for
-                          </label>
-                          <select
-                            value={selectedDuration ?? ''}
-                            onChange={(e) => setSelectedDuration(e.target.value ? Number(e.target.value) : undefined)}
-                            className="w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-blue-500 focus:border-blue-500"
-                          >
-                            {DURATION_OPTIONS.map((option) => (
-                              <option key={option.label} value={option.value ?? ''}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
+                    {/* Action Section - Admin only */}
+                    {user?.is_admin ? (
+                      anyDisabled ? (
+                        /* Enable button when disabled */
                         <div className="p-3">
                           <button
-                            onClick={handleDisable}
+                            onClick={handleEnable}
                             disabled={blockingLoading}
-                            className="w-full px-3 py-2 text-sm bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50 transition-colors font-medium"
+                            className="w-full px-3 py-2 text-sm bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 transition-colors font-medium"
                           >
-                            {blockingLoading ? 'Disabling...' : 'Disable Blocking'}
+                            {blockingLoading ? 'Enabling...' : 'Enable Blocking'}
                           </button>
                         </div>
-                      </>
+                      ) : (
+                        /* Disable controls when enabled */
+                        <>
+                          <div className="p-3 border-b border-gray-200 dark:border-gray-700">
+                            <label className="block text-sm text-gray-700 dark:text-gray-300 mb-1">
+                              Disable for
+                            </label>
+                            <select
+                              value={selectedDuration ?? ''}
+                              onChange={(e) => setSelectedDuration(e.target.value ? Number(e.target.value) : undefined)}
+                              className="w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-blue-500 focus:border-blue-500"
+                            >
+                              {DURATION_OPTIONS.map((option) => (
+                                <option key={option.label} value={option.value ?? ''}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="p-3">
+                            <button
+                              onClick={handleDisable}
+                              disabled={blockingLoading}
+                              className="w-full px-3 py-2 text-sm bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50 transition-colors font-medium"
+                            >
+                              {blockingLoading ? 'Disabling...' : 'Disable Blocking'}
+                            </button>
+                          </div>
+                        </>
+                      )
+                    ) : (
+                      <div className="p-3 text-xs text-gray-500 dark:text-gray-400 text-center">
+                        Admin privileges required to change blocking
+                      </div>
                     )}
                   </div>
                 )}
@@ -378,9 +386,9 @@ function AppLayout() {
           <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
           <Route path="/search" element={<ProtectedRoute><Search /></ProtectedRoute>} />
           <Route path="/statistics" element={<ProtectedRoute><Statistics /></ProtectedRoute>} />
-          <Route path="/lists" element={<ProtectedRoute><Lists /></ProtectedRoute>} />
-          <Route path="/alerts" element={<ProtectedRoute><AlertRules /></ProtectedRoute>} />
-          <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+          <Route path="/lists" element={<ProtectedRoute requireAdmin><Lists /></ProtectedRoute>} />
+          <Route path="/alerts" element={<ProtectedRoute requireAdmin><AlertRules /></ProtectedRoute>} />
+          <Route path="/settings" element={<ProtectedRoute requireAdmin><Settings /></ProtectedRoute>} />
           <Route path="/users" element={<ProtectedRoute requireAdmin><Users /></ProtectedRoute>} />
         </Routes>
       </main>

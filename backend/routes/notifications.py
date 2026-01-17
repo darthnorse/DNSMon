@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..database import get_db
 from ..models import User, NotificationChannel
 from ..notifications import SENDERS, render_template, truncate_message, AlertContext, DEFAULT_TEMPLATE
-from ..auth import get_current_user
+from ..auth import get_current_user, require_admin
 
 router = APIRouter(prefix="/api/notification-channels", tags=["notifications"])
 
@@ -137,7 +137,7 @@ async def list_channels(
 async def create_channel(
     data: NotificationChannelCreate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user)
+    _: User = Depends(require_admin)
 ):
     """Create a new notification channel"""
     # Validate channel type
@@ -177,7 +177,7 @@ async def update_channel(
     channel_id: int,
     data: NotificationChannelUpdate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user)
+    _: User = Depends(require_admin)
 ):
     """Update a notification channel"""
     stmt = select(NotificationChannel).where(NotificationChannel.id == channel_id)
@@ -217,7 +217,7 @@ async def update_channel(
 async def delete_channel(
     channel_id: int,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user)
+    _: User = Depends(require_admin)
 ):
     """Delete a notification channel"""
     stmt = select(NotificationChannel).where(NotificationChannel.id == channel_id)
@@ -235,7 +235,7 @@ async def delete_channel(
 async def test_channel(
     channel_id: int,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user)
+    _: User = Depends(require_admin)
 ):
     """Send a test notification to a channel"""
     stmt = select(NotificationChannel).where(NotificationChannel.id == channel_id)

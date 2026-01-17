@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from ..database import get_db
 from ..models import AlertRule, User
 from ..schemas import AlertRuleCreate, AlertRuleResponse
-from ..auth import get_current_user
+from ..auth import get_current_user, require_admin
 from ..service import get_service
 from ..utils import ensure_utc
 
@@ -47,7 +47,7 @@ async def get_alert_rules(
 async def create_alert_rule(
     rule: AlertRuleCreate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user)
+    _: User = Depends(require_admin)
 ):
     """Create a new alert rule"""
     db_rule = AlertRule(**rule.model_dump())
@@ -79,7 +79,7 @@ async def update_alert_rule(
     rule_id: int,
     rule_update: AlertRuleCreate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user)
+    _: User = Depends(require_admin)
 ):
     """Update an existing alert rule"""
     stmt = select(AlertRule).where(AlertRule.id == rule_id)
@@ -122,7 +122,7 @@ async def update_alert_rule(
 async def delete_alert_rule(
     rule_id: int,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user)
+    _: User = Depends(require_admin)
 ):
     """Delete an alert rule"""
     stmt = select(AlertRule).where(AlertRule.id == rule_id)

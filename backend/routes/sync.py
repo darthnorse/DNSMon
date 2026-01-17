@@ -4,7 +4,7 @@ Pi-hole sync routes
 from fastapi import APIRouter, Depends, HTTPException, Query as QueryParam
 
 from ..models import User
-from ..auth import get_current_user
+from ..auth import get_current_user, require_admin
 
 router = APIRouter(prefix="/api/sync", tags=["sync"])
 
@@ -27,7 +27,7 @@ async def get_sync_preview(_: User = Depends(get_current_user)):
 
 
 @router.post("/execute")
-async def execute_sync(_: User = Depends(get_current_user)):
+async def execute_sync(_: User = Depends(require_admin)):
     """Execute configuration sync from all sources to their respective targets"""
     from ..sync_service import PiholeSyncService
 
