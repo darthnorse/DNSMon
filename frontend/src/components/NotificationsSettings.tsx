@@ -270,37 +270,64 @@ export default function NotificationsSettings({ onError, onSuccess }: Props) {
             {/* Channel-specific Config Fields */}
             {getChannelTypeInfo(formData.channel_type)?.config_fields.map((field) => (
               <div key={field.name}>
-                <label htmlFor={`config_${field.name}`} className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  {field.label}
-                  {field.required && <span className="text-red-500 ml-1">*</span>}
-                </label>
-                {field.type === 'select' ? (
-                  <select
-                    id={`config_${field.name}`}
-                    value={(formData.config[field.name] as string) || ''}
-                    onChange={(e) => setFormData({
-                      ...formData,
-                      config: { ...formData.config, [field.name]: e.target.value }
-                    })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                  >
-                    <option value="">{field.placeholder || 'Select...'}</option>
-                    {field.options?.map((opt) => (
-                      <option key={opt} value={opt}>{opt}</option>
-                    ))}
-                  </select>
+                {field.type === 'checkbox' ? (
+                  <div className="flex items-start p-3 bg-gray-50 dark:bg-gray-700 rounded-md border border-gray-200 dark:border-gray-600">
+                    <input
+                      type="checkbox"
+                      id={`config_${field.name}`}
+                      checked={Boolean(formData.config[field.name])}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        config: { ...formData.config, [field.name]: e.target.checked }
+                      })}
+                      className="h-4 w-4 mt-0.5 text-blue-600 border-gray-300 rounded"
+                    />
+                    <div className="ml-3">
+                      <label htmlFor={`config_${field.name}`} className="text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer">
+                        {field.label}
+                      </label>
+                      {field.description && (
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                          {field.description}
+                        </p>
+                      )}
+                    </div>
+                  </div>
                 ) : (
-                  <input
-                    type={field.type === 'password' ? 'password' : field.type === 'number' ? 'number' : 'text'}
-                    id={`config_${field.name}`}
-                    value={(formData.config[field.name] as string) || ''}
-                    onChange={(e) => setFormData({
-                      ...formData,
-                      config: { ...formData.config, [field.name]: field.type === 'number' ? parseInt(e.target.value, 10) || '' : e.target.value }
-                    })}
-                    placeholder={editingChannel && field.type === 'password' ? 'Leave empty to keep existing' : field.placeholder}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                  />
+                  <>
+                    <label htmlFor={`config_${field.name}`} className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      {field.label}
+                      {field.required && <span className="text-red-500 ml-1">*</span>}
+                    </label>
+                    {field.type === 'select' ? (
+                      <select
+                        id={`config_${field.name}`}
+                        value={(formData.config[field.name] as string) || ''}
+                        onChange={(e) => setFormData({
+                          ...formData,
+                          config: { ...formData.config, [field.name]: e.target.value }
+                        })}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      >
+                        <option value="">{field.placeholder || 'Select...'}</option>
+                        {field.options?.map((opt) => (
+                          <option key={opt} value={opt}>{opt}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type={field.type === 'password' ? 'password' : field.type === 'number' ? 'number' : 'text'}
+                        id={`config_${field.name}`}
+                        value={(formData.config[field.name] as string) || ''}
+                        onChange={(e) => setFormData({
+                          ...formData,
+                          config: { ...formData.config, [field.name]: field.type === 'number' ? parseInt(e.target.value, 10) || '' : e.target.value }
+                        })}
+                        placeholder={editingChannel && field.type === 'password' ? 'Leave empty to keep existing' : field.placeholder}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      />
+                    )}
+                  </>
                 )}
               </div>
             ))}
@@ -318,20 +345,24 @@ export default function NotificationsSettings({ onError, onSuccess }: Props) {
                 placeholder={defaultTemplate}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white font-mono text-sm"
               />
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                Leave empty to use the default template. Available variables:
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                Leave empty to use the default template. Click a variable to insert it:
               </p>
-              <div className="flex flex-wrap gap-1 mt-1">
-                {templateVariables.map((v) => (
-                  <span
-                    key={v.name}
-                    className="inline-block px-2 py-0.5 text-xs bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 rounded cursor-pointer hover:bg-gray-300 dark:hover:bg-gray-500"
-                    title={`${v.description} (e.g., ${v.example})`}
-                    onClick={() => setFormData({ ...formData, message_template: (formData.message_template || '') + v.name })}
-                  >
-                    {v.name}
-                  </span>
-                ))}
+              <div className="mt-2 text-xs border border-gray-200 dark:border-gray-600 rounded-md overflow-hidden">
+                <table className="w-full">
+                  <tbody>
+                    {templateVariables.map((v, i) => (
+                      <tr
+                        key={v.name}
+                        className={`${i % 2 === 0 ? 'bg-gray-50 dark:bg-gray-700' : 'bg-white dark:bg-gray-800'} hover:bg-blue-50 dark:hover:bg-gray-600 cursor-pointer`}
+                        onClick={() => setFormData({ ...formData, message_template: (formData.message_template || '') + v.name })}
+                      >
+                        <td className="px-2 py-1 font-mono text-blue-600 dark:text-blue-400 whitespace-nowrap">{v.name}</td>
+                        <td className="px-2 py-1 text-gray-600 dark:text-gray-300">{v.description}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
 

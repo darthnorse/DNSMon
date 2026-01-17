@@ -37,16 +37,19 @@ async def get_template_variables(_: User = Depends(get_current_user)):
     """Get list of available template variables"""
     return {
         "variables": [
-            {"name": "{domain}", "description": "Queried domain", "example": "ads.google.com"},
-            {"name": "{client_ip}", "description": "Client IP address", "example": "192.168.1.100"},
-            {"name": "{client_hostname}", "description": "Client hostname", "example": "johns-iphone.local"},
-            {"name": "{rule_name}", "description": "Alert rule name", "example": "Block Google Ads"},
-            {"name": "{server_name}", "description": "Pi-hole server name", "example": "pihole1"},
-            {"name": "{timestamp}", "description": "Query timestamp", "example": "2026-01-16 09:30:45"},
-            {"name": "{query_type}", "description": "DNS query type", "example": "A"},
-            {"name": "{status}", "description": "Query status", "example": "Blocked"},
-            {"name": "{count}", "description": "Match count (batched alerts)", "example": "5"},
-            {"name": "{answer}", "description": "DNS answer", "example": "93.184.216.34"},
+            {"name": "{rule_name}", "description": "Alert rule name", "example": "Block Adult Content"},
+            {"name": "{count}", "description": "Number of matching queries", "example": "5"},
+            {"name": "{query_list}", "description": "All queries, one per line (domain - client)", "example": "ads.com - 192.168.1.50\\ntracker.com - 192.168.1.51"},
+            {"name": "{domains}", "description": "All domains (comma-separated)", "example": "ads.google.com, tracker.fb.com"},
+            {"name": "{clients}", "description": "All clients (comma-separated)", "example": "johns-iphone, 192.168.1.50"},
+            {"name": "{domain}", "description": "First queried domain", "example": "ads.google.com"},
+            {"name": "{client_ip}", "description": "First client IP address", "example": "192.168.1.100"},
+            {"name": "{client_hostname}", "description": "First client hostname", "example": "johns-iphone.local"},
+            {"name": "{server_name}", "description": "DNS server name", "example": "pihole1"},
+            {"name": "{timestamp}", "description": "First query timestamp", "example": "2026-01-16 09:30:45"},
+            {"name": "{query_type}", "description": "First DNS query type", "example": "A"},
+            {"name": "{status}", "description": "First query status", "example": "Blocked"},
+            {"name": "{answer}", "description": "First DNS answer", "example": "93.184.216.34"},
         ],
         "default_template": DEFAULT_TEMPLATE,
     }
@@ -55,6 +58,9 @@ async def get_template_variables(_: User = Depends(get_current_user)):
 @router.get("/channel-types")
 async def get_channel_types(_: User = Depends(get_current_user)):
     """Get list of supported channel types with their configuration requirements"""
+    # Common option for all channel types
+    dedupe_option = {"name": "dedupe_domains", "label": "Deduplicate domains", "type": "checkbox", "required": False, "description": "Show only unique domains instead of all matches"}
+
     return {
         "channel_types": [
             {
@@ -64,6 +70,7 @@ async def get_channel_types(_: User = Depends(get_current_user)):
                 "config_fields": [
                     {"name": "bot_token", "label": "Bot Token", "type": "password", "required": True},
                     {"name": "chat_id", "label": "Chat ID", "type": "text", "required": True},
+                    dedupe_option,
                 ]
             },
             {
@@ -76,6 +83,7 @@ async def get_channel_types(_: User = Depends(get_current_user)):
                     {"name": "title", "label": "Title", "type": "text", "required": False, "placeholder": "DNSMon Alert"},
                     {"name": "priority", "label": "Priority (-2 to 2)", "type": "number", "required": False, "placeholder": "0"},
                     {"name": "sound", "label": "Sound", "type": "text", "required": False, "placeholder": "pushover"},
+                    dedupe_option,
                 ]
             },
             {
@@ -88,6 +96,7 @@ async def get_channel_types(_: User = Depends(get_current_user)):
                     {"name": "title", "label": "Title", "type": "text", "required": False, "placeholder": "DNSMon Alert"},
                     {"name": "priority", "label": "Priority (1-5)", "type": "number", "required": False, "placeholder": "3"},
                     {"name": "auth_token", "label": "Auth Token", "type": "password", "required": False},
+                    dedupe_option,
                 ]
             },
             {
@@ -96,6 +105,7 @@ async def get_channel_types(_: User = Depends(get_current_user)):
                 "icon": "discord",
                 "config_fields": [
                     {"name": "webhook_url", "label": "Webhook URL", "type": "password", "required": True},
+                    dedupe_option,
                 ]
             },
             {
@@ -105,6 +115,7 @@ async def get_channel_types(_: User = Depends(get_current_user)):
                 "config_fields": [
                     {"name": "url", "label": "URL", "type": "text", "required": True},
                     {"name": "method", "label": "Method", "type": "select", "required": False, "options": ["POST", "PUT", "GET"], "placeholder": "POST"},
+                    dedupe_option,
                 ]
             },
         ]
@@ -233,7 +244,7 @@ async def test_channel(
     if not channel:
         raise HTTPException(404, "Channel not found")
 
-    # Create test context
+    # Create test context with sample batch data
     context = AlertContext(
         domain="test.example.com",
         client_ip="192.168.1.100",
@@ -243,7 +254,10 @@ async def test_channel(
         timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
         query_type="A",
         status="Blocked",
-        count=1,
+        count=3,
+        query_list="test.example.com - test-device.local\nads.tracker.com - 192.168.1.50\nanalytics.test.org - test-device.local",
+        domains="test.example.com, ads.tracker.com, analytics.test.org",
+        clients="test-device.local, 192.168.1.50",
     )
 
     sender = SENDERS.get(channel.channel_type)

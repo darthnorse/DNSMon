@@ -321,10 +321,11 @@ export interface TemplateVariable {
 export interface ChannelTypeConfigField {
   name: string;
   label: string;
-  type: 'text' | 'password' | 'number' | 'select';
+  type: 'text' | 'password' | 'number' | 'select' | 'checkbox';
   required: boolean;
   placeholder?: string;
   options?: string[];
+  description?: string;
 }
 
 export interface ChannelTypeInfo {

@@ -136,11 +136,16 @@ async def create_pihole_server(
     last_server = result.scalar_one_or_none()
     max_order = last_server if last_server is not None else 0
 
-    # If setting as source, unset existing source
+    # If setting as source, unset existing source of the SAME server type
+    # This allows one source per server type (e.g., one Pi-hole source + one AdGuard source)
+    server_type = server_data.server_type or 'pihole'
     if server_data.is_source:
         stmt = (
             select(PiholeServerModel)
-            .where(PiholeServerModel.is_source == True)
+            .where(
+                PiholeServerModel.is_source == True,
+                PiholeServerModel.server_type == server_type
+            )
             .with_for_update()
         )
         result = await db.execute(stmt)
@@ -198,13 +203,17 @@ async def update_pihole_server(
     if 'password' in update_data and (not update_data['password'] or update_data['password'] == '********'):
         del update_data['password']
 
-    # If setting as source, unset existing source
+    # If setting as source, unset existing source of the SAME server type
+    # This allows one source per server type (e.g., one Pi-hole source + one AdGuard source)
     if update_data.get('is_source'):
+        # Use the new server_type if being updated, otherwise use existing
+        target_type = update_data.get('server_type', server.server_type) or 'pihole'
         stmt = (
             select(PiholeServerModel)
             .where(
                 PiholeServerModel.is_source == True,
-                PiholeServerModel.id != server_id
+                PiholeServerModel.id != server_id,
+                PiholeServerModel.server_type == target_type
             )
             .with_for_update()
         )

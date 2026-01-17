@@ -155,9 +155,9 @@ export const syncApi = {
     return response.data;
   },
 
-  // Execute sync from source to targets
-  execute: async (): Promise<{ message: string; sync_history_id: number }> => {
-    const response = await api.post<{ message: string; sync_history_id: number }>('/sync/execute');
+  // Execute sync from all sources to their respective targets
+  execute: async (): Promise<{ message: string; sync_history_ids: number[]; sync_history_id: number | null }> => {
+    const response = await api.post<{ message: string; sync_history_ids: number[]; sync_history_id: number | null }>('/sync/execute');
     return response.data;
   },
 

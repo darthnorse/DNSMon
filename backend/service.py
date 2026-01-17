@@ -122,9 +122,9 @@ class DNSMonService:
         """Periodic sync from source to target Pi-holes"""
         try:
             logger.info("Running Pi-hole configuration sync...")
-            sync_history_id = await self.sync_service.execute_sync(sync_type='automatic')
-            if sync_history_id:
-                logger.info(f"Sync completed successfully (history ID: {sync_history_id})")
+            sync_history_ids = await self.sync_service.execute_sync(sync_type='automatic')
+            if sync_history_ids:
+                logger.info(f"Sync completed successfully ({len(sync_history_ids)} source(s), history IDs: {sync_history_ids})")
             else:
                 logger.debug("No sync performed (no source or targets configured)")
         except Exception as e:

@@ -28,21 +28,23 @@ async def get_sync_preview(_: User = Depends(get_current_user)):
 
 @router.post("/execute")
 async def execute_sync(_: User = Depends(get_current_user)):
-    """Execute configuration sync from source to targets"""
+    """Execute configuration sync from all sources to their respective targets"""
     from ..sync_service import PiholeSyncService
 
     sync_service = PiholeSyncService()
-    sync_history_id = await sync_service.execute_sync(sync_type='manual')
+    sync_history_ids = await sync_service.execute_sync(sync_type='manual')
 
-    if not sync_history_id:
+    if not sync_history_ids:
         raise HTTPException(
             status_code=400,
             detail="Sync failed. Check logs for details."
         )
 
     return {
-        "message": "Sync completed",
-        "sync_history_id": sync_history_id
+        "message": f"Sync completed ({len(sync_history_ids)} source(s))",
+        "sync_history_ids": sync_history_ids,
+        # For backwards compatibility, also include first ID as singular
+        "sync_history_id": sync_history_ids[0] if sync_history_ids else None
     }
 
 

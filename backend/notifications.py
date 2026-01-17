@@ -21,9 +21,8 @@ MESSAGE_LIMITS = {
     'webhook': None,  # No limit
 }
 
-DEFAULT_TEMPLATE = """Alert: {rule_name}
-Domain: {domain}
-Client: {client_ip}"""
+DEFAULT_TEMPLATE = """Alert: {rule_name} ({count} queries)
+{query_list}"""
 
 
 @dataclass
@@ -39,6 +38,10 @@ class AlertContext:
     status: str
     count: int
     answer: Optional[str] = None
+    # Batch fields
+    query_list: str = ""  # One query per line: "domain - client"
+    domains: str = ""  # Comma-separated list of domains
+    clients: str = ""  # Comma-separated list of clients (IP or hostname)
 
 
 class NotificationSender(ABC):
@@ -305,6 +308,10 @@ def render_template(template: Optional[str], context: AlertContext) -> str:
         '{status}': context.status or '',
         '{count}': str(context.count),
         '{answer}': context.answer or '',
+        # Batch fields
+        '{query_list}': context.query_list or f"{context.domain} - {context.client_ip}",
+        '{domains}': context.domains or context.domain or '',
+        '{clients}': context.clients or context.client_ip or '',
     }
 
     message = template
@@ -378,14 +385,51 @@ class NotificationService:
 
         return results
 
-    async def send_batch_alert(self, queries: List, rule: AlertRule) -> Dict[int, bool]:
-        """Send batched alert for multiple queries to all enabled channels.
-        Returns dict of {channel_id: success}"""
-        if not queries:
-            return {}
+    def _build_batch_context(self, queries: List, rule: AlertRule, dedupe: bool = False) -> AlertContext:
+        """Build alert context from a batch of queries.
 
+        Args:
+            queries: List of matching queries
+            rule: The alert rule that matched
+            dedupe: If True, only include unique domain-client pairs. If False, include all.
+        """
         first_query = queries[0]
-        context = AlertContext(
+
+        if dedupe:
+            # Collect unique domain-client pairs
+            query_lines = []
+            seen_pairs = set()
+            domains = []
+            clients = []
+            seen_domains = set()
+            seen_clients = set()
+
+            for q in queries:
+                client_display = q.client_hostname or q.client_ip
+                pair = (q.domain, client_display)
+                if pair not in seen_pairs:
+                    seen_pairs.add(pair)
+                    query_lines.append(f"{q.domain} - {client_display}")
+
+                if q.domain and q.domain not in seen_domains:
+                    seen_domains.add(q.domain)
+                    domains.append(q.domain)
+                if client_display and client_display not in seen_clients:
+                    seen_clients.add(client_display)
+                    clients.append(client_display)
+        else:
+            # Include all queries (with duplicates)
+            query_lines = []
+            domains = []
+            clients = []
+            for q in queries:
+                client_display = q.client_hostname or q.client_ip
+                query_lines.append(f"{q.domain} - {client_display}")
+                if q.domain:
+                    domains.append(q.domain)
+                clients.append(client_display)
+
+        return AlertContext(
             domain=first_query.domain,
             client_ip=first_query.client_ip,
             client_hostname=first_query.client_hostname,
@@ -395,9 +439,70 @@ class NotificationService:
             query_type=first_query.query_type or "",
             status=first_query.status or "",
             count=len(queries),
+            query_list="\n".join(query_lines),
+            domains=", ".join(domains),
+            clients=", ".join(clients),
         )
 
-        return await self.send_alert(context)
+    async def send_batch_alert(self, queries: List, rule: AlertRule) -> Dict[int, bool]:
+        """Send batched alert for multiple queries to all enabled channels.
+        Returns dict of {channel_id: success}"""
+        from .database import async_session_maker
+        from .models import NotificationChannel
+        from sqlalchemy import select
+
+        if not queries:
+            return {}
+
+        results = {}
+
+        async with async_session_maker() as session:
+            stmt = select(NotificationChannel).where(NotificationChannel.enabled == True)
+            result = await session.execute(stmt)
+            channels = result.scalars().all()
+
+            for channel in channels:
+                sender = SENDERS.get(channel.channel_type)
+                if not sender:
+                    logger.warning(f"Unknown channel type: {channel.channel_type}")
+                    results[channel.id] = False
+                    continue
+
+                try:
+                    # Check if this channel wants deduplication (default: False = show all)
+                    dedupe = channel.config.get('dedupe_domains', False) if channel.config else False
+                    context = self._build_batch_context(queries, rule, dedupe=dedupe)
+
+                    message = render_template(channel.message_template, context)
+                    message = truncate_message(message, channel.channel_type)
+
+                    success, error = await sender.send(message, channel.config)
+                    results[channel.id] = success
+
+                    # Update channel status
+                    now = datetime.now(timezone.utc)
+                    if success:
+                        channel.last_success_at = now
+                        channel.last_error = None
+                        channel.last_error_at = None
+                        channel.consecutive_failures = 0
+                        logger.info(f"Sent batch notification ({len(queries)} queries) to channel {channel.name}")
+                    else:
+                        channel.last_error = error
+                        channel.last_error_at = now
+                        channel.consecutive_failures += 1
+                        logger.warning(f"Failed to send to channel {channel.name}: {error}")
+
+                except Exception as e:
+                    logger.error(f"Error sending to channel {channel.name}: {e}")
+                    channel.last_error = str(e)
+                    channel.last_error_at = datetime.now(timezone.utc)
+                    channel.consecutive_failures += 1
+                    results[channel.id] = False
+
+            await session.commit()
+
+        return results
 
     async def send_to_channel(self, channel_id: int, context: AlertContext) -> Tuple[bool, Optional[str]]:
         """Send alert to a specific channel. Returns (success, error_message)"""
