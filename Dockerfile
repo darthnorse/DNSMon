@@ -1,3 +1,12 @@
+# Build frontend
+FROM node:20-slim AS frontend-builder
+WORKDIR /app/frontend
+COPY frontend/package*.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+# Build final image
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -17,7 +26,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY backend/ ./backend/
-COPY frontend/build/ ./frontend/build/
+COPY --from=frontend-builder /app/frontend/build/ ./frontend/build/
 
 # Create config directory and set permissions
 RUN mkdir -p /app/config && chown -R appuser:appuser /app
