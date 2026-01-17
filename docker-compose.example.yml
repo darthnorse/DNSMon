@@ -18,7 +18,7 @@ services:
 
   app:
     image: ghcr.io/darthnorse/dnsmon:latest
-    container_name: dnsmon-app
+    container_name: dnsmon
     network_mode: host
     depends_on:
       postgres:
