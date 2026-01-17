@@ -17,9 +17,7 @@ services:
     restart: unless-stopped
 
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/darthnorse/dnsmon:latest
     container_name: dnsmon-app
     network_mode: host
     depends_on:
@@ -30,7 +28,6 @@ services:
       TZ: ${TZ:-America/Denver}
     volumes:
       - dnsmon_logs:/app/logs
-    # All other settings are now configured via the Settings page
     restart: unless-stopped
 
 volumes:

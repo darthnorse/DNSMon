@@ -40,3 +40,4 @@ docker-compose.yml
 
 # Frontend build
 frontend/build/
+docker-compose.yml
