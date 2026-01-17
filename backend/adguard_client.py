@@ -445,9 +445,9 @@ class AdGuardHomeClient(DNSBlockerClient):
             )
             if response.status_code == 200:
                 data = response.json()
-                config['user_rules'] = data.get('user_rules', [])
+                config['user_rules'] = data.get('user_rules') or []
                 config['filtering_enabled'] = data.get('enabled', True)
-                config['filtering_interval'] = data.get('interval', 24)
+                config['filtering_interval'] = data.get('filtering_interval') or data.get('interval') or 24
 
             # Get DNS config
             response = await self.client.get(
@@ -458,13 +458,13 @@ class AdGuardHomeClient(DNSBlockerClient):
                 dns_data = response.json()
                 # Only sync specific DNS settings, not device-specific ones
                 config['dns'] = {
-                    'upstream_dns': dns_data.get('upstream_dns', []),
-                    'bootstrap_dns': dns_data.get('bootstrap_dns', []),
-                    'ratelimit': dns_data.get('ratelimit', 0),
-                    'blocking_mode': dns_data.get('blocking_mode', 'default'),
-                    'edns_cs_enabled': dns_data.get('edns_cs_enabled', False),
-                    'dnssec_enabled': dns_data.get('dnssec_enabled', False),
-                    'disable_ipv6': dns_data.get('disable_ipv6', False),
+                    'upstream_dns': dns_data.get('upstream_dns') or [],
+                    'bootstrap_dns': dns_data.get('bootstrap_dns') or [],
+                    'ratelimit': dns_data.get('ratelimit') or 0,
+                    'blocking_mode': dns_data.get('blocking_mode') or 'default',
+                    'edns_cs_enabled': dns_data.get('edns_cs_enabled') or False,
+                    'dnssec_enabled': dns_data.get('dnssec_enabled') or False,
+                    'disable_ipv6': dns_data.get('disable_ipv6') or False,
                 }
 
             logger.info(f"Retrieved config from {self.server_name}")
@@ -485,7 +485,7 @@ class AdGuardHomeClient(DNSBlockerClient):
             success = True
 
             # Apply user rules
-            if 'user_rules' in config:
+            if 'user_rules' in config and config['user_rules'] is not None:
                 if not await self._set_user_rules(config['user_rules']):
                     logger.error(f"Failed to set user rules on {self.server_name}")
                     success = False
@@ -493,7 +493,7 @@ class AdGuardHomeClient(DNSBlockerClient):
                     logger.info(f"Applied {len(config['user_rules'])} user rules to {self.server_name}")
 
             # Apply DNS config
-            if 'dns' in config:
+            if 'dns' in config and config['dns']:
                 response = await self.client.post(
                     f"{self.url}/control/dns_config",
                     json=config['dns'],

@@ -763,19 +763,6 @@ export default function Settings() {
                     <option value="adguard">AdGuard Home</option>
                   </select>
                 </div>
-                <div>
-                  <label htmlFor="server_password" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Password {editingServer && <span className="text-blue-600 dark:text-blue-400 text-xs">(optional)</span>}
-                  </label>
-                  <input
-                    type="password"
-                    id="server_password"
-                    value={serverFormData.password}
-                    onChange={(e) => setServerFormData({ ...serverFormData, password: e.target.value })}
-                    placeholder={editingServer ? "Leave empty to keep existing password" : "Enter password"}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                  />
-                </div>
                 {serverFormData.server_type === 'adguard' && (
                   <div>
                     <label htmlFor="server_username" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -794,6 +781,19 @@ export default function Settings() {
                     </p>
                   </div>
                 )}
+                <div>
+                  <label htmlFor="server_password" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Password {editingServer && <span className="text-blue-600 dark:text-blue-400 text-xs">(optional)</span>}
+                  </label>
+                  <input
+                    type="password"
+                    id="server_password"
+                    value={serverFormData.password}
+                    onChange={(e) => setServerFormData({ ...serverFormData, password: e.target.value })}
+                    placeholder={editingServer ? "Leave empty to keep existing password" : "Enter password"}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  />
+                </div>
                 <div className="flex items-center">
                   <input
                     type="checkbox"
@@ -1157,41 +1157,45 @@ export default function Settings() {
             {syncPreview && (
               <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-700 rounded-md">
                 <h4 className="font-medium text-gray-900 dark:text-white mb-2">Sync Preview</h4>
-                <div className="text-sm text-gray-700 dark:text-gray-300">
-                  <p><strong>Source:</strong> {syncPreview.source?.name}</p>
-                  <p><strong>Targets:</strong> {syncPreview.targets?.length > 0 ? syncPreview.targets.map((t: any) => t.name).join(', ') : 'None'}</p>
-                  {syncPreview.teleporter && (
-                    <div className="mt-2">
-                      <p><strong>Teleporter (Gravity Database):</strong></p>
-                      <p className="ml-4 text-xs text-gray-500 dark:text-gray-400">
-                        Backup size: {Math.round((syncPreview.teleporter.backup_size_bytes || 0) / 1024)} KB
-                      </p>
-                      <ul className="list-disc list-inside ml-4 mt-1">
-                        {syncPreview.teleporter.includes?.map((item: string) => (
-                          <li key={item}>{item.replace(/_/g, ' ')}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                  {syncPreview.config && (
-                    <div className="mt-2">
-                      <p><strong>Config Settings:</strong></p>
-                      <ul className="list-disc list-inside ml-4 mt-1">
-                        {syncPreview.config.keys && Object.entries(syncPreview.config.keys as Record<string, string[]>).map(([section, keys]) => (
-                          <li key={section}>{section.toUpperCase()}: {keys.join(', ')}</li>
-                        ))}
-                      </ul>
-                      {syncPreview.config.summary && (
-                        <div className="mt-1 ml-4 text-xs text-gray-500 dark:text-gray-400">
-                          {syncPreview.config.summary.dns_hosts > 0 && <span>Local DNS: {syncPreview.config.summary.dns_hosts} | </span>}
-                          {syncPreview.config.summary.dns_cnameRecords > 0 && <span>CNAME: {syncPreview.config.summary.dns_cnameRecords} | </span>}
-                          {syncPreview.config.summary.dns_upstreams > 0 && <span>Upstreams: {syncPreview.config.summary.dns_upstreams} | </span>}
-                          {syncPreview.config.summary.dns_revServers > 0 && <span>Reverse DNS: {syncPreview.config.summary.dns_revServers}</span>}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
+                {(syncPreview.sources || [syncPreview]).map((preview: any, idx: number) => (
+                  <div key={idx} className={`text-sm text-gray-700 dark:text-gray-300 ${idx > 0 ? 'mt-4 pt-4 border-t border-gray-200 dark:border-gray-600' : ''}`}>
+                    <p><strong>Source:</strong> {preview.source?.name} ({preview.source?.server_type || 'pihole'})</p>
+                    <p><strong>Targets:</strong> {preview.targets?.length > 0 ? preview.targets.map((t: any) => t.name).join(', ') : 'None'}</p>
+                    {preview.teleporter && preview.teleporter.backup_size_bytes > 0 && (
+                      <div className="mt-2">
+                        <p><strong>Teleporter (Gravity Database):</strong></p>
+                        <p className="ml-4 text-xs text-gray-500 dark:text-gray-400">
+                          Backup size: {Math.round((preview.teleporter.backup_size_bytes || 0) / 1024)} KB
+                        </p>
+                        <ul className="list-disc list-inside ml-4 mt-1">
+                          {preview.teleporter.includes?.map((item: string) => (
+                            <li key={item}>{item.replace(/_/g, ' ')}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {preview.config && (
+                      <div className="mt-2">
+                        <p><strong>Config Settings:</strong></p>
+                        <ul className="list-disc list-inside ml-4 mt-1">
+                          {preview.config.keys && Object.entries(preview.config.keys as Record<string, string[]>).map(([section, keys]) => (
+                            <li key={section}>{section.toUpperCase()}: {keys.join(', ')}</li>
+                          ))}
+                        </ul>
+                        {preview.config.summary && (
+                          <div className="mt-1 ml-4 text-xs text-gray-500 dark:text-gray-400">
+                            {preview.config.summary.dns_hosts > 0 && <span>Local DNS: {preview.config.summary.dns_hosts} | </span>}
+                            {preview.config.summary.dns_cnameRecords > 0 && <span>CNAME: {preview.config.summary.dns_cnameRecords} | </span>}
+                            {preview.config.summary.dns_upstreams > 0 && <span>Upstreams: {preview.config.summary.dns_upstreams} | </span>}
+                            {preview.config.summary.dns_revServers > 0 && <span>Reverse DNS: {preview.config.summary.dns_revServers}</span>}
+                            {preview.config.summary.upstream_dns > 0 && <span>Upstream DNS: {preview.config.summary.upstream_dns}</span>}
+                            {preview.config.summary.user_rules > 0 && <span>User Rules: {preview.config.summary.user_rules}</span>}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
             )}
           </div>

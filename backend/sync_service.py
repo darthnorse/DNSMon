@@ -65,11 +65,11 @@ class PiholeSyncService:
 
         if server_type == 'adguard':
             # AdGuard config summary
-            if 'user_rules' in config:
+            if 'user_rules' in config and config['user_rules']:
                 summary['user_rules'] = len(config['user_rules'])
-            if 'dns' in config:
+            if 'dns' in config and config['dns']:
                 dns = config['dns']
-                if 'upstream_dns' in dns:
+                if 'upstream_dns' in dns and dns['upstream_dns']:
                     summary['upstream_dns'] = len(dns['upstream_dns'])
         else:
             # Pi-hole config summary
