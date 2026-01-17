@@ -266,7 +266,7 @@ export default function Dashboard() {
                   </div>
                   <div className="flex justify-between items-center">
                     <div className="text-xs text-gray-500 dark:text-gray-400">
-                      {query.pihole_server}
+                      {query.server}
                     </div>
                     <div className="flex space-x-2">
                       <button
@@ -380,7 +380,7 @@ export default function Dashboard() {
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                          {query.pihole_server}
+                          {query.server}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm">
                           <div className="flex space-x-2">

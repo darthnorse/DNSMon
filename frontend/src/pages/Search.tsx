@@ -16,7 +16,7 @@ export default function Search() {
     domain: '',
     client_ip: '',
     client_hostname: '',
-    pihole_server: '',
+    server: '',
     from_date: '',
     to_date: '',
     limit: 100,
@@ -37,7 +37,7 @@ export default function Search() {
       if (searchParams.domain) params.domain = searchParams.domain;
       if (searchParams.client_ip) params.client_ip = searchParams.client_ip;
       if (searchParams.client_hostname) params.client_hostname = searchParams.client_hostname;
-      if (searchParams.pihole_server) params.pihole_server = searchParams.pihole_server;
+      if (searchParams.server) params.server = searchParams.server;
       if (searchParams.from_date) params.from_date = searchParams.from_date;
       if (searchParams.to_date) params.to_date = searchParams.to_date;
 
@@ -62,7 +62,7 @@ export default function Search() {
       domain: '',
       client_ip: '',
       client_hostname: '',
-      pihole_server: '',
+      server: '',
       from_date: '',
       to_date: '',
       limit: 100,
@@ -166,15 +166,15 @@ export default function Search() {
           </div>
 
           <div>
-            <label htmlFor="pihole_server" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            <label htmlFor="server" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
               Pihole Server
             </label>
             <input
               type="text"
-              id="pihole_server"
+              id="server"
               placeholder="e.g., pihole1"
-              value={searchParams.pihole_server}
-              onChange={(e) => setSearchParams({ ...searchParams, pihole_server: e.target.value })}
+              value={searchParams.server}
+              onChange={(e) => setSearchParams({ ...searchParams, server: e.target.value })}
               className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm px-3 py-2 border"
             />
           </div>
@@ -287,7 +287,7 @@ export default function Search() {
                       {query.client_hostname || '-'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                      {query.pihole_server}
+                      {query.server}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
                       <div className="flex space-x-2">

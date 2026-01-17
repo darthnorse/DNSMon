@@ -21,7 +21,7 @@ class Query(Base):
     client_hostname = Column(String(255), nullable=True, index=True)
     query_type = Column(String(10), nullable=True)  # A, AAAA, PTR, etc.
     status = Column(String(50), nullable=True)  # blocked, allowed, etc.
-    pihole_server = Column(String(100), nullable=False, index=True)
+    server = Column(String(100), nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
     # Composite indexes for common query patterns
@@ -29,10 +29,10 @@ class Query(Base):
         Index('idx_queries_timestamp_domain', 'timestamp', 'domain'),
         Index('idx_queries_timestamp_client', 'timestamp', 'client_ip'),
         Index('idx_queries_domain_client', 'domain', 'client_ip'),
-        Index('idx_queries_pihole_timestamp', 'pihole_server', 'timestamp'),
+        Index('idx_queries_pihole_timestamp', 'server', 'timestamp'),
         Index('idx_queries_client_ip_timestamp', 'client_ip', 'timestamp'),  # For top clients stats query
         # Unique constraint to prevent duplicates
-        Index('idx_queries_unique', 'timestamp', 'domain', 'client_ip', 'pihole_server', unique=True),
+        Index('idx_queries_unique', 'timestamp', 'domain', 'client_ip', 'server', unique=True),
     )
 
     def to_dict(self):
@@ -44,7 +44,7 @@ class Query(Base):
             'client_hostname': self.client_hostname,
             'query_type': self.query_type,
             'status': self.status,
-            'pihole_server': self.pihole_server,
+            'server': self.server,
         }
 
 
@@ -182,7 +182,7 @@ class AppSetting(Base):
 
 class PiholeServerModel(Base):
     """DNS ad-blocker server configuration stored in database"""
-    __tablename__ = "pihole_servers"
+    __tablename__ = "servers"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(100), unique=True, nullable=False)
@@ -203,9 +203,9 @@ class PiholeServerModel(Base):
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     __table_args__ = (
-        Index('idx_pihole_servers_enabled', 'enabled', 'display_order'),
-        Index('idx_pihole_servers_source', 'is_source'),  # For source server queries
-        Index('idx_pihole_servers_sync', 'sync_enabled', 'enabled'),  # For target server queries
+        Index('idx_servers_enabled', 'enabled', 'display_order'),
+        Index('idx_servers_source', 'is_source'),  # For source server queries
+        Index('idx_servers_sync', 'sync_enabled', 'enabled'),  # For target server queries
     )
 
     def to_dict(self, mask_password: bool = True):
@@ -242,7 +242,7 @@ class SettingsChangelog(Base):
     setting_key = Column(String(100), nullable=True, index=True)
     old_value = Column(Text, nullable=True)
     new_value = Column(Text, nullable=True)
-    change_type = Column(String(20), nullable=False)  # 'app_setting', 'pihole_server'
+    change_type = Column(String(20), nullable=False)  # 'app_setting', 'server'
     requires_restart = Column(Boolean, default=False)
     changed_at = Column(DateTime(timezone=True), default=utcnow, index=True)
 
@@ -310,7 +310,7 @@ class BlockingOverride(Base):
     __tablename__ = "blocking_overrides"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    server_id = Column(Integer, ForeignKey('pihole_servers.id', ondelete='CASCADE'), nullable=False, index=True)
+    server_id = Column(Integer, ForeignKey('servers.id', ondelete='CASCADE'), nullable=False, index=True)
     disabled_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
     auto_enable_at = Column(DateTime(timezone=True), nullable=True)  # null = manual re-enable only
     enabled_at = Column(DateTime(timezone=True), nullable=True)  # null = still disabled

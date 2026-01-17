@@ -69,7 +69,7 @@ class Settings(BaseModel):
     retention_days: int = Field(default=60, ge=1, le=365)
     max_catchup_seconds: int = Field(default=300, ge=60, le=3600)  # 5 min default, max lookback after downtime
     cors_origins: List[str] = Field(default_factory=lambda: ["http://localhost:3000"])
-    pihole_servers: List[PiholeServer] = Field(default_factory=list)
+    servers: List[PiholeServer] = Field(default_factory=list)
 
     model_config = {'arbitrary_types_allowed': True}
 
@@ -161,7 +161,7 @@ async def load_settings_from_db(db: AsyncSession) -> Settings:
         PiholeServerModel.id
     )
     result = await db.execute(stmt)
-    pihole_servers = [
+    servers = [
         PiholeServer(
             id=server.id,
             name=server.name,
@@ -186,13 +186,13 @@ async def load_settings_from_db(db: AsyncSession) -> Settings:
             retention_days=app_settings.get('retention_days', 60),
             max_catchup_seconds=app_settings.get('max_catchup_seconds', 300),
             cors_origins=app_settings.get('cors_origins', ["http://localhost:3000"]),
-            pihole_servers=pihole_servers
+            servers=servers
         )
     except Exception as e:
         logger.error(f"Invalid settings loaded from database: {e}", exc_info=True)
         raise ValueError(f"Settings validation failed: {e}") from e
 
-    if not settings.pihole_servers:
+    if not settings.servers:
         logger.warning("No Pi-hole servers configured in database. Add servers via Settings page.")
 
     return settings

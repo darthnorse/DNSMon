@@ -41,11 +41,11 @@ async def get_all_settings(
 
     stmt = select(PiholeServerModel).order_by(PiholeServerModel.display_order, PiholeServerModel.id)
     result = await db.execute(stmt)
-    pihole_servers = [server.to_dict() for server in result.scalars()]
+    servers = [server.to_dict() for server in result.scalars()]
 
     return SettingsResponse(
         app_settings=app_settings,
-        pihole_servers=pihole_servers
+        servers=servers
     )
 
 
@@ -100,7 +100,7 @@ async def update_app_setting(
 # Pi-hole server endpoints
 
 @router.get("/pihole-servers")
-async def get_pihole_servers(
+async def get_servers(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user)
 ):
@@ -113,7 +113,7 @@ async def get_pihole_servers(
 
 
 @router.post("/pihole-servers")
-async def create_pihole_server(
+async def create_server(
     server_data: PiholeServerCreate,
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user)
@@ -167,9 +167,9 @@ async def create_pihole_server(
     db.add(server)
 
     changelog = SettingsChangelog(
-        setting_key=f"pihole_server.{server_data.name}",
+        setting_key=f"server.{server_data.name}",
         new_value=server_data.url,
-        change_type='pihole_server',
+        change_type='server',
         requires_restart=False
     )
     db.add(changelog)
@@ -183,7 +183,7 @@ async def create_pihole_server(
 
 
 @router.put("/pihole-servers/{server_id}")
-async def update_pihole_server(
+async def update_server(
     server_id: int,
     server_data: PiholeServerUpdate,
     db: AsyncSession = Depends(get_db),
@@ -227,8 +227,8 @@ async def update_pihole_server(
     server.updated_at = datetime.now(timezone.utc)
 
     changelog = SettingsChangelog(
-        setting_key=f"pihole_server.{server.name}",
-        change_type='pihole_server',
+        setting_key=f"server.{server.name}",
+        change_type='server',
         requires_restart=False
     )
     db.add(changelog)
@@ -242,7 +242,7 @@ async def update_pihole_server(
 
 
 @router.delete("/pihole-servers/{server_id}")
-async def delete_pihole_server(
+async def delete_server(
     server_id: int,
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user)
@@ -258,9 +258,9 @@ async def delete_pihole_server(
     server_name = server.name
 
     changelog = SettingsChangelog(
-        setting_key=f"pihole_server.{server_name}",
+        setting_key=f"server.{server_name}",
         old_value=server.url,
-        change_type='pihole_server',
+        change_type='server',
         requires_restart=False
     )
     db.add(changelog)

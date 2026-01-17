@@ -20,7 +20,7 @@ class QueryResponse(BaseModel):
     client_hostname: Optional[str]
     query_type: Optional[str]
     status: Optional[str]
-    pihole_server: str
+    server: str
 
     class Config:
         from_attributes = True
@@ -30,7 +30,7 @@ class QuerySearchParams(BaseModel):
     domain: Optional[str] = None
     client_ip: Optional[str] = None
     client_hostname: Optional[str] = None
-    pihole_server: Optional[str] = None
+    server: Optional[str] = None
     from_date: Optional[datetime] = None
     to_date: Optional[datetime] = None
     limit: int = 100
@@ -305,7 +305,7 @@ class PiholeServerUpdate(BaseModel):
 
 class SettingsResponse(BaseModel):
     app_settings: dict
-    pihole_servers: List[dict]
+    servers: List[dict]
 
 
 # ============================================================================

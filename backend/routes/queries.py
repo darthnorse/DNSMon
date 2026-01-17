@@ -28,7 +28,7 @@ async def search_queries(
     domain: Optional[str] = QueryParam(None, max_length=255),
     client_ip: Optional[str] = QueryParam(None, max_length=45),
     client_hostname: Optional[str] = QueryParam(None, max_length=255),
-    pihole_server: Optional[str] = QueryParam(None, max_length=100),
+    server: Optional[str] = QueryParam(None, max_length=100),
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
     limit: int = QueryParam(100, le=1000, ge=1),
@@ -67,8 +67,9 @@ async def search_queries(
         escaped_hostname = escape_sql_like(client_hostname)
         conditions.append(Query.client_hostname.ilike(f"%{escaped_hostname}%", escape='\\'))
 
-    if pihole_server:
-        conditions.append(Query.pihole_server == pihole_server)
+    if server:
+        escaped_server = escape_sql_like(server)
+        conditions.append(Query.server.ilike(f"%{escaped_server}%", escape='\\'))
 
     from_dt = None
     to_dt = None
@@ -107,7 +108,7 @@ async def search_queries(
         client_hostname=q.client_hostname,
         query_type=q.query_type,
         status=q.status,
-        pihole_server=q.pihole_server
+        server=q.server
     ) for q in queries]
 
 
@@ -116,7 +117,7 @@ async def count_queries(
     domain: Optional[str] = None,
     client_ip: Optional[str] = None,
     client_hostname: Optional[str] = None,
-    pihole_server: Optional[str] = None,
+    server: Optional[str] = None,
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
@@ -135,8 +136,9 @@ async def count_queries(
     if client_hostname:
         escaped_hostname = escape_sql_like(client_hostname)
         conditions.append(Query.client_hostname.ilike(f"%{escaped_hostname}%", escape='\\'))
-    if pihole_server:
-        conditions.append(Query.pihole_server == pihole_server)
+    if server:
+        escaped_server = escape_sql_like(server)
+        conditions.append(Query.server.ilike(f"%{escaped_server}%", escape='\\'))
 
     if from_date:
         try:

@@ -463,7 +463,7 @@ class AlertEngine:
                         Query.timestamp == query.timestamp,
                         Query.domain == query.domain,
                         Query.client_ip == query.client_ip,
-                        Query.pihole_server == query.pihole_server
+                        Query.server == query.server
                     )
                 ).limit(1)
                 result = await session.execute(stmt)

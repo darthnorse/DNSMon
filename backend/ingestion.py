@@ -23,7 +23,7 @@ class IngestedQuery:
     timestamp: datetime
     query_type: str
     status: str
-    pihole_server: str
+    server: str
 
 
 class QueryIngestionService:
@@ -49,7 +49,7 @@ class QueryIngestionService:
 
             stmt = (
                 select(func.extract('epoch', func.max(Query.timestamp)).cast(BigInteger))
-                .where(Query.pihole_server == server_name)
+                .where(Query.server == server_name)
             )
             result = await session.execute(stmt)
             epoch_timestamp = result.scalar()
@@ -190,7 +190,7 @@ class QueryIngestionService:
                         'client_hostname': client_hostname,
                         'query_type': query_type,
                         'status': status,
-                        'pihole_server': server_name,
+                        'server': server_name,
                         'created_at': datetime.now(timezone.utc),
                     })
 
@@ -204,7 +204,7 @@ class QueryIngestionService:
                         timestamp=timestamp,
                         query_type=query_type,
                         status=status,
-                        pihole_server=server_name,
+                        server=server_name,
                     ))
 
                 if not values_list:
@@ -221,7 +221,7 @@ class QueryIngestionService:
 
                     stmt = insert(Query).values(batch)
                     stmt = stmt.on_conflict_do_nothing(
-                        index_elements=['timestamp', 'domain', 'client_ip', 'pihole_server']
+                        index_elements=['timestamp', 'domain', 'client_ip', 'server']
                     )
 
                     result = await session.execute(stmt)
@@ -248,7 +248,7 @@ class QueryIngestionService:
         total_count = 0
         all_queries: List[IngestedQuery] = []
 
-        for server in self.settings.pihole_servers:
+        for server in self.settings.servers:
             count, queries = await self.ingest_from_server(server)
             total_count += count
             all_queries.extend(queries)

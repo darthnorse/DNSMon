@@ -6,7 +6,7 @@ export interface Query {
   client_hostname: string | null;
   query_type: string | null;
   status: string | null;
-  pihole_server: string;
+  server: string;
 }
 
 export interface AlertRule {
@@ -49,7 +49,7 @@ export interface QuerySearchParams {
   domain?: string;
   client_ip?: string;
   client_hostname?: string;
-  pihole_server?: string;
+  server?: string;
   from_date?: string;
   to_date?: string;
   limit?: number;
@@ -98,7 +98,7 @@ export interface AppSettingDetail {
 
 export interface SettingsResponse {
   app_settings: Record<string, AppSettingDetail>;
-  pihole_servers: PiholeServer[];
+  servers: PiholeServer[];
 }
 
 export interface DomainEntry {

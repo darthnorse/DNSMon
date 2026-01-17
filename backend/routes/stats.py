@@ -84,9 +84,9 @@ async def get_stats(
 
     # Queries by server (last 7 days)
     by_server_stmt = (
-        select(Query.pihole_server, func.count(Query.id).label('count'))
+        select(Query.server, func.count(Query.id).label('count'))
         .where(Query.timestamp >= last_7d)
-        .group_by(Query.pihole_server)
+        .group_by(Query.server)
         .order_by(func.count(Query.id).desc())
     )
     by_server_result = await db.execute(by_server_stmt)
@@ -139,7 +139,7 @@ async def get_statistics(
 
     def add_server_filter(stmt):
         if server_list:
-            return stmt.where(Query.pihole_server.in_(server_list))
+            return stmt.where(Query.server.in_(server_list))
         return stmt
 
     period_filter = Query.timestamp >= period_start
@@ -262,13 +262,13 @@ async def get_statistics(
     # Per Server Stats
     server_stats_stmt = (
         select(
-            Query.pihole_server,
+            Query.server,
             func.count(Query.id).label('queries'),
             func.count(Query.id).filter(Query.status.in_(BLOCKED_STATUSES)).label('blocked'),
             func.count(Query.id).filter(Query.status.in_(CACHE_STATUSES)).label('cached')
         )
         .where(period_filter)
-        .group_by(Query.pihole_server)
+        .group_by(Query.server)
         .order_by(func.count(Query.id).desc())
     )
     server_stats_stmt = add_server_filter(server_stats_stmt)
