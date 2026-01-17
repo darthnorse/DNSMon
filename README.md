@@ -32,7 +32,7 @@ A comprehensive web-based dashboard for monitoring and managing multiple Pi-hole
 
 ### Flexible Alert System
 - Pattern-based rules with wildcard support:
-  - Domain patterns (e.g., `*porn*`, `*.gambling.*`)
+  - Domain patterns (e.g., `*ads*`, `*.gambling.*`)
   - Client IP patterns (e.g., `192.168.1.*`)
   - Client hostname patterns (e.g., `*kids-tablet*`)
 - Exclusion patterns to reduce false positives
@@ -203,7 +203,7 @@ All configuration is done through the web UI - no config files needed!
 1. Go to **Alert Rules**
 2. Click **Create Rule**
 3. Configure patterns:
-   - **Domain Pattern**: `*adult*,*porn*,*.xxx` (comma-separated)
+   - **Domain Pattern**: `*ads*,*tracker*,*malware*` (comma-separated)
    - **Client IP Pattern**: `192.168.1.100` or `192.168.1.*`
    - **Exclude Domains**: `safe-site.com,another-safe.com`
 4. Set cooldown period (minutes between alerts)
