@@ -13,11 +13,22 @@ export default function Dashboard() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
+  // Initial load only
   useEffect(() => {
     loadData();
-    const interval = setInterval(loadData, 60000); // Refresh every minute
-    return () => clearInterval(interval);
   }, []);
+
+  // Auto-refresh every minute, respecting current search state
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (searchTerm) {
+        handleSearch();
+      } else {
+        loadData();
+      }
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [searchTerm]); // Re-create interval when searchTerm changes
 
   // Debounced search as you type
   useEffect(() => {
