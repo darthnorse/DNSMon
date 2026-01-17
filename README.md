@@ -248,8 +248,7 @@ docker pull ghcr.io/darthnorse/dnsmon:latest
 
 Supported architectures:
 - `linux/amd64` (x86 64-bit)
-- `linux/arm64` (ARM 64-bit, e.g., Raspberry Pi 4)
-- `linux/arm/v7` (ARM 32-bit, e.g., Raspberry Pi 3)
+- `linux/arm64` (ARM 64-bit, e.g., Raspberry Pi 4+)
 
 ## API Endpoints
 
