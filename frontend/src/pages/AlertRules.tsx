@@ -205,29 +205,29 @@ export default function AlertRules() {
               />
             </div>
 
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <div>
-                <label htmlFor="domain_pattern" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Domain Pattern
-                </label>
-                <input
-                  type="text"
-                  id="domain_pattern"
-                  placeholder="google, facebook, *.adult.*"
-                  value={formData.domain_pattern}
-                  onChange={(e) => setFormData({ ...formData, domain_pattern: e.target.value })}
-                  className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm px-3 py-2 border"
-                />
-                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  Comma-separated, auto-wildcard (*google* for "google")
-                  {formData.domain_pattern && (
-                    <span className={formData.domain_pattern.length > 5000 ? 'text-red-600 dark:text-red-400' : ''}>
-                      {' '}({formData.domain_pattern.length}/5000)
-                    </span>
-                  )}
-                </p>
-              </div>
+            <div>
+              <label htmlFor="domain_pattern" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Alert Keywords
+              </label>
+              <input
+                type="text"
+                id="domain_pattern"
+                placeholder="google, facebook, *.adult.*"
+                value={formData.domain_pattern}
+                onChange={(e) => setFormData({ ...formData, domain_pattern: e.target.value })}
+                className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm px-3 py-2 border"
+              />
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Comma-separated, auto-wildcard (*google* for "google")
+                {formData.domain_pattern && (
+                  <span className={formData.domain_pattern.length > 5000 ? 'text-red-600 dark:text-red-400' : ''}>
+                    {' '}({formData.domain_pattern.length}/5000)
+                  </span>
+                )}
+              </p>
+            </div>
 
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label htmlFor="client_ip_pattern" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Client IP Pattern
@@ -259,7 +259,7 @@ export default function AlertRules() {
 
             <div>
               <label htmlFor="exclude_domains" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Exclude Domains
+                Exclude Keywords
               </label>
               <input
                 type="text"
