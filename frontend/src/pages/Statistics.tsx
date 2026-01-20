@@ -282,10 +282,13 @@ export default function StatisticsPage() {
                 <Tooltip
                   formatter={(value: number) => value.toLocaleString()}
                   contentStyle={{
-                    backgroundColor: 'var(--tooltip-bg, #fff)',
-                    border: '1px solid var(--tooltip-border, #e5e7eb)',
+                    backgroundColor: '#1F2937',
+                    border: '1px solid #374151',
                     borderRadius: '0.375rem',
+                    color: '#fff',
                   }}
+                  labelStyle={{ color: '#9CA3AF' }}
+                  itemStyle={{ color: '#fff' }}
                 />
               </PieChart>
             </ResponsiveContainer>
@@ -327,6 +330,8 @@ export default function StatisticsPage() {
                     borderRadius: '0.375rem',
                     color: '#fff',
                   }}
+                  labelStyle={{ color: '#9CA3AF' }}
+                  itemStyle={{ color: '#fff' }}
                 />
                 <Legend />
                 <Line
@@ -433,6 +438,13 @@ export default function StatisticsPage() {
                     borderRadius: '0.375rem',
                     color: '#fff',
                   }}
+                  wrapperStyle={{
+                    backgroundColor: '#1F2937',
+                    borderRadius: '0.375rem',
+                  }}
+                  labelStyle={{ color: '#9CA3AF' }}
+                  itemStyle={{ color: '#fff' }}
+                  cursor={{ fill: 'rgba(55, 65, 81, 0.3)' }}
                 />
                 <Legend />
                 <Bar dataKey="queries" name="Total" fill="#3B82F6" />
