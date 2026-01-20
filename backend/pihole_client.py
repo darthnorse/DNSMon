@@ -236,7 +236,7 @@ class PiholeClient(DNSBlockerClient):
         """Get all whitelist entries"""
         try:
             response = await self.client.get(
-                f"{self.url}/api/domains/whitelist",
+                f"{self.url}/api/domains/allow/exact",
                 headers=self.get_auth_headers()
             )
             if response.status_code == 200:
@@ -252,7 +252,7 @@ class PiholeClient(DNSBlockerClient):
         """Get all blacklist entries"""
         try:
             response = await self.client.get(
-                f"{self.url}/api/domains/blacklist",
+                f"{self.url}/api/domains/deny/exact",
                 headers=self.get_auth_headers()
             )
             if response.status_code == 200:
@@ -268,11 +268,12 @@ class PiholeClient(DNSBlockerClient):
         """Get all regex whitelist entries"""
         try:
             response = await self.client.get(
-                f"{self.url}/api/domains/regex/whitelist",
+                f"{self.url}/api/domains/allow/regex",
                 headers=self.get_auth_headers()
             )
             if response.status_code == 200:
                 data = response.json()
+                logger.info(f"Regex whitelist response from {self.server_name}: {data}")
                 return data.get('domains', [])
             logger.warning(f"Failed to get regex whitelist from {self.server_name}: {response.status_code}")
             return []
@@ -284,7 +285,7 @@ class PiholeClient(DNSBlockerClient):
         """Get all regex blacklist entries"""
         try:
             response = await self.client.get(
-                f"{self.url}/api/domains/regex/blacklist",
+                f"{self.url}/api/domains/deny/regex",
                 headers=self.get_auth_headers()
             )
             if response.status_code == 200:
@@ -300,14 +301,14 @@ class PiholeClient(DNSBlockerClient):
         """Add a domain to whitelist"""
         try:
             response = await self.client.post(
-                f"{self.url}/api/domains/whitelist",
+                f"{self.url}/api/domains/allow/exact",
                 json={"domain": domain},
                 headers=self.get_auth_headers()
             )
             if response.status_code in [200, 201]:
                 logger.info(f"Added {domain} to whitelist on {self.server_name}")
                 return True
-            logger.warning(f"Failed to add {domain} to whitelist on {self.server_name}: {response.status_code}")
+            logger.warning(f"Failed to add {domain} to whitelist on {self.server_name}: {response.status_code} - {response.text}")
             return False
         except Exception as e:
             logger.error(f"Error adding {domain} to whitelist on {self.server_name}: {e}")
@@ -317,14 +318,14 @@ class PiholeClient(DNSBlockerClient):
         """Add a domain to blacklist"""
         try:
             response = await self.client.post(
-                f"{self.url}/api/domains/blacklist",
+                f"{self.url}/api/domains/deny/exact",
                 json={"domain": domain},
                 headers=self.get_auth_headers()
             )
             if response.status_code in [200, 201]:
                 logger.info(f"Added {domain} to blacklist on {self.server_name}")
                 return True
-            logger.warning(f"Failed to add {domain} to blacklist on {self.server_name}: {response.status_code}")
+            logger.warning(f"Failed to add {domain} to blacklist on {self.server_name}: {response.status_code} - {response.text}")
             return False
         except Exception as e:
             logger.error(f"Error adding {domain} to blacklist on {self.server_name}: {e}")
@@ -334,7 +335,7 @@ class PiholeClient(DNSBlockerClient):
         """Remove a domain from whitelist"""
         try:
             response = await self.client.delete(
-                f"{self.url}/api/domains/whitelist/{domain}",
+                f"{self.url}/api/domains/allow/exact/{domain}",
                 headers=self.get_auth_headers()
             )
             if response.status_code in [200, 204]:
@@ -350,7 +351,7 @@ class PiholeClient(DNSBlockerClient):
         """Remove a domain from blacklist"""
         try:
             response = await self.client.delete(
-                f"{self.url}/api/domains/blacklist/{domain}",
+                f"{self.url}/api/domains/deny/exact/{domain}",
                 headers=self.get_auth_headers()
             )
             if response.status_code in [200, 204]:
@@ -362,36 +363,74 @@ class PiholeClient(DNSBlockerClient):
             logger.error(f"Error removing {domain} from blacklist on {self.server_name}: {e}")
             return False
 
-    async def remove_from_regex_whitelist(self, pattern_id: int) -> bool:
-        """Remove a pattern from regex whitelist by ID"""
+    async def add_to_regex_whitelist(self, pattern: str) -> bool:
+        """Add a regex pattern to whitelist"""
         try:
-            response = await self.client.delete(
-                f"{self.url}/api/domains/regex/whitelist/{pattern_id}",
+            response = await self.client.post(
+                f"{self.url}/api/domains/allow/regex",
+                json={"domain": pattern},
                 headers=self.get_auth_headers()
             )
-            if response.status_code in [200, 204]:
-                logger.info(f"Removed regex whitelist {pattern_id} from {self.server_name}")
+            if response.status_code in [200, 201]:
+                logger.info(f"Added regex '{pattern}' to whitelist on {self.server_name}")
                 return True
-            logger.warning(f"Failed to remove regex whitelist {pattern_id} from {self.server_name}: {response.status_code}")
+            logger.warning(f"Failed to add regex '{pattern}' to whitelist on {self.server_name}: {response.status_code} - {response.text}")
             return False
         except Exception as e:
-            logger.error(f"Error removing regex whitelist {pattern_id} from {self.server_name}: {e}")
+            logger.error(f"Error adding regex '{pattern}' to whitelist on {self.server_name}: {e}")
             return False
 
-    async def remove_from_regex_blacklist(self, pattern_id: int) -> bool:
-        """Remove a pattern from regex blacklist by ID"""
+    async def add_to_regex_blacklist(self, pattern: str) -> bool:
+        """Add a regex pattern to blacklist"""
         try:
+            response = await self.client.post(
+                f"{self.url}/api/domains/deny/regex",
+                json={"domain": pattern},
+                headers=self.get_auth_headers()
+            )
+            if response.status_code in [200, 201]:
+                logger.info(f"Added regex '{pattern}' to blacklist on {self.server_name}")
+                return True
+            logger.warning(f"Failed to add regex '{pattern}' to blacklist on {self.server_name}: {response.status_code} - {response.text}")
+            return False
+        except Exception as e:
+            logger.error(f"Error adding regex '{pattern}' to blacklist on {self.server_name}: {e}")
+            return False
+
+    async def remove_from_regex_whitelist(self, pattern: str) -> bool:
+        """Remove a pattern from regex whitelist"""
+        try:
+            from urllib.parse import quote
+            encoded_pattern = quote(pattern, safe='')
             response = await self.client.delete(
-                f"{self.url}/api/domains/regex/blacklist/{pattern_id}",
+                f"{self.url}/api/domains/allow/regex/{encoded_pattern}",
                 headers=self.get_auth_headers()
             )
             if response.status_code in [200, 204]:
-                logger.info(f"Removed regex blacklist {pattern_id} from {self.server_name}")
+                logger.info(f"Removed regex '{pattern}' from whitelist on {self.server_name}")
                 return True
-            logger.warning(f"Failed to remove regex blacklist {pattern_id} from {self.server_name}: {response.status_code}")
+            logger.warning(f"Failed to remove regex '{pattern}' from whitelist on {self.server_name}: {response.status_code} - {response.text}")
             return False
         except Exception as e:
-            logger.error(f"Error removing regex blacklist {pattern_id} from {self.server_name}: {e}")
+            logger.error(f"Error removing regex '{pattern}' from whitelist on {self.server_name}: {e}")
+            return False
+
+    async def remove_from_regex_blacklist(self, pattern: str) -> bool:
+        """Remove a pattern from regex blacklist"""
+        try:
+            from urllib.parse import quote
+            encoded_pattern = quote(pattern, safe='')
+            response = await self.client.delete(
+                f"{self.url}/api/domains/deny/regex/{encoded_pattern}",
+                headers=self.get_auth_headers()
+            )
+            if response.status_code in [200, 204]:
+                logger.info(f"Removed regex '{pattern}' from blacklist on {self.server_name}")
+                return True
+            logger.warning(f"Failed to remove regex '{pattern}' from blacklist on {self.server_name}: {response.status_code} - {response.text}")
+            return False
+        except Exception as e:
+            logger.error(f"Error removing regex '{pattern}' from blacklist on {self.server_name}: {e}")
             return False
 
     async def logout(self):

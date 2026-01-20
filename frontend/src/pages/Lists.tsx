@@ -72,9 +72,10 @@ export default function Lists() {
         await domainApi.whitelist(newDomain.trim());
       } else if (activeTab === 'blacklist') {
         await domainApi.blacklist(newDomain.trim());
-      } else {
-        setError('Adding regex patterns is not yet supported');
-        return;
+      } else if (activeTab === 'regex-whitelist') {
+        await domainApi.addToRegexWhitelist(newDomain.trim());
+      } else if (activeTab === 'regex-blacklist') {
+        await domainApi.addToRegexBlacklist(newDomain.trim());
       }
 
       setSuccessMessage(`Added "${newDomain.trim()}" to ${activeTab}`);
@@ -101,10 +102,10 @@ export default function Lists() {
           await domainApi.removeFromBlacklist(domain.domain);
           break;
         case 'regex-whitelist':
-          await domainApi.removeFromRegexWhitelist(domain.id);
+          await domainApi.removeFromRegexWhitelist(domain.domain);
           break;
         case 'regex-blacklist':
-          await domainApi.removeFromRegexBlacklist(domain.id);
+          await domainApi.removeFromRegexBlacklist(domain.domain);
           break;
       }
 
@@ -179,24 +180,22 @@ export default function Lists() {
                 className="w-full border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
-            {(activeTab === 'whitelist' || activeTab === 'blacklist') && (
-              <form onSubmit={handleAddDomain} className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="Add domain..."
-                  value={newDomain}
-                  onChange={(e) => setNewDomain(e.target.value)}
-                  className="border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                <button
-                  type="submit"
-                  disabled={addingDomain || !newDomain.trim()}
-                  className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  {addingDomain ? 'Adding...' : 'Add'}
-                </button>
-              </form>
-            )}
+            <form onSubmit={handleAddDomain} className="flex gap-2">
+              <input
+                type="text"
+                placeholder={activeTab.includes('regex') ? 'Add regex pattern...' : 'Add domain...'}
+                value={newDomain}
+                onChange={(e) => setNewDomain(e.target.value)}
+                className="border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <button
+                type="submit"
+                disabled={addingDomain || !newDomain.trim()}
+                className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {addingDomain ? 'Adding...' : 'Add'}
+              </button>
+            </form>
           </div>
 
           {/* Domain List */}

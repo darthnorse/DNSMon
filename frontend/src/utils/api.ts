@@ -199,6 +199,14 @@ export const domainApi = {
     return response.data.domains;
   },
 
+  addToRegexWhitelist: async (pattern: string): Promise<void> => {
+    await api.post('/domains/regex-whitelist', { domain: pattern });
+  },
+
+  addToRegexBlacklist: async (pattern: string): Promise<void> => {
+    await api.post('/domains/regex-blacklist', { domain: pattern });
+  },
+
   removeFromWhitelist: async (domain: string): Promise<void> => {
     await api.delete(`/domains/whitelist/${encodeURIComponent(domain)}`);
   },
@@ -207,12 +215,12 @@ export const domainApi = {
     await api.delete(`/domains/blacklist/${encodeURIComponent(domain)}`);
   },
 
-  removeFromRegexWhitelist: async (id: number): Promise<void> => {
-    await api.delete(`/domains/regex-whitelist/${id}`);
+  removeFromRegexWhitelist: async (pattern: string): Promise<void> => {
+    await api.delete(`/domains/regex-whitelist/${encodeURIComponent(pattern)}`);
   },
 
-  removeFromRegexBlacklist: async (id: number): Promise<void> => {
-    await api.delete(`/domains/regex-blacklist/${id}`);
+  removeFromRegexBlacklist: async (pattern: string): Promise<void> => {
+    await api.delete(`/domains/regex-blacklist/${encodeURIComponent(pattern)}`);
   },
 };
 

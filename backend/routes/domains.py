@@ -49,23 +49,13 @@ async def get_all_enabled_servers():
 
 @router.get("/whitelist")
 async def get_whitelist(_: User = Depends(get_current_user)):
-    """Get combined whitelist entries from all enabled DNS servers"""
-    servers = await get_all_enabled_servers()
-    all_domains = {}
-
-    for server in servers:
-        try:
-            async with create_client_from_server(server) as client:
-                if await client.authenticate():
-                    domains = await client.get_whitelist()
-                    for d in domains:
-                        domain_name = d.get('domain', '')
-                        if domain_name and domain_name not in all_domains:
-                            all_domains[domain_name] = d
-        except Exception as e:
-            logger.warning(f"Failed to get whitelist from {server.name}: {e}")
-
-    return {"domains": list(all_domains.values())}
+    """Get whitelist entries from source DNS server"""
+    source = await get_source_server()
+    async with create_client_from_server(source) as client:
+        if not await client.authenticate():
+            raise HTTPException(status_code=500, detail="Failed to authenticate with source server")
+        domains = await client.get_whitelist()
+        return {"domains": domains}
 
 
 @router.post("/whitelist")
@@ -124,23 +114,13 @@ async def remove_from_whitelist(
 
 @router.get("/blacklist")
 async def get_blacklist(_: User = Depends(get_current_user)):
-    """Get combined blacklist entries from all enabled DNS servers"""
-    servers = await get_all_enabled_servers()
-    all_domains = {}
-
-    for server in servers:
-        try:
-            async with create_client_from_server(server) as client:
-                if await client.authenticate():
-                    domains = await client.get_blacklist()
-                    for d in domains:
-                        domain_name = d.get('domain', '')
-                        if domain_name and domain_name not in all_domains:
-                            all_domains[domain_name] = d
-        except Exception as e:
-            logger.warning(f"Failed to get blacklist from {server.name}: {e}")
-
-    return {"domains": list(all_domains.values())}
+    """Get blacklist entries from source DNS server"""
+    source = await get_source_server()
+    async with create_client_from_server(source) as client:
+        if not await client.authenticate():
+            raise HTTPException(status_code=500, detail="Failed to authenticate with source server")
+        domains = await client.get_blacklist()
+        return {"domains": domains}
 
 
 @router.post("/blacklist")
@@ -210,22 +190,62 @@ async def get_regex_whitelist(_: User = Depends(get_current_user)):
         return {"domains": domains}
 
 
-@router.delete("/regex-whitelist/{pattern_id}")
-async def remove_from_regex_whitelist(
-    pattern_id: int,
+@router.post("/regex-whitelist")
+async def add_to_regex_whitelist(
+    request: DomainRequest,
     _: User = Depends(require_admin)
 ):
-    """Remove a pattern from regex whitelist on source DNS server (Pi-hole only)"""
-    source = await get_source_server()
-    async with create_client_from_server(source) as client:
-        if not client.supports_regex_lists:
-            raise HTTPException(status_code=400, detail="Regex lists not supported by this server type")
-        if not await client.authenticate():
-            raise HTTPException(status_code=500, detail="Failed to authenticate with source server")
-        success = await client.remove_from_regex_whitelist(pattern_id)
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to remove pattern from regex whitelist")
-        return {"message": f"Removed pattern {pattern_id} from regex whitelist"}
+    """Add a regex pattern to whitelist on all servers"""
+    servers = await get_all_enabled_servers()
+    if not servers:
+        raise HTTPException(status_code=400, detail="No enabled servers configured")
+
+    results = []
+    for server in servers:
+        async with create_client_from_server(server) as client:
+            if not client.supports_regex_lists:
+                results.append({"server": server.name, "success": False, "error": "Regex not supported"})
+                continue
+            if not await client.authenticate():
+                results.append({"server": server.name, "success": False, "error": "Auth failed"})
+                continue
+            success = await client.add_to_regex_whitelist(request.domain)
+            results.append({"server": server.name, "success": success})
+
+    successful = sum(1 for r in results if r.get("success"))
+    if successful == 0:
+        raise HTTPException(status_code=500, detail="Failed to add regex to whitelist on any server")
+
+    return {"message": f"Added regex to whitelist on {successful}/{len(results)} servers", "results": results}
+
+
+@router.delete("/regex-whitelist/{pattern:path}")
+async def remove_from_regex_whitelist(
+    pattern: str,
+    _: User = Depends(require_admin)
+):
+    """Remove a pattern from regex whitelist on all servers"""
+    servers = await get_all_enabled_servers()
+    if not servers:
+        raise HTTPException(status_code=400, detail="No enabled servers configured")
+
+    results = []
+    for server in servers:
+        async with create_client_from_server(server) as client:
+            if not client.supports_regex_lists:
+                results.append({"server": server.name, "success": False, "error": "Regex not supported"})
+                continue
+            if not await client.authenticate():
+                results.append({"server": server.name, "success": False, "error": "Auth failed"})
+                continue
+            success = await client.remove_from_regex_whitelist(pattern)
+            results.append({"server": server.name, "success": success})
+
+    successful = sum(1 for r in results if r.get("success"))
+    if successful == 0:
+        raise HTTPException(status_code=500, detail="Failed to remove regex from whitelist on any server")
+
+    return {"message": f"Removed regex from whitelist on {successful}/{len(results)} servers", "results": results}
 
 
 @router.get("/regex-blacklist")
@@ -241,19 +261,59 @@ async def get_regex_blacklist(_: User = Depends(get_current_user)):
         return {"domains": domains}
 
 
-@router.delete("/regex-blacklist/{pattern_id}")
-async def remove_from_regex_blacklist(
-    pattern_id: int,
+@router.post("/regex-blacklist")
+async def add_to_regex_blacklist(
+    request: DomainRequest,
     _: User = Depends(require_admin)
 ):
-    """Remove a pattern from regex blacklist on source DNS server (Pi-hole only)"""
-    source = await get_source_server()
-    async with create_client_from_server(source) as client:
-        if not client.supports_regex_lists:
-            raise HTTPException(status_code=400, detail="Regex lists not supported by this server type")
-        if not await client.authenticate():
-            raise HTTPException(status_code=500, detail="Failed to authenticate with source server")
-        success = await client.remove_from_regex_blacklist(pattern_id)
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to remove pattern from regex blacklist")
-        return {"message": f"Removed pattern {pattern_id} from regex blacklist"}
+    """Add a regex pattern to blacklist on all servers"""
+    servers = await get_all_enabled_servers()
+    if not servers:
+        raise HTTPException(status_code=400, detail="No enabled servers configured")
+
+    results = []
+    for server in servers:
+        async with create_client_from_server(server) as client:
+            if not client.supports_regex_lists:
+                results.append({"server": server.name, "success": False, "error": "Regex not supported"})
+                continue
+            if not await client.authenticate():
+                results.append({"server": server.name, "success": False, "error": "Auth failed"})
+                continue
+            success = await client.add_to_regex_blacklist(request.domain)
+            results.append({"server": server.name, "success": success})
+
+    successful = sum(1 for r in results if r.get("success"))
+    if successful == 0:
+        raise HTTPException(status_code=500, detail="Failed to add regex to blacklist on any server")
+
+    return {"message": f"Added regex to blacklist on {successful}/{len(results)} servers", "results": results}
+
+
+@router.delete("/regex-blacklist/{pattern:path}")
+async def remove_from_regex_blacklist(
+    pattern: str,
+    _: User = Depends(require_admin)
+):
+    """Remove a pattern from regex blacklist on all servers"""
+    servers = await get_all_enabled_servers()
+    if not servers:
+        raise HTTPException(status_code=400, detail="No enabled servers configured")
+
+    results = []
+    for server in servers:
+        async with create_client_from_server(server) as client:
+            if not client.supports_regex_lists:
+                results.append({"server": server.name, "success": False, "error": "Regex not supported"})
+                continue
+            if not await client.authenticate():
+                results.append({"server": server.name, "success": False, "error": "Auth failed"})
+                continue
+            success = await client.remove_from_regex_blacklist(pattern)
+            results.append({"server": server.name, "success": success})
+
+    successful = sum(1 for r in results if r.get("success"))
+    if successful == 0:
+        raise HTTPException(status_code=500, detail="Failed to remove regex from blacklist on any server")
+
+    return {"message": f"Removed regex from blacklist on {successful}/{len(results)} servers", "results": results}

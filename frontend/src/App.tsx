@@ -153,7 +153,7 @@ function Navigation({ darkMode, toggleDarkMode }: { darkMode: boolean; toggleDar
 
   return (
     <nav className="bg-gray-800 dark:bg-gray-900">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           <div className="flex items-center min-w-0 flex-1">
             <div className="flex-shrink-0">
@@ -381,7 +381,7 @@ function AppLayout() {
   return (
     <div className="min-h-screen bg-gray-100 dark:bg-gray-900">
       <Navigation darkMode={darkMode} toggleDarkMode={toggleDarkMode} />
-      <main className="max-w-7xl mx-auto py-4 px-4 sm:py-6 sm:px-6 lg:px-8">
+      <main className="max-w-[1400px] mx-auto py-4 px-4 sm:py-6 sm:px-6 lg:px-8">
         <Routes>
           <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
           <Route path="/search" element={<ProtectedRoute><Search /></ProtectedRoute>} />
