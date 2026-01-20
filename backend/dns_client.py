@@ -193,7 +193,23 @@ class DNSBlockerClient(ABC):
         """
         return []
 
-    async def remove_from_regex_whitelist(self, pattern_id: int) -> bool:
+    async def add_to_regex_whitelist(self, pattern: str) -> bool:
+        """
+        Add a pattern to the regex whitelist.
+
+        Default: Returns False (not supported).
+        """
+        return False
+
+    async def add_to_regex_blacklist(self, pattern: str) -> bool:
+        """
+        Add a pattern to the regex blacklist.
+
+        Default: Returns False (not supported).
+        """
+        return False
+
+    async def remove_from_regex_whitelist(self, pattern: str) -> bool:
         """
         Remove a pattern from the regex whitelist.
 
@@ -201,7 +217,7 @@ class DNSBlockerClient(ABC):
         """
         return False
 
-    async def remove_from_regex_blacklist(self, pattern_id: int) -> bool:
+    async def remove_from_regex_blacklist(self, pattern: str) -> bool:
         """
         Remove a pattern from the regex blacklist.
 

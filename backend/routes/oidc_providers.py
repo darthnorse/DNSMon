@@ -156,3 +156,35 @@ async def test_oidc_provider(
             "success": False,
             "message": f"Failed to connect: {str(e)}"
         }
+
+
+@router.post("/{provider_id}/test")
+async def test_existing_oidc_provider(
+    provider_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_admin)
+):
+    """Test an existing OIDC provider using saved credentials"""
+    stmt = select(OIDCProvider).where(OIDCProvider.id == provider_id)
+    result = await db.execute(stmt)
+    provider = result.scalar_one_or_none()
+
+    if not provider:
+        raise HTTPException(status_code=404, detail="OIDC provider not found")
+
+    try:
+        config = await discover_oidc_config(provider.issuer_url)
+        return {
+            "success": True,
+            "message": "Successfully connected to OIDC provider",
+            "endpoints": {
+                "authorization": config.get('authorization_endpoint'),
+                "token": config.get('token_endpoint'),
+                "userinfo": config.get('userinfo_endpoint'),
+            }
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"Failed to connect: {str(e)}"
+        }

@@ -566,10 +566,13 @@ export default function Settings() {
   };
 
   const handleTestOidcProvider = async () => {
-    const errors = validateOidcProvider(oidcFormData, !!editingOidc);
-    if (errors.length > 0) {
-      setError(errors.join('. '));
-      return;
+    // Skip validation when testing existing provider (uses saved data)
+    if (!editingOidc) {
+      const errors = validateOidcProvider(oidcFormData, false);
+      if (errors.length > 0) {
+        setError(errors.join('. '));
+        return;
+      }
     }
 
     try {
@@ -577,19 +580,30 @@ export default function Settings() {
       setError(null);
       setOidcTestResult(null);
 
-      const result = await oidcProviderApi.test(oidcFormData);
+      // Use testById for existing providers, test for new ones
+      const result = editingOidc
+        ? await oidcProviderApi.testById(editingOidc.id)
+        : await oidcProviderApi.test(oidcFormData);
       setOidcTestResult(result);
 
       if (!result.success) {
         setError(result.message);
       }
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
+      const error = err as { response?: { data?: { detail?: string | Array<{ msg: string; loc: string[] }> } } };
+      let errorMessage = 'Test connection failed';
+      const detail = error.response?.data?.detail;
+      if (typeof detail === 'string') {
+        errorMessage = detail;
+      } else if (Array.isArray(detail) && detail.length > 0) {
+        // Pydantic validation errors
+        errorMessage = detail.map(e => `${e.loc?.join('.')}: ${e.msg}`).join(', ');
+      }
       setOidcTestResult({
         success: false,
-        message: error.response?.data?.detail || 'Test connection failed'
+        message: errorMessage
       });
-      setError(error.response?.data?.detail || 'Test connection failed');
+      setError(errorMessage);
     } finally {
       setTestingOidc(false);
     }
@@ -1358,6 +1372,50 @@ export default function Settings() {
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                   />
                 </div>
+
+                {/* Callback URL - shown when provider name is entered */}
+                {oidcFormData.name && (
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Callback URL
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        readOnly
+                        value={`${window.location.origin}/api/auth/oidc/${oidcFormData.name}/callback`}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-100 dark:bg-gray-600 text-gray-700 dark:text-gray-300 text-sm font-mono"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const url = `${window.location.origin}/api/auth/oidc/${oidcFormData.name}/callback`;
+                          if (navigator.clipboard && navigator.clipboard.writeText) {
+                            navigator.clipboard.writeText(url);
+                          } else {
+                            // Fallback for HTTP (clipboard API requires HTTPS)
+                            const textArea = document.createElement('textarea');
+                            textArea.value = url;
+                            textArea.style.position = 'fixed';
+                            textArea.style.left = '-999999px';
+                            document.body.appendChild(textArea);
+                            textArea.select();
+                            document.execCommand('copy');
+                            document.body.removeChild(textArea);
+                          }
+                          setSuccessMessage('Callback URL copied to clipboard');
+                        }}
+                        className="px-3 py-2 text-sm bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 rounded-md text-gray-700 dark:text-gray-300"
+                        title="Copy to clipboard"
+                      >
+                        Copy
+                      </button>
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      Configure this URL as the redirect/callback URI in your OIDC provider
+                    </p>
+                  </div>
+                )}
 
                 <div className="md:col-span-2">
                   <label htmlFor="oidc_issuer_url" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">

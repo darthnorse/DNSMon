@@ -529,6 +529,27 @@ async def find_or_create_oidc_user(
         await db.refresh(user)
         return user
 
+    # Try to find by email first (for linking existing local accounts)
+    email = claims.get('email')
+    if email:
+        stmt = select(User).where(User.email == email.lower())
+        result = await db.execute(stmt)
+        existing_user = result.scalar_one_or_none()
+        if existing_user:
+            # Link OIDC to existing account
+            existing_user.oidc_provider = provider.name
+            existing_user.oidc_subject = sub
+            if claims.get('display_name') and not existing_user.display_name:
+                existing_user.display_name = claims['display_name']
+            # Update admin status if group-based admin is configured
+            if provider.admin_group:
+                existing_user.is_admin = claims.get('is_admin', False)
+            existing_user.last_login_at = utcnow()
+            await db.commit()
+            await db.refresh(existing_user)
+            logger.info(f"Linked OIDC {provider.name} to existing user {existing_user.username} by email")
+            return existing_user
+
     # Try to find by username (for linking existing local accounts)
     username = claims.get('username')
     if username:

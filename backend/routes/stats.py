@@ -46,7 +46,7 @@ async def get_stats(
     blocks_24h_stmt = select(func.count(Query.id)).where(
         and_(
             Query.timestamp >= last_24h,
-            Query.status.in_(['GRAVITY', 'GRAVITY_CNAME', 'BLACKLIST', 'BLACKLIST_CNAME', 'REGEX_BLACKLIST'])
+            Query.status.in_(BLOCKED_STATUSES)
         )
     )
     blocks_24h_result = await db.execute(blocks_24h_stmt)

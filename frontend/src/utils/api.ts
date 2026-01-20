@@ -353,9 +353,15 @@ export const oidcProviderApi = {
     await api.delete(`/oidc-providers/${id}`);
   },
 
-  // Test OIDC provider configuration
+  // Test OIDC provider configuration (for new providers)
   test: async (data: OIDCProviderCreate): Promise<{ success: boolean; message: string }> => {
     const response = await api.post<{ success: boolean; message: string }>('/oidc-providers/test', data);
+    return response.data;
+  },
+
+  // Test existing OIDC provider by ID (uses saved credentials)
+  testById: async (id: number): Promise<{ success: boolean; message: string }> => {
+    const response = await api.post<{ success: boolean; message: string }>(`/oidc-providers/${id}/test`);
     return response.data;
   },
 };

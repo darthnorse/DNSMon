@@ -202,15 +202,18 @@ async def add_to_regex_whitelist(
 
     results = []
     for server in servers:
-        async with create_client_from_server(server) as client:
-            if not client.supports_regex_lists:
-                results.append({"server": server.name, "success": False, "error": "Regex not supported"})
-                continue
-            if not await client.authenticate():
-                results.append({"server": server.name, "success": False, "error": "Auth failed"})
-                continue
-            success = await client.add_to_regex_whitelist(request.domain)
-            results.append({"server": server.name, "success": success})
+        try:
+            async with create_client_from_server(server) as client:
+                if not client.supports_regex_lists:
+                    results.append({"server": server.name, "success": False, "error": "Regex not supported"})
+                    continue
+                if not await client.authenticate():
+                    results.append({"server": server.name, "success": False, "error": "Auth failed"})
+                    continue
+                success = await client.add_to_regex_whitelist(request.domain)
+                results.append({"server": server.name, "success": success})
+        except Exception as e:
+            results.append({"server": server.name, "success": False, "error": str(e)})
 
     successful = sum(1 for r in results if r.get("success"))
     if successful == 0:
@@ -231,15 +234,18 @@ async def remove_from_regex_whitelist(
 
     results = []
     for server in servers:
-        async with create_client_from_server(server) as client:
-            if not client.supports_regex_lists:
-                results.append({"server": server.name, "success": False, "error": "Regex not supported"})
-                continue
-            if not await client.authenticate():
-                results.append({"server": server.name, "success": False, "error": "Auth failed"})
-                continue
-            success = await client.remove_from_regex_whitelist(pattern)
-            results.append({"server": server.name, "success": success})
+        try:
+            async with create_client_from_server(server) as client:
+                if not client.supports_regex_lists:
+                    results.append({"server": server.name, "success": False, "error": "Regex not supported"})
+                    continue
+                if not await client.authenticate():
+                    results.append({"server": server.name, "success": False, "error": "Auth failed"})
+                    continue
+                success = await client.remove_from_regex_whitelist(pattern)
+                results.append({"server": server.name, "success": success})
+        except Exception as e:
+            results.append({"server": server.name, "success": False, "error": str(e)})
 
     successful = sum(1 for r in results if r.get("success"))
     if successful == 0:
@@ -273,15 +279,18 @@ async def add_to_regex_blacklist(
 
     results = []
     for server in servers:
-        async with create_client_from_server(server) as client:
-            if not client.supports_regex_lists:
-                results.append({"server": server.name, "success": False, "error": "Regex not supported"})
-                continue
-            if not await client.authenticate():
-                results.append({"server": server.name, "success": False, "error": "Auth failed"})
-                continue
-            success = await client.add_to_regex_blacklist(request.domain)
-            results.append({"server": server.name, "success": success})
+        try:
+            async with create_client_from_server(server) as client:
+                if not client.supports_regex_lists:
+                    results.append({"server": server.name, "success": False, "error": "Regex not supported"})
+                    continue
+                if not await client.authenticate():
+                    results.append({"server": server.name, "success": False, "error": "Auth failed"})
+                    continue
+                success = await client.add_to_regex_blacklist(request.domain)
+                results.append({"server": server.name, "success": success})
+        except Exception as e:
+            results.append({"server": server.name, "success": False, "error": str(e)})
 
     successful = sum(1 for r in results if r.get("success"))
     if successful == 0:
@@ -302,15 +311,18 @@ async def remove_from_regex_blacklist(
 
     results = []
     for server in servers:
-        async with create_client_from_server(server) as client:
-            if not client.supports_regex_lists:
-                results.append({"server": server.name, "success": False, "error": "Regex not supported"})
-                continue
-            if not await client.authenticate():
-                results.append({"server": server.name, "success": False, "error": "Auth failed"})
-                continue
-            success = await client.remove_from_regex_blacklist(pattern)
-            results.append({"server": server.name, "success": success})
+        try:
+            async with create_client_from_server(server) as client:
+                if not client.supports_regex_lists:
+                    results.append({"server": server.name, "success": False, "error": "Regex not supported"})
+                    continue
+                if not await client.authenticate():
+                    results.append({"server": server.name, "success": False, "error": "Auth failed"})
+                    continue
+                success = await client.remove_from_regex_blacklist(pattern)
+                results.append({"server": server.name, "success": success})
+        except Exception as e:
+            results.append({"server": server.name, "success": False, "error": str(e)})
 
     successful = sum(1 for r in results if r.get("success"))
     if successful == 0:

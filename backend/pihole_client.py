@@ -3,6 +3,7 @@ import hashlib
 import time
 import json
 from typing import Optional, Dict, List, Any
+from urllib.parse import quote
 import logging
 
 from .dns_client import DNSBlockerClient
@@ -273,7 +274,7 @@ class PiholeClient(DNSBlockerClient):
             )
             if response.status_code == 200:
                 data = response.json()
-                logger.info(f"Regex whitelist response from {self.server_name}: {data}")
+                logger.debug(f"Regex whitelist response from {self.server_name}: {data}")
                 return data.get('domains', [])
             logger.warning(f"Failed to get regex whitelist from {self.server_name}: {response.status_code}")
             return []
@@ -400,7 +401,6 @@ class PiholeClient(DNSBlockerClient):
     async def remove_from_regex_whitelist(self, pattern: str) -> bool:
         """Remove a pattern from regex whitelist"""
         try:
-            from urllib.parse import quote
             encoded_pattern = quote(pattern, safe='')
             response = await self.client.delete(
                 f"{self.url}/api/domains/allow/regex/{encoded_pattern}",
@@ -418,7 +418,6 @@ class PiholeClient(DNSBlockerClient):
     async def remove_from_regex_blacklist(self, pattern: str) -> bool:
         """Remove a pattern from regex blacklist"""
         try:
-            from urllib.parse import quote
             encoded_pattern = quote(pattern, safe='')
             response = await self.client.delete(
                 f"{self.url}/api/domains/deny/regex/{encoded_pattern}",
