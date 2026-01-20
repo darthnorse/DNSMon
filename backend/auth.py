@@ -4,6 +4,7 @@ Handles password hashing, session management, OIDC, and auth dependencies.
 """
 
 import os
+import re
 import secrets
 import logging
 from datetime import datetime, timezone, timedelta
@@ -574,7 +575,6 @@ async def find_or_create_oidc_user(
     # Generate unique username if needed
     base_username = (username or sub).lower()
     # Remove invalid characters
-    import re
     base_username = re.sub(r'[^a-z0-9_-]', '', base_username)[:50]
     if not base_username:
         base_username = 'user'
