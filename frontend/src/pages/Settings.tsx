@@ -50,7 +50,9 @@ export default function Settings() {
 
   // OIDC providers
   const { user } = useAuth();
-  const [oidcProviders, setOidcProviders] = useState<OIDCProvider[]>([]);
+  const [oidcProviders, setOidcProviders] = useState<OIDCProvider[] | null>(null);
+  const [loadingOidc, setLoadingOidc] = useState(false);
+  const [disableLocalAuth, setDisableLocalAuth] = useState(false);
   const [showOidcForm, setShowOidcForm] = useState(false);
   const [editingOidc, setEditingOidc] = useState<OIDCProvider | null>(null);
   const [oidcFormData, setOidcFormData] = useState<OIDCProviderCreate>({
@@ -121,6 +123,9 @@ export default function Settings() {
 
       const origins = data.app_settings.cors_origins?.value as string[];
       setCorsOrigins(origins ? origins.join(', ') : '');
+
+      // Load disable_local_auth setting
+      setDisableLocalAuth(data.app_settings.disable_local_auth?.value === true);
 
       setError(null);
     } catch (err) {
@@ -433,14 +438,41 @@ export default function Settings() {
     }
   };
 
+  // Disable local auth toggle
+  const handleToggleDisableLocalAuth = async (enabled: boolean) => {
+    // Check if any OIDC provider is enabled before allowing this to be turned on
+    if (enabled && (!oidcProviders || oidcProviders.filter(p => p.enabled).length === 0)) {
+      setError('Cannot disable local authentication: At least one OIDC provider must be enabled first.');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setError(null);
+      await settingsApi.updateSetting('disable_local_auth', String(enabled));
+      setDisableLocalAuth(enabled);
+      setSuccessMessage(enabled
+        ? 'Local password authentication disabled. Users must now use OIDC.'
+        : 'Local password authentication enabled.');
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { detail?: string } } };
+      setError(error.response?.data?.detail || 'Failed to update setting');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // OIDC Provider CRUD
   const loadOidcProviders = async () => {
     try {
+      setLoadingOidc(true);
       const providers = await oidcProviderApi.getAll();
       setOidcProviders(providers);
     } catch (err: unknown) {
       const error = err as { response?: { data?: { detail?: string } } };
       console.error('Failed to load OIDC providers:', error.response?.data?.detail);
+    } finally {
+      setLoadingOidc(false);
     }
   };
 
@@ -1336,6 +1368,50 @@ export default function Settings() {
             )}
           </div>
 
+          {/* Disable Local Authentication Toggle */}
+          {!showOidcForm && !editingOidc && (
+            <div className="mb-6 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+              <div className="flex items-center justify-between">
+                <div className="flex-1">
+                  <h3 className="text-sm font-medium text-gray-900 dark:text-white">
+                    Disable local password authentication
+                  </h3>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                    When enabled, users must log in via OIDC. Ensure at least one OIDC provider is configured and working before enabling.
+                  </p>
+                  {!loadingOidc && oidcProviders !== null && oidcProviders.filter(p => p.enabled).length === 0 && (
+                    <p className="text-sm text-yellow-600 dark:text-yellow-400 mt-2">
+                      No OIDC providers are currently enabled. Add and enable at least one provider before disabling local authentication.
+                    </p>
+                  )}
+                </div>
+                <div className="ml-4">
+                  <button
+                    type="button"
+                    onClick={() => handleToggleDisableLocalAuth(!disableLocalAuth)}
+                    disabled={saving || loadingOidc || oidcProviders === null}
+                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                      disableLocalAuth ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600'
+                    } ${saving || loadingOidc || oidcProviders === null ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    role="switch"
+                    aria-checked={disableLocalAuth}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        disableLocalAuth ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
+              {disableLocalAuth && (
+                <div className="mt-3 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded text-sm text-yellow-800 dark:text-yellow-200">
+                  Local password authentication is currently disabled. Users must use OIDC to log in.
+                </div>
+              )}
+            </div>
+          )}
+
           {(showOidcForm || editingOidc) && (
             <form onSubmit={handleOidcSubmit} className="mb-6 bg-gray-50 dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
               <h3 className="text-md font-medium text-gray-900 dark:text-white mb-4">
@@ -1608,7 +1684,11 @@ export default function Settings() {
 
           {!showOidcForm && !editingOidc && (
             <div className="space-y-3">
-              {oidcProviders.length === 0 ? (
+              {oidcProviders === null || loadingOidc ? (
+                <p className="text-gray-500 dark:text-gray-400 text-center py-8">
+                  Loading OIDC providers...
+                </p>
+              ) : oidcProviders.length === 0 ? (
                 <p className="text-gray-500 dark:text-gray-400 text-center py-8">
                   No OIDC providers configured. Add your first provider to enable single sign-on.
                 </p>

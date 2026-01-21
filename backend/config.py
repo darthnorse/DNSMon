@@ -75,69 +75,79 @@ class Settings(BaseModel):
 
 
 async def bootstrap_settings_if_needed(db: AsyncSession):
-    """Ensure settings tables exist and have default values"""
-    from .models import AppSetting, PiholeServerModel
+    """Ensure all default settings exist, creating any that are missing"""
+    from .models import AppSetting
 
-    # Check if app_settings has any data
-    stmt = select(AppSetting).limit(1)
-    result = await db.execute(stmt)
-    existing = result.scalar_one_or_none()
+    # Default settings - new settings can be added here and will be auto-created on next startup
+    defaults = [
+        AppSetting(
+            key='poll_interval_seconds',
+            value='60',
+            value_type='int',
+            description='How often to poll Pi-hole servers (10-3600 seconds)',
+            requires_restart=True
+        ),
+        AppSetting(
+            key='query_lookback_seconds',
+            value='65',
+            value_type='int',
+            description='How far back to look for queries (10-3600 seconds)',
+            requires_restart=True
+        ),
+        AppSetting(
+            key='sync_interval_seconds',
+            value='900',
+            value_type='int',
+            description='How often to sync Pi-hole configurations (60-86400 seconds, 15 min default)',
+            requires_restart=True
+        ),
+        AppSetting(
+            key='retention_days',
+            value='60',
+            value_type='int',
+            description='Days to retain query data (1-365)',
+            requires_restart=False
+        ),
+        AppSetting(
+            key='max_catchup_seconds',
+            value='300',
+            value_type='int',
+            description='Maximum lookback window when catching up after downtime (60-3600 seconds)',
+            requires_restart=False
+        ),
+        AppSetting(
+            key='cors_origins',
+            value='["http://localhost:3000", "http://localhost:8000"]',
+            value_type='json',
+            description='Allowed CORS origins',
+            requires_restart=True
+        ),
+        AppSetting(
+            key='disable_local_auth',
+            value='false',
+            value_type='bool',
+            description='Disable local password authentication (requires OIDC)',
+            requires_restart=False
+        ),
+    ]
 
-    if not existing:
-        logger.info("Bootstrapping default settings...")
+    # Check each setting and create if missing
+    created = []
+    for default in defaults:
+        stmt = select(AppSetting).where(AppSetting.key == default.key)
+        result = await db.execute(stmt)
+        if not result.scalar_one_or_none():
+            db.add(default)
+            created.append(default.key)
 
-        # Insert default app settings
-        # Note: telegram_bot_token and telegram_chat_id were removed - use NotificationChannel instead
-        defaults = [
-            AppSetting(
-                key='poll_interval_seconds',
-                value='60',
-                value_type='int',
-                description='How often to poll Pi-hole servers (10-3600 seconds)',
-                requires_restart=True
-            ),
-            AppSetting(
-                key='query_lookback_seconds',
-                value='65',
-                value_type='int',
-                description='How far back to look for queries (10-3600 seconds)',
-                requires_restart=True
-            ),
-            AppSetting(
-                key='sync_interval_seconds',
-                value='900',
-                value_type='int',
-                description='How often to sync Pi-hole configurations (60-86400 seconds, 15 min default)',
-                requires_restart=True
-            ),
-            AppSetting(
-                key='retention_days',
-                value='60',
-                value_type='int',
-                description='Days to retain query data (1-365)',
-                requires_restart=False
-            ),
-            AppSetting(
-                key='max_catchup_seconds',
-                value='300',
-                value_type='int',
-                description='Maximum lookback window when catching up after downtime (60-3600 seconds)',
-                requires_restart=False
-            ),
-            AppSetting(
-                key='cors_origins',
-                value='["http://localhost:3000", "http://localhost:8000"]',
-                value_type='json',
-                description='Allowed CORS origins',
-                requires_restart=True
-            ),
-        ]
-
-        for setting in defaults:
-            db.add(setting)
-
-        await db.commit()
-        logger.info("Default settings bootstrapped successfully")
+    if created:
+        try:
+            await db.commit()
+            logger.info(f"Created missing settings: {', '.join(created)}")
+        except Exception as e:
+            # Handle race condition: another process may have created the setting
+            await db.rollback()
+            logger.debug(f"Settings already created by another process: {e}")
 
 
 async def load_settings_from_db(db: AsyncSession) -> Settings:

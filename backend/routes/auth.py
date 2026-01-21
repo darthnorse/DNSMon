@@ -10,7 +10,7 @@ from urllib.parse import quote
 import logging
 
 from ..database import get_db
-from ..models import User, OIDCProvider
+from ..models import User, OIDCProvider, AppSetting
 from ..schemas import (
     LoginRequest, SetupRequest, UserResponse, AuthCheckResponse,
     OIDCProviderPublic
@@ -82,6 +82,16 @@ async def login(
     db: AsyncSession = Depends(get_db)
 ):
     """Login with username and password"""
+    # Check if local auth is disabled
+    stmt = select(AppSetting).where(AppSetting.key == 'disable_local_auth')
+    result = await db.execute(stmt)
+    setting = result.scalar_one_or_none()
+    if setting and setting.get_typed_value() is True:
+        raise HTTPException(
+            status_code=403,
+            detail="Local password authentication is disabled. Please use SSO/OIDC."
+        )
+
     client_ip = get_client_ip(request)
     if not check_login_rate_limit(client_ip):
         logger.warning(f"Rate limit exceeded for IP: {client_ip}")
