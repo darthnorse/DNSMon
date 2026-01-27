@@ -9,6 +9,14 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
     volumes:
       - dnsmon_postgres_data:/var/lib/postgresql/data
+    command:
+      - "postgres"
+      - "-c"
+      - "work_mem=64MB"
+      - "-c"
+      - "shared_buffers=256MB"
+      - "-c"
+      - "effective_cache_size=1GB"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U dnsmon"]
       interval: 10s
