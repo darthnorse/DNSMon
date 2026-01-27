@@ -103,10 +103,68 @@ async def get_stats(
     )
 
 
+@router.get("/statistics/clients")
+async def get_statistics_clients(
+    period: str = "24h",
+    servers: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user)
+):
+    """Get unique clients for the filter dropdown.
+
+    Args:
+        period: Time period filter - "24h", "7d", or "30d" (default: "24h")
+        servers: Comma-separated list of server names to include (default: all servers)
+    """
+    if period not in ("24h", "7d", "30d"):
+        raise HTTPException(status_code=400, detail="Invalid period. Must be '24h', '7d', or '30d'")
+
+    now = datetime.now(timezone.utc)
+    if period == "24h":
+        period_start = now - timedelta(hours=24)
+    elif period == "7d":
+        period_start = now - timedelta(days=7)
+    else:
+        period_start = now - timedelta(days=30)
+
+    server_list = None
+    if servers:
+        server_list = [s.strip() for s in servers.split(',') if s.strip()]
+
+    # Get unique clients with query counts
+    stmt = (
+        select(
+            Query.client_ip,
+            Query.client_hostname,
+            func.count(Query.id).label('count')
+        )
+        .where(Query.timestamp >= period_start)
+        .group_by(Query.client_ip, Query.client_hostname)
+        .order_by(func.count(Query.id).desc())
+        .limit(500)  # Limit to top 500 clients
+    )
+
+    if server_list:
+        stmt = stmt.where(Query.server.in_(server_list))
+
+    result = await db.execute(stmt)
+    clients = [
+        {
+            "client_ip": row[0],
+            "client_hostname": row[1],
+            "count": row[2]
+        }
+        for row in result
+    ]
+
+    return clients
+
+
 @router.get("/statistics", response_model=StatisticsResponse)
 async def get_statistics(
     period: str = "24h",
     servers: Optional[str] = None,
+    clients: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user)
 ):
@@ -115,6 +173,7 @@ async def get_statistics(
     Args:
         period: Time period filter - "24h", "7d", or "30d" (default: "24h")
         servers: Comma-separated list of server names to include (default: all servers)
+        clients: Comma-separated list of client IPs to include (default: all clients)
     """
     if period not in ("24h", "7d", "30d"):
         raise HTTPException(status_code=400, detail="Invalid period. Must be '24h', '7d', or '30d'")
@@ -137,44 +196,49 @@ async def get_statistics(
         if not server_list:
             server_list = None
 
-    def add_server_filter(stmt):
+    client_list = None
+    if clients:
+        client_list = [c.strip() for c in clients.split(',') if c.strip()]
+        if not client_list:
+            client_list = None
+
+    def add_filters(stmt):
         if server_list:
-            return stmt.where(Query.server.in_(server_list))
+            stmt = stmt.where(Query.server.in_(server_list))
+        if client_list:
+            stmt = stmt.where(Query.client_ip.in_(client_list))
         return stmt
 
     period_filter = Query.timestamp >= period_start
 
-    # Query counts
-    period_stmt = select(func.count(Query.id)).where(period_filter)
-    period_stmt = add_server_filter(period_stmt)
-    period_result = await db.execute(period_stmt)
-    queries_period = period_result.scalar() or 0
-
+    # Query counts - combine into a single query for efficiency
     today_start = now - timedelta(hours=24)
     week_start = now - timedelta(days=7)
     month_start = now - timedelta(days=30)
 
-    today_stmt = add_server_filter(select(func.count(Query.id)).where(Query.timestamp >= today_start))
-    today_result = await db.execute(today_stmt)
-    queries_today = today_result.scalar() or 0
+    # Single aggregation query with conditional counts
+    counts_stmt = select(
+        func.count(Query.id).label('total'),
+        func.count(Query.id).filter(Query.timestamp >= month_start).label('month'),
+        func.count(Query.id).filter(Query.timestamp >= week_start).label('week'),
+        func.count(Query.id).filter(Query.timestamp >= today_start).label('today'),
+        func.count(Query.id).filter(Query.timestamp >= period_start).label('period'),
+    )
+    counts_stmt = add_filters(counts_stmt)
+    counts_result = await db.execute(counts_stmt)
+    counts_row = counts_result.one()
 
-    week_stmt = add_server_filter(select(func.count(Query.id)).where(Query.timestamp >= week_start))
-    week_result = await db.execute(week_stmt)
-    queries_week = week_result.scalar() or 0
-
-    month_stmt = add_server_filter(select(func.count(Query.id)).where(Query.timestamp >= month_start))
-    month_result = await db.execute(month_stmt)
-    queries_month = month_result.scalar() or 0
-
-    total_stmt = add_server_filter(select(func.count(Query.id)))
-    total_result = await db.execute(total_stmt)
-    queries_total = total_result.scalar() or 0
+    queries_total = counts_row.total or 0
+    queries_month = counts_row.month or 0
+    queries_week = counts_row.week or 0
+    queries_today = counts_row.today or 0
+    queries_period = counts_row.period or 0
 
     # Blocked stats
     blocked_stmt = select(func.count(Query.id)).where(
         and_(period_filter, Query.status.in_(BLOCKED_STATUSES))
     )
-    blocked_stmt = add_server_filter(blocked_stmt)
+    blocked_stmt = add_filters(blocked_stmt)
     blocked_result = await db.execute(blocked_stmt)
     blocked_today = blocked_result.scalar() or 0
 
@@ -193,7 +257,7 @@ async def get_statistics(
             .group_by(time_col)
             .order_by(time_col)
         )
-        time_stmt = add_server_filter(time_stmt)
+        time_stmt = add_filters(time_stmt)
         time_result = await db.execute(time_stmt)
         queries_hourly = [
             {"hour": row[0].strftime('%Y-%m-%dT%H:%M:%SZ') if row[0] else "", "queries": row[1], "blocked": row[2]}
@@ -212,7 +276,7 @@ async def get_statistics(
             .group_by(time_col)
             .order_by(time_col)
         )
-        time_stmt = add_server_filter(time_stmt)
+        time_stmt = add_filters(time_stmt)
         time_result = await db.execute(time_stmt)
         queries_daily = [
             {"date": row[0].strftime('%Y-%m-%d') if row[0] else "", "queries": row[1], "blocked": row[2]}
@@ -228,7 +292,7 @@ async def get_statistics(
         .order_by(func.count(Query.id).desc())
         .limit(10)
     )
-    top_domains_stmt = add_server_filter(top_domains_stmt)
+    top_domains_stmt = add_filters(top_domains_stmt)
     top_domains_result = await db.execute(top_domains_stmt)
     top_domains = [{"domain": row[0], "count": row[1]} for row in top_domains_result]
 
@@ -240,7 +304,7 @@ async def get_statistics(
         .order_by(func.count(Query.id).desc())
         .limit(10)
     )
-    top_blocked_stmt = add_server_filter(top_blocked_stmt)
+    top_blocked_stmt = add_filters(top_blocked_stmt)
     top_blocked_result = await db.execute(top_blocked_stmt)
     top_blocked_domains = [{"domain": row[0], "count": row[1]} for row in top_blocked_result]
 
@@ -252,7 +316,7 @@ async def get_statistics(
         .order_by(func.count(Query.id).desc())
         .limit(10)
     )
-    top_clients_stmt = add_server_filter(top_clients_stmt)
+    top_clients_stmt = add_filters(top_clients_stmt)
     top_clients_result = await db.execute(top_clients_stmt)
     top_clients = [
         {"client_ip": row[0], "client_hostname": row[1], "count": row[2]}
@@ -271,7 +335,7 @@ async def get_statistics(
         .group_by(Query.server)
         .order_by(func.count(Query.id).desc())
     )
-    server_stats_stmt = add_server_filter(server_stats_stmt)
+    server_stats_stmt = add_filters(server_stats_stmt)
     server_stats_result = await db.execute(server_stats_stmt)
     queries_by_server = [
         {"server": row[0], "queries": row[1], "blocked": row[2], "cached": row[3]}
@@ -280,18 +344,36 @@ async def get_statistics(
 
     # Client Insights
     unique_clients_stmt = select(func.count(func.distinct(Query.client_ip))).where(period_filter)
-    unique_clients_stmt = add_server_filter(unique_clients_stmt)
+    unique_clients_stmt = add_filters(unique_clients_stmt)
     unique_clients_result = await db.execute(unique_clients_stmt)
     unique_clients = unique_clients_result.scalar() or 0
 
     most_active_client = top_clients[0] if top_clients else None
 
-    first_seen_base = select(Query.client_ip, func.min(Query.timestamp).label('first_seen'))
-    first_seen_base = add_server_filter(first_seen_base)
-    first_seen_subq = first_seen_base.group_by(Query.client_ip).subquery()
+    # For "new clients" calculation, use EXCEPT to find clients in the period
+    # that weren't seen before the period. Look back 30 days before period_start.
+    lookback_for_existing = period_start - timedelta(days=30)
 
-    new_clients_stmt = select(func.count()).select_from(first_seen_subq).where(
-        first_seen_subq.c.first_seen >= period_start
+    # Clients seen in the current period
+    clients_in_period = (
+        select(func.distinct(Query.client_ip))
+        .where(Query.timestamp >= period_start)
+    )
+    clients_in_period = add_filters(clients_in_period)
+
+    # Clients seen before the period (within lookback window)
+    clients_before_period = (
+        select(func.distinct(Query.client_ip))
+        .where(and_(
+            Query.timestamp >= lookback_for_existing,
+            Query.timestamp < period_start
+        ))
+    )
+    clients_before_period = add_filters(clients_before_period)
+
+    # New clients = clients in period EXCEPT clients seen before
+    new_clients_stmt = select(func.count()).select_from(
+        clients_in_period.except_(clients_before_period).subquery()
     )
     new_clients_result = await db.execute(new_clients_stmt)
     new_clients_24h = new_clients_result.scalar() or 0

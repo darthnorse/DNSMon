@@ -31,6 +31,7 @@ class Query(Base):
         Index('idx_queries_domain_client', 'domain', 'client_ip'),
         Index('idx_queries_pihole_timestamp', 'server', 'timestamp'),
         Index('idx_queries_client_ip_timestamp', 'client_ip', 'timestamp'),  # For top clients stats query
+        Index('idx_queries_timestamp_status', 'timestamp', 'status'),  # For blocked query counts in statistics
         # Unique constraint to prevent duplicates
         Index('idx_queries_unique', 'timestamp', 'domain', 'client_ip', 'server', unique=True),
     )

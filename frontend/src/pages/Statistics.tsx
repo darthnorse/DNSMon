@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { statisticsApi, settingsApi } from '../utils/api';
-import type { Statistics, PiholeServer } from '../types';
+import type { Statistics, PiholeServer, ClientInfo } from '../types';
 import { format } from 'date-fns';
 import {
   PieChart,
@@ -30,23 +30,39 @@ export default function StatisticsPage() {
   const [period, setPeriod] = useState<Period>('24h');
   const [selectedServers, setSelectedServers] = useState<string[]>([]);
   const [serverDropdownOpen, setServerDropdownOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const serverDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Client filter state
+  const [clients, setClients] = useState<ClientInfo[]>([]);
+  const [selectedClients, setSelectedClients] = useState<string[]>([]);
+  const [clientDropdownOpen, setClientDropdownOpen] = useState(false);
+  const [clientSearch, setClientSearch] = useState('');
+  const clientDropdownRef = useRef<HTMLDivElement>(null);
 
   // Load servers on mount
   useEffect(() => {
     loadServers();
   }, []);
 
+  // Load clients when period or servers change
+  useEffect(() => {
+    loadClients();
+  }, [period, selectedServers]);
+
   // Load stats when filters change
   useEffect(() => {
     loadStats();
-  }, [period, selectedServers]);
+  }, [period, selectedServers, selectedClients]);
 
-  // Close dropdown when clicking outside
+  // Close dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+      if (serverDropdownRef.current && !serverDropdownRef.current.contains(event.target as Node)) {
         setServerDropdownOpen(false);
+      }
+      if (clientDropdownRef.current && !clientDropdownRef.current.contains(event.target as Node)) {
+        setClientDropdownOpen(false);
+        setClientSearch('');
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -62,12 +78,30 @@ export default function StatisticsPage() {
     }
   };
 
-  const loadStats = async () => {
+  const loadClients = async () => {
     try {
-      setLoading(true);
       const params: { period: string; servers?: string } = { period };
       if (selectedServers.length > 0) {
         params.servers = selectedServers.join(',');
+      }
+      const clientList = await statisticsApi.getClients(params);
+      setClients(clientList);
+      // Select all clients by default
+      setSelectedClients(clientList.map(c => c.client_ip));
+    } catch (err) {
+      console.error('Failed to load clients:', err);
+    }
+  };
+
+  const loadStats = async () => {
+    try {
+      setLoading(true);
+      const params: { period: string; servers?: string; clients?: string } = { period };
+      if (selectedServers.length > 0) {
+        params.servers = selectedServers.join(',');
+      }
+      if (selectedClients.length > 0) {
+        params.clients = selectedClients.join(',');
       }
       const data = await statisticsApi.get(params);
       setStats(data);
@@ -89,12 +123,46 @@ export default function StatisticsPage() {
   };
 
   const selectAllServers = () => {
-    if (selectedServers.length === servers.length) {
-      setSelectedServers([]);
+    // Always clear selection to show all servers
+    setSelectedServers([]);
+  };
+
+  const toggleClient = (clientIp: string) => {
+    setSelectedClients(prev =>
+      prev.includes(clientIp)
+        ? prev.filter(c => c !== clientIp)
+        : [...prev, clientIp]
+    );
+  };
+
+  const selectAllClients = () => {
+    // Toggle between all selected and none selected
+    if (selectedClients.length === clients.length && clients.length > 0) {
+      setSelectedClients([]);
     } else {
-      setSelectedServers(servers.map(s => s.name));
+      setSelectedClients(clients.map(c => c.client_ip));
     }
   };
+
+  const getClientLabel = () => {
+    if (clients.length === 0) return 'No Clients';
+    if (selectedClients.length === 0) return 'None Selected';
+    if (selectedClients.length === clients.length) return 'All Clients';
+    if (selectedClients.length === 1) {
+      const client = clients.find(c => c.client_ip === selectedClients[0]);
+      return client?.client_hostname || selectedClients[0];
+    }
+    return `${selectedClients.length} clients`;
+  };
+
+  const filteredClients = clients.filter(client => {
+    if (!clientSearch) return true;
+    const search = clientSearch.toLowerCase();
+    return (
+      client.client_ip.toLowerCase().includes(search) ||
+      (client.client_hostname?.toLowerCase().includes(search) ?? false)
+    );
+  });
 
   if (loading && !stats) {
     return (
@@ -151,7 +219,6 @@ export default function StatisticsPage() {
   const getServerLabel = () => {
     if (selectedServers.length === 0) return 'All Servers';
     if (selectedServers.length === 1) return selectedServers[0];
-    if (selectedServers.length === servers.length) return 'All Servers';
     return `${selectedServers.length} servers`;
   };
 
@@ -180,7 +247,7 @@ export default function StatisticsPage() {
           </div>
 
           {/* Server Dropdown */}
-          <div className="relative" ref={dropdownRef}>
+          <div className="relative" ref={serverDropdownRef}>
             <button
               onClick={() => setServerDropdownOpen(!serverDropdownOpen)}
               className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
@@ -198,7 +265,7 @@ export default function StatisticsPage() {
                   <label className="flex items-center gap-2 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
                     <input
                       type="checkbox"
-                      checked={selectedServers.length === 0 || selectedServers.length === servers.length}
+                      checked={selectedServers.length === 0}
                       onChange={selectAllServers}
                       className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
                     />
@@ -217,20 +284,96 @@ export default function StatisticsPage() {
                     >
                       <input
                         type="checkbox"
-                        checked={selectedServers.length === 0 || selectedServers.includes(server.name)}
-                        onChange={() => {
-                          if (selectedServers.length === 0) {
-                            // Currently showing all, switch to just this one NOT selected
-                            setSelectedServers(servers.filter(s => s.name !== server.name).map(s => s.name));
-                          } else {
-                            toggleServer(server.name);
-                          }
-                        }}
+                        checked={selectedServers.includes(server.name)}
+                        onChange={() => toggleServer(server.name)}
                         className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
                       />
                       <span className="text-sm text-gray-700 dark:text-gray-300">{server.name}</span>
                     </label>
                   ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Client Dropdown */}
+          <div className="relative" ref={clientDropdownRef}>
+            <button
+              onClick={() => setClientDropdownOpen(!clientDropdownOpen)}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+            >
+              <span>{getClientLabel()}</span>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            {clientDropdownOpen && (
+              <div className="absolute right-0 mt-2 w-72 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-10">
+                {/* Search Input */}
+                <div className="p-2 border-b border-gray-200 dark:border-gray-700">
+                  <input
+                    type="text"
+                    placeholder="Search clients..."
+                    value={clientSearch}
+                    onChange={(e) => setClientSearch(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    autoFocus
+                  />
+                </div>
+
+                <div className="p-2 max-h-64 overflow-y-auto">
+                  {/* Select All Option */}
+                  {!clientSearch && (
+                    <>
+                      <label className="flex items-center gap-2 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={selectedClients.length === clients.length && clients.length > 0}
+                          onChange={selectAllClients}
+                          className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-sm text-gray-700 dark:text-gray-300 font-medium">
+                          All Clients
+                        </span>
+                      </label>
+                      <div className="border-t border-gray-200 dark:border-gray-700 my-1" />
+                    </>
+                  )}
+
+                  {/* Individual Clients */}
+                  {filteredClients.length === 0 ? (
+                    <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
+                      {clientSearch ? 'No clients match your search' : 'No clients found'}
+                    </div>
+                  ) : (
+                    filteredClients.map((client) => (
+                      <label
+                        key={client.client_ip}
+                        className="flex items-center gap-2 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedClients.includes(client.client_ip)}
+                          onChange={() => toggleClient(client.client_ip)}
+                          className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm text-gray-900 dark:text-white truncate">
+                            {client.client_hostname || client.client_ip}
+                          </div>
+                          {client.client_hostname && (
+                            <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                              {client.client_ip}
+                            </div>
+                          )}
+                        </div>
+                        <span className="text-xs text-gray-400 dark:text-gray-500">
+                          {client.count.toLocaleString()}
+                        </span>
+                      </label>
+                    ))
+                  )}
                 </div>
               </div>
             )}

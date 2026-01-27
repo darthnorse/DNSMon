@@ -138,6 +138,12 @@ export interface Statistics {
   new_clients_24h: number;
 }
 
+export interface ClientInfo {
+  client_ip: string;
+  client_hostname: string | null;
+  count: number;
+}
+
 export interface BlockingStatus {
   id: number;
   name: string;
