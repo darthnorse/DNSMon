@@ -60,8 +60,7 @@ async def search_queries(
         conditions.append(Query.domain.ilike(f"%{escaped_domain}%", escape='\\'))
 
     if client_ip:
-        escaped_ip = escape_sql_like(client_ip)
-        conditions.append(Query.client_ip.ilike(f"%{escaped_ip}%", escape='\\'))
+        conditions.append(Query.client_ip == client_ip)
 
     if client_hostname:
         escaped_hostname = escape_sql_like(client_hostname)
@@ -131,14 +130,16 @@ async def count_queries(
         escaped_domain = escape_sql_like(domain)
         conditions.append(Query.domain.ilike(f"%{escaped_domain}%", escape='\\'))
     if client_ip:
-        escaped_ip = escape_sql_like(client_ip)
-        conditions.append(Query.client_ip.ilike(f"%{escaped_ip}%", escape='\\'))
+        conditions.append(Query.client_ip == client_ip)
     if client_hostname:
         escaped_hostname = escape_sql_like(client_hostname)
         conditions.append(Query.client_hostname.ilike(f"%{escaped_hostname}%", escape='\\'))
     if server:
         escaped_server = escape_sql_like(server)
         conditions.append(Query.server.ilike(f"%{escaped_server}%", escape='\\'))
+
+    from_dt = None
+    to_dt = None
 
     if from_date:
         try:
@@ -153,6 +154,9 @@ async def count_queries(
             conditions.append(Query.timestamp <= to_dt)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid to_date format")
+
+    if from_dt and to_dt and from_dt > to_dt:
+        raise HTTPException(status_code=400, detail="from_date must be before or equal to to_date")
 
     if conditions:
         stmt = stmt.where(and_(*conditions))

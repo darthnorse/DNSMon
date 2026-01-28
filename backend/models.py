@@ -49,6 +49,48 @@ class Query(Base):
         }
 
 
+class QueryStatsHourly(Base):
+    """Pre-aggregated hourly query statistics for fast dashboard queries"""
+    __tablename__ = "query_stats_hourly"
+
+    hour = Column(DateTime(timezone=True), primary_key=True)
+    server = Column(String(100), primary_key=True)
+    total = Column(Integer, nullable=False, default=0)
+    blocked = Column(Integer, nullable=False, default=0)
+    cached = Column(Integer, nullable=False, default=0)
+
+
+class ClientStatsHourly(Base):
+    """Pre-aggregated hourly per-client statistics"""
+    __tablename__ = "client_stats_hourly"
+
+    hour = Column(DateTime(timezone=True), primary_key=True)
+    server = Column(String(100), primary_key=True)
+    client_ip = Column(String(45), primary_key=True)
+    client_hostname = Column(String(255), nullable=True)
+    total = Column(Integer, nullable=False, default=0)
+    blocked = Column(Integer, nullable=False, default=0)
+
+    __table_args__ = (
+        Index('idx_csh_client_hour', 'client_ip', 'hour'),
+    )
+
+
+class DomainStatsHourly(Base):
+    """Pre-aggregated hourly per-domain statistics"""
+    __tablename__ = "domain_stats_hourly"
+
+    hour = Column(DateTime(timezone=True), primary_key=True)
+    server = Column(String(100), primary_key=True)
+    domain = Column(String(255), primary_key=True)
+    total = Column(Integer, nullable=False, default=0)
+    blocked = Column(Integer, nullable=False, default=0)
+
+    __table_args__ = (
+        Index('idx_dsh_domain_hour', 'domain', 'hour'),
+    )
+
+
 class AlertRule(Base):
     """Alert rule configuration"""
     __tablename__ = "alert_rules"

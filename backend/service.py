@@ -193,6 +193,8 @@ class DNSMonService:
     async def _run_initial_ingestion(self):
         """Run initial ingestion with error handling"""
         try:
+            # Backfill hourly stats tables if empty
+            await self.ingestion_service.backfill_hourly_stats()
             await self.ingest_and_alert()
         except Exception as e:
             logger.error(f"Error in initial ingestion: {e}", exc_info=True)

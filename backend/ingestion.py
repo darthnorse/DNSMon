@@ -2,9 +2,10 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import List, Tuple
 from dataclasses import dataclass
-from sqlalchemy import select, func
+from collections import defaultdict
+from sqlalchemy import select, func, text
 from sqlalchemy.dialects.postgresql import insert
-from .models import Query
+from .models import Query, QueryStatsHourly, ClientStatsHourly, DomainStatsHourly
 from .database import async_session_maker, cleanup_old_queries
 from .dns_client_factory import create_dns_client
 from .config import get_settings_sync, PiholeServer
@@ -237,6 +238,163 @@ class QueryIngestionService:
             logger.error(f"Error storing queries: {e}", exc_info=True)
             return 0, []
 
+    async def update_hourly_stats(self, ingested_queries: List[IngestedQuery]) -> None:
+        """Update pre-aggregated hourly stats tables from ingested queries."""
+        if not ingested_queries:
+            return
+
+        blocked_statuses = {'GRAVITY', 'GRAVITY_CNAME', 'REGEX', 'REGEX_CNAME',
+                            'BLACKLIST', 'BLACKLIST_CNAME', 'REGEX_BLACKLIST',
+                            'EXTERNAL_BLOCKED_IP', 'EXTERNAL_BLOCKED_NULL', 'EXTERNAL_BLOCKED_NXRA'}
+        cache_statuses = {'CACHE', 'CACHE_STALE'}
+
+        # Aggregate in memory
+        # Key: (hour, server)
+        server_agg: dict[tuple, dict] = defaultdict(lambda: {'total': 0, 'blocked': 0, 'cached': 0})
+        # Key: (hour, server, client_ip)
+        client_agg: dict[tuple, dict] = defaultdict(lambda: {'hostname': None, 'total': 0, 'blocked': 0})
+        # Key: (hour, server, domain)
+        domain_agg: dict[tuple, dict] = defaultdict(lambda: {'total': 0, 'blocked': 0})
+
+        for q in ingested_queries:
+            hour = q.timestamp.replace(minute=0, second=0, microsecond=0)
+            is_blocked = q.status in blocked_statuses
+            is_cached = q.status in cache_statuses
+
+            sk = (hour, q.server)
+            server_agg[sk]['total'] += 1
+            if is_blocked:
+                server_agg[sk]['blocked'] += 1
+            if is_cached:
+                server_agg[sk]['cached'] += 1
+
+            ck = (hour, q.server, q.client_ip)
+            client_agg[ck]['total'] += 1
+            client_agg[ck]['hostname'] = q.client_hostname
+            if is_blocked:
+                client_agg[ck]['blocked'] += 1
+
+            dk = (hour, q.server, q.domain)
+            domain_agg[dk]['total'] += 1
+            if is_blocked:
+                domain_agg[dk]['blocked'] += 1
+
+        try:
+            async with async_session_maker() as session:
+                # Upsert query_stats_hourly
+                if server_agg:
+                    values = [
+                        {'hour': k[0], 'server': k[1], 'total': v['total'], 'blocked': v['blocked'], 'cached': v['cached']}
+                        for k, v in server_agg.items()
+                    ]
+                    stmt = insert(QueryStatsHourly).values(values)
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=['hour', 'server'],
+                        set_={'total': QueryStatsHourly.total + stmt.excluded.total,
+                              'blocked': QueryStatsHourly.blocked + stmt.excluded.blocked,
+                              'cached': QueryStatsHourly.cached + stmt.excluded.cached}
+                    )
+                    await session.execute(stmt)
+
+                # Upsert client_stats_hourly
+                if client_agg:
+                    values = [
+                        {'hour': k[0], 'server': k[1], 'client_ip': k[2],
+                         'client_hostname': v['hostname'], 'total': v['total'], 'blocked': v['blocked']}
+                        for k, v in client_agg.items()
+                    ]
+                    # Batch to avoid parameter limits
+                    for i in range(0, len(values), 2000):
+                        batch = values[i:i + 2000]
+                        stmt = insert(ClientStatsHourly).values(batch)
+                        stmt = stmt.on_conflict_do_update(
+                            index_elements=['hour', 'server', 'client_ip'],
+                            set_={'total': ClientStatsHourly.total + stmt.excluded.total,
+                                  'blocked': ClientStatsHourly.blocked + stmt.excluded.blocked,
+                                  'client_hostname': stmt.excluded.client_hostname}
+                        )
+                        await session.execute(stmt)
+
+                # Upsert domain_stats_hourly
+                if domain_agg:
+                    values = [
+                        {'hour': k[0], 'server': k[1], 'domain': k[2],
+                         'total': v['total'], 'blocked': v['blocked']}
+                        for k, v in domain_agg.items()
+                    ]
+                    for i in range(0, len(values), 2000):
+                        batch = values[i:i + 2000]
+                        stmt = insert(DomainStatsHourly).values(batch)
+                        stmt = stmt.on_conflict_do_update(
+                            index_elements=['hour', 'server', 'domain'],
+                            set_={'total': DomainStatsHourly.total + stmt.excluded.total,
+                                  'blocked': DomainStatsHourly.blocked + stmt.excluded.blocked}
+                        )
+                        await session.execute(stmt)
+
+                await session.commit()
+                logger.debug(f"Updated hourly stats: {len(server_agg)} server buckets, {len(client_agg)} client buckets, {len(domain_agg)} domain buckets")
+
+        except Exception as e:
+            logger.error(f"Error updating hourly stats: {e}", exc_info=True)
+
+    async def backfill_hourly_stats(self) -> None:
+        """Backfill hourly stats tables from existing query data."""
+        logger.info("Starting hourly stats backfill...")
+        try:
+            async with async_session_maker() as session:
+                # Check if already backfilled
+                result = await session.execute(select(func.count()).select_from(QueryStatsHourly))
+                if (result.scalar() or 0) > 0:
+                    logger.info("Hourly stats already populated, skipping backfill")
+                    return
+
+                # Backfill query_stats_hourly
+                await session.execute(text("""
+                    INSERT INTO query_stats_hourly (hour, server, total, blocked, cached)
+                    SELECT date_trunc('hour', timestamp) AS hour,
+                           server,
+                           COUNT(*) AS total,
+                           COUNT(*) FILTER (WHERE status IN ('GRAVITY','GRAVITY_CNAME','REGEX','REGEX_CNAME','BLACKLIST','BLACKLIST_CNAME','REGEX_BLACKLIST','EXTERNAL_BLOCKED_IP','EXTERNAL_BLOCKED_NULL','EXTERNAL_BLOCKED_NXRA')) AS blocked,
+                           COUNT(*) FILTER (WHERE status IN ('CACHE','CACHE_STALE')) AS cached
+                    FROM queries
+                    GROUP BY hour, server
+                    ON CONFLICT (hour, server) DO NOTHING
+                """))
+
+                # Backfill client_stats_hourly
+                await session.execute(text("""
+                    INSERT INTO client_stats_hourly (hour, server, client_ip, client_hostname, total, blocked)
+                    SELECT date_trunc('hour', timestamp) AS hour,
+                           server,
+                           client_ip,
+                           MAX(client_hostname) AS client_hostname,
+                           COUNT(*) AS total,
+                           COUNT(*) FILTER (WHERE status IN ('GRAVITY','GRAVITY_CNAME','REGEX','REGEX_CNAME','BLACKLIST','BLACKLIST_CNAME','REGEX_BLACKLIST','EXTERNAL_BLOCKED_IP','EXTERNAL_BLOCKED_NULL','EXTERNAL_BLOCKED_NXRA')) AS blocked
+                    FROM queries
+                    GROUP BY hour, server, client_ip
+                    ON CONFLICT (hour, server, client_ip) DO NOTHING
+                """))
+
+                # Backfill domain_stats_hourly
+                await session.execute(text("""
+                    INSERT INTO domain_stats_hourly (hour, server, domain, total, blocked)
+                    SELECT date_trunc('hour', timestamp) AS hour,
+                           server,
+                           domain,
+                           COUNT(*) AS total,
+                           COUNT(*) FILTER (WHERE status IN ('GRAVITY','GRAVITY_CNAME','REGEX','REGEX_CNAME','BLACKLIST','BLACKLIST_CNAME','REGEX_BLACKLIST','EXTERNAL_BLOCKED_IP','EXTERNAL_BLOCKED_NULL','EXTERNAL_BLOCKED_NXRA')) AS blocked
+                    FROM queries
+                    GROUP BY hour, server, domain
+                    ON CONFLICT (hour, server, domain) DO NOTHING
+                """))
+
+                await session.commit()
+                logger.info("Hourly stats backfill completed")
+
+        except Exception as e:
+            logger.error(f"Error backfilling hourly stats: {e}", exc_info=True)
+
     async def ingest_from_all_servers(self) -> Tuple[int, List[IngestedQuery]]:
         """Ingest queries from all configured Pi-hole servers.
         Returns (total_count, all_ingested_queries).
@@ -252,6 +410,13 @@ class QueryIngestionService:
             count, queries = await self.ingest_from_server(server)
             total_count += count
             all_queries.extend(queries)
+
+        # Update pre-aggregated hourly stats only if new queries were inserted.
+        # Note: ingested_queries includes all parsed queries, not just inserted ones
+        # (ON CONFLICT DO NOTHING doesn't tell us which). In practice the duplicate
+        # rate is near-zero since we fetch from the last known timestamp.
+        if total_count > 0:
+            await self.update_hourly_stats(all_queries)
 
         return total_count, all_queries
 

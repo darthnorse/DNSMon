@@ -112,4 +112,4 @@ if os.path.exists("/app/frontend/build"):
             if requested_path.exists() and requested_path.is_file():
                 return FileResponse(str(requested_path))
 
-        return FileResponse("/app/frontend/build/index.html")
+        return FileResponse("/app/frontend/build/index.html", headers={"Cache-Control": "no-cache, no-store, must-revalidate"})

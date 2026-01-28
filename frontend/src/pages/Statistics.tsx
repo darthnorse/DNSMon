@@ -35,6 +35,7 @@ export default function StatisticsPage() {
   // Client filter state
   const [clients, setClients] = useState<ClientInfo[]>([]);
   const [selectedClients, setSelectedClients] = useState<string[]>([]);
+  const [pendingClients, setPendingClients] = useState<string[]>([]);
   const [clientDropdownOpen, setClientDropdownOpen] = useState(false);
   const [clientSearch, setClientSearch] = useState('');
   const clientDropdownRef = useRef<HTMLDivElement>(null);
@@ -44,15 +45,36 @@ export default function StatisticsPage() {
     loadServers();
   }, []);
 
-  // Load clients when period or servers change
+  // Load clients when period or servers change.
+  // This resets selectedClients, which triggers loadStats via the effect below.
   useEffect(() => {
     loadClients();
   }, [period, selectedServers]);
 
-  // Load stats when filters change
+  // Load stats when selected clients change.
+  // Period/server changes flow through here indirectly: they trigger loadClients,
+  // which resets selectedClients, which triggers this effect. This avoids the
+  // double-fetch that would occur if period/servers were also in the dep array.
   useEffect(() => {
     loadStats();
-  }, [period, selectedServers, selectedClients]);
+  }, [selectedClients]);
+
+  const applyClientSelection = () => {
+    if (clientSearch) {
+      const s = clientSearch.toLowerCase();
+      const matching = clients.filter(c =>
+        c.client_ip.toLowerCase().includes(s) ||
+        (c.client_hostname?.toLowerCase().includes(s) ?? false)
+      );
+      if (matching.length > 0) {
+        setSelectedClients(matching.map(c => c.client_ip));
+      }
+    } else {
+      setSelectedClients(pendingClients);
+    }
+    setClientDropdownOpen(false);
+    setClientSearch('');
+  };
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -60,14 +82,13 @@ export default function StatisticsPage() {
       if (serverDropdownRef.current && !serverDropdownRef.current.contains(event.target as Node)) {
         setServerDropdownOpen(false);
       }
-      if (clientDropdownRef.current && !clientDropdownRef.current.contains(event.target as Node)) {
-        setClientDropdownOpen(false);
-        setClientSearch('');
+      if (clientDropdownOpen && clientDropdownRef.current && !clientDropdownRef.current.contains(event.target as Node)) {
+        applyClientSelection();
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  });
 
   const loadServers = async () => {
     try {
@@ -87,7 +108,9 @@ export default function StatisticsPage() {
       const clientList = await statisticsApi.getClients(params);
       setClients(clientList);
       // Select all clients by default
-      setSelectedClients(clientList.map(c => c.client_ip));
+      const allIps = clientList.map(c => c.client_ip);
+      setSelectedClients(allIps);
+      setPendingClients(allIps);
     } catch (err) {
       console.error('Failed to load clients:', err);
     }
@@ -100,7 +123,8 @@ export default function StatisticsPage() {
       if (selectedServers.length > 0) {
         params.servers = selectedServers.join(',');
       }
-      if (selectedClients.length > 0) {
+      // Only send client filter when a subset is selected (not all)
+      if (selectedClients.length > 0 && selectedClients.length < clients.length) {
         params.clients = selectedClients.join(',');
       }
       const data = await statisticsApi.get(params);
@@ -128,7 +152,7 @@ export default function StatisticsPage() {
   };
 
   const toggleClient = (clientIp: string) => {
-    setSelectedClients(prev =>
+    setPendingClients(prev =>
       prev.includes(clientIp)
         ? prev.filter(c => c !== clientIp)
         : [...prev, clientIp]
@@ -137,10 +161,10 @@ export default function StatisticsPage() {
 
   const selectAllClients = () => {
     // Toggle between all selected and none selected
-    if (selectedClients.length === clients.length && clients.length > 0) {
-      setSelectedClients([]);
+    if (pendingClients.length === clients.length && clients.length > 0) {
+      setPendingClients([]);
     } else {
-      setSelectedClients(clients.map(c => c.client_ip));
+      setPendingClients(clients.map(c => c.client_ip));
     }
   };
 
@@ -299,7 +323,14 @@ export default function StatisticsPage() {
           {/* Client Dropdown */}
           <div className="relative" ref={clientDropdownRef}>
             <button
-              onClick={() => setClientDropdownOpen(!clientDropdownOpen)}
+              onClick={() => {
+                if (clientDropdownOpen) {
+                  applyClientSelection();
+                } else {
+                  setPendingClients(selectedClients);
+                  setClientDropdownOpen(true);
+                }
+              }}
               className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
             >
               <span>{getClientLabel()}</span>
@@ -322,14 +353,14 @@ export default function StatisticsPage() {
                   />
                 </div>
 
-                <div className="p-2 max-h-64 overflow-y-auto">
+                <div className="p-2 max-h-64 overflow-y-auto" key={`client-list-${clientSearch}`}>
                   {/* Select All Option */}
                   {!clientSearch && (
                     <>
                       <label className="flex items-center gap-2 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
                         <input
                           type="checkbox"
-                          checked={selectedClients.length === clients.length && clients.length > 0}
+                          checked={pendingClients.length === clients.length && clients.length > 0}
                           onChange={selectAllClients}
                           className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
                         />
@@ -354,7 +385,7 @@ export default function StatisticsPage() {
                       >
                         <input
                           type="checkbox"
-                          checked={selectedClients.includes(client.client_ip)}
+                          checked={pendingClients.includes(client.client_ip)}
                           onChange={() => toggleClient(client.client_ip)}
                           className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
                         />
