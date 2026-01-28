@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { statsApi, queryApi, domainApi } from '../utils/api';
 import type { Stats, Query } from '../types';
 import { format } from 'date-fns';
@@ -7,20 +7,34 @@ export default function Dashboard() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [queries, setQueries] = useState<Query[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [hideSystemQueries, setHideSystemQueries] = useState(true); // Hide system queries by default
+  const [hideSystemQueries, setHideSystemQueries] = useState(() => {
+    const stored = localStorage.getItem('dashboard_hideSystemQueries');
+    return stored !== null ? stored === 'true' : true;
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [pageSize, setPageSize] = useState(() => {
+    const stored = Number(localStorage.getItem('dashboard_pageSize'));
+    return [25, 50, 100].includes(stored) ? stored : 50;
+  });
+  const [currentPage, setCurrentPage] = useState(1);
+
+  const isInitialMount = useRef(true);
+
+  useEffect(() => { localStorage.setItem('dashboard_pageSize', String(pageSize)); }, [pageSize]);
+  useEffect(() => { localStorage.setItem('dashboard_hideSystemQueries', String(hideSystemQueries)); }, [hideSystemQueries]);
 
   // Initial load only
   useEffect(() => {
     loadData();
   }, []);
 
-  // Auto-refresh every minute, respecting current search state
+  // Auto-refresh every minute, but only on page 1
   useEffect(() => {
     const interval = setInterval(() => {
+      if (currentPage !== 1) return;
       if (searchTerm) {
         handleSearch();
       } else {
@@ -28,18 +42,21 @@ export default function Dashboard() {
       }
     }, 60000);
     return () => clearInterval(interval);
-  }, [searchTerm]); // Re-create interval when searchTerm changes
+  }, [searchTerm, currentPage]);
 
-  // Debounced search as you type
+  // Debounced search as you type (skip initial mount to avoid duplicate loadData)
   useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
     const delayDebounceFn = setTimeout(() => {
       if (searchTerm) {
         handleSearch();
       } else {
-        // If search is cleared, reload all recent queries
         loadData();
       }
-    }, 300); // Wait 300ms after user stops typing
+    }, 300);
 
     return () => clearTimeout(delayDebounceFn);
   }, [searchTerm]);
@@ -49,7 +66,7 @@ export default function Dashboard() {
       setLoading(true);
       const [statsData, queriesData] = await Promise.all([
         statsApi.get(),
-        queryApi.search({ limit: 100 })
+        queryApi.search({ limit: 1000 })
       ]);
       setStats(statsData);
       setQueries(queriesData);
@@ -71,7 +88,7 @@ export default function Dashboard() {
       const searchResults = await queryApi.search({
         search: searchTerm || undefined,
         from_date: sevenDaysAgo.toISOString(),
-        limit: 100
+        limit: 1000
       });
       setQueries(searchResults);
     } catch (err) {
@@ -148,6 +165,11 @@ export default function Dashboard() {
       })
     : queries;
 
+  const totalPages = Math.max(1, Math.ceil(filteredQueries.length / pageSize));
+  const clampedPage = Math.min(currentPage, totalPages);
+  if (clampedPage !== currentPage) setCurrentPage(clampedPage);
+  const paginatedQueries = filteredQueries.slice((clampedPage - 1) * pageSize, clampedPage * pageSize);
+
   return (
     <div className="space-y-6">
       <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
@@ -196,11 +218,20 @@ export default function Dashboard() {
                 type="text"
                 placeholder="Search domain, IP, or hostname..."
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
                 className="flex-1 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
+              <select
+                value={pageSize}
+                onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
+                className="border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md px-2 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              >
+                <option value={25}>25 rows</option>
+                <option value={50}>50 rows</option>
+                <option value={100}>100 rows</option>
+              </select>
               <button
-                onClick={loadData}
+                onClick={() => { setSearchTerm(''); setCurrentPage(1); }}
                 className="bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 px-4 py-2 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500"
               >
                 Clear
@@ -222,12 +253,12 @@ export default function Dashboard() {
 
           {/* Mobile Card View */}
           <div className="md:hidden space-y-3">
-            {filteredQueries.length === 0 ? (
+            {paginatedQueries.length === 0 ? (
               <div className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">
                 No queries found
               </div>
             ) : (
-              filteredQueries.map((query) => {
+              paginatedQueries.map((query) => {
                 const isBlocked = query.status?.toUpperCase().includes('GRAVITY') ||
                                   query.status?.toUpperCase().includes('BLACKLIST');
                 return (
@@ -337,14 +368,14 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                {filteredQueries.length === 0 ? (
+                {paginatedQueries.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="px-6 py-4 text-center text-gray-500 dark:text-gray-400">
                       No queries found
                     </td>
                   </tr>
                 ) : (
-                  filteredQueries.map((query) => {
+                  paginatedQueries.map((query) => {
                     const isBlocked = query.status?.toUpperCase().includes('GRAVITY') ||
                                       query.status?.toUpperCase().includes('BLACKLIST');
                     return (
@@ -359,7 +390,7 @@ export default function Dashboard() {
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-300">
                           {format(new Date(query.timestamp), 'MMM dd, HH:mm:ss')}
                         </td>
-                        <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-300 truncate">
+                        <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-300 max-w-xs truncate" title={query.domain}>
                           {query.domain}
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-300">
@@ -427,6 +458,45 @@ export default function Dashboard() {
               </tbody>
             </table>
           </div>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="mt-4 flex items-center justify-between">
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Page {clampedPage} of {totalPages} ({filteredQueries.length} results)
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setCurrentPage(1)}
+                  disabled={currentPage === 1}
+                  className="px-3 py-1 text-sm rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  First
+                </button>
+                <button
+                  onClick={() => setCurrentPage(p => p - 1)}
+                  disabled={currentPage === 1}
+                  className="px-3 py-1 text-sm rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Prev
+                </button>
+                <button
+                  onClick={() => setCurrentPage(p => p + 1)}
+                  disabled={currentPage >= totalPages}
+                  className="px-3 py-1 text-sm rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
+                <button
+                  onClick={() => setCurrentPage(totalPages)}
+                  disabled={currentPage >= totalPages}
+                  className="px-3 py-1 text-sm rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Last
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
