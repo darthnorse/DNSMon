@@ -6,6 +6,7 @@ A comprehensive web-based dashboard for monitoring and managing multiple Pi-hole
 ![Backend](https://img.shields.io/badge/Backend-FastAPI-009688?style=flat-square&logo=fastapi)
 ![Database](https://img.shields.io/badge/Database-PostgreSQL-4169E1?style=flat-square&logo=postgresql)
 ![Docker](https://img.shields.io/badge/Docker-Multi--arch-2496ED?style=flat-square&logo=docker)
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-ffdd00?style=flat-square&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/darthnorse)
 
 ## Screenshots
 
