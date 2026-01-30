@@ -7,6 +7,12 @@ A comprehensive web-based dashboard for monitoring and managing multiple Pi-hole
 ![Database](https://img.shields.io/badge/Database-PostgreSQL-4169E1?style=flat-square&logo=postgresql)
 ![Docker](https://img.shields.io/badge/Docker-Multi--arch-2496ED?style=flat-square&logo=docker)
 
+## Screenshots
+
+| Dashboard | Statistics |
+|-----------|------------|
+| ![Dashboard](docs/images/dnsmon_dashboard.png) | ![Statistics](docs/images/dnsmon_statistics.png) |
+
 ## Features
 
 ### Multi-Server Support
@@ -378,3 +384,13 @@ Built with:
 - [Tailwind CSS](https://tailwindcss.com/) - Styling
 - [Recharts](https://recharts.org/) - Charts
 - [SQLAlchemy](https://www.sqlalchemy.org/) - ORM
+
+## Support
+
+If you find DNSMon useful, consider buying me a coffee!
+
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/darthnorse)
+
+## Acknowledgments
+
+This project has been developed with vibe coding and AI assistance using [Claude Code](https://docs.anthropic.com/en/docs/claude-code). The codebase includes clean, well-documented code with proper error handling, comprehensive testing considerations, modern async/await patterns, robust database design, and production-ready deployment configurations.
