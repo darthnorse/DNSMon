@@ -49,8 +49,9 @@ export default function Search() {
       setQueries(results);
       setTotalCount(count);
       setSearchParams({ ...searchParams, offset });
-    } catch (err) {
-      setError('Failed to search queries');
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { detail?: string } } };
+      setError(error.response?.data?.detail || 'Failed to search queries');
       console.error(err);
     } finally {
       setLoading(false);
