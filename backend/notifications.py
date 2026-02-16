@@ -435,7 +435,7 @@ class NotificationService:
             client_hostname=first_query.client_hostname,
             rule_name=rule.name,
             server_name=first_query.server,
-            timestamp=first_query.timestamp.strftime("%Y-%m-%d %H:%M:%S") if first_query.timestamp else "",
+            timestamp=first_query.timestamp.astimezone().strftime("%Y-%m-%d %H:%M:%S %Z") if first_query.timestamp else "",
             query_type=first_query.query_type or "",
             status=first_query.status or "",
             count=len(queries),
