@@ -645,12 +645,12 @@ export default function Settings() {
     { id: 'notifications', label: 'Notifications' },
     { id: 'polling', label: 'Polling & Retention' },
     { id: 'sync', label: 'Sync' },
-    ...(user?.is_admin ? [{ id: 'oidc' as TabType, label: 'OIDC' }] : []),
-    { id: 'advanced', label: 'Advanced' },
     ...(user?.is_admin ? [
       { id: 'users' as TabType, label: 'Users' },
+      { id: 'oidc' as TabType, label: 'OIDC' },
       { id: 'api-keys' as TabType, label: 'API Keys' },
     ] : []),
+    { id: 'advanced', label: 'Advanced' },
   ];
 
   if (loading) {
