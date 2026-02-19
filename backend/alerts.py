@@ -36,11 +36,9 @@ class AlertEngine:
                 self._rule_locks.move_to_end(rule_id)
                 return self._rule_locks[rule_id]
 
-            # Create new lock
             lock = asyncio.Lock()
             self._rule_locks[rule_id] = lock
 
-            # Evict oldest if over limit
             if len(self._rule_locks) > self._max_locks:
                 oldest_id, _ = self._rule_locks.popitem(last=False)
                 logger.debug(f"Evicted lock for rule_id {oldest_id} (LRU cache full)")
@@ -74,27 +72,23 @@ class AlertEngine:
             return []
 
         patterns = []
-        # Split by comma and process each pattern
         for pattern in pattern_string.split(','):
             pattern = pattern.strip()
             if not pattern:
                 continue
 
-            # Normalize (auto-wildcard)
             pattern = self._normalize_pattern(pattern)
 
             # ReDoS protection: limit wildcards and pattern complexity
             wildcard_count = pattern.count('*') + pattern.count('?')
             if wildcard_count > 10:
                 logger.warning(f"Pattern '{pattern}' has too many wildcards ({wildcard_count}), limiting to prevent ReDoS")
-                # Skip this pattern to avoid potential ReDoS
                 continue
 
             if len(pattern) > 1000:
                 logger.warning(f"Pattern '{pattern}' is too long ({len(pattern)} chars), limiting to prevent ReDoS")
                 pattern = pattern[:1000]
 
-            # Convert wildcard pattern to regex
             regex_pattern = re.escape(pattern)
             regex_pattern = regex_pattern.replace(r'\*', '.*?')  # Use non-greedy matching
             regex_pattern = regex_pattern.replace(r'\?', '.')
@@ -121,7 +115,6 @@ class AlertEngine:
                 self._pattern_cache.move_to_end(rule.id)
                 return self._pattern_cache[rule.id]
 
-            # Compile and cache
             cached = {
                 'domain': self._compile_patterns(rule.domain_pattern),
                 'client_ip': self._compile_patterns(rule.client_ip_pattern),
@@ -129,7 +122,6 @@ class AlertEngine:
             }
             self._pattern_cache[rule.id] = cached
 
-            # Evict oldest if over limit
             if len(self._pattern_cache) > self._max_pattern_cache:
                 oldest_id, _ = self._pattern_cache.popitem(last=False)
                 logger.debug(f"Evicted pattern cache for rule_id {oldest_id} (LRU cache full)")
@@ -160,7 +152,6 @@ class AlertEngine:
             # Comma-separated format (new default)
             excludes = [e.strip() for e in exclude_domains.split(',') if e.strip()]
 
-        # Check each exclusion (substring matching)
         domain_lower = domain.lower()
         for exclude in excludes:
             if str(exclude).lower() in domain_lower:
@@ -202,20 +193,17 @@ class AlertEngine:
             # Check if query matches rule patterns
             matches = True
 
-            # Domain pattern
             domain_patterns = patterns.get('domain', [])
             if domain_patterns:
                 if not self._matches_compiled_patterns(query.domain, domain_patterns):
                     matches = False
 
-            # Client IP pattern
             if matches:
                 ip_patterns = patterns.get('client_ip', [])
                 if ip_patterns:
                     if not self._matches_compiled_patterns(query.client_ip, ip_patterns):
                         matches = False
 
-            # Client hostname pattern
             if matches:
                 hostname_patterns = patterns.get('client_hostname', [])
                 if hostname_patterns:
@@ -265,7 +253,6 @@ class AlertEngine:
             # Now we have exclusive access for this rule
             try:
                 async with async_session_maker() as session:
-                    # Check cooldown
                     if cooldown_minutes > 0:
                         cooldown_start = datetime.now(timezone.utc) - timedelta(minutes=cooldown_minutes)
                         stmt = select(AlertHistory).where(
@@ -281,7 +268,6 @@ class AlertEngine:
                         if last_alert is not None:
                             return None  # In cooldown
 
-                    # Not in cooldown, insert the alert record
                     alert_history = AlertHistory(
                         alert_rule_id=rule_id,
                         query_id=query_id,
@@ -328,7 +314,6 @@ class AlertEngine:
 
         try:
             async with async_session_maker() as session:
-                # Get all enabled alert rules once
                 rules_stmt = select(AlertRule).where(AlertRule.enabled == True)
                 rules_result = await session.execute(rules_stmt)
                 rules = rules_result.scalars().all()
@@ -336,7 +321,6 @@ class AlertEngine:
                 if not rules:
                     return []  # No rules to check
 
-                # Compile patterns for all rules once (cached)
                 cached_patterns = {}
                 for rule in rules:
                     cached_patterns[rule.id] = await self._get_cached_patterns(rule)
@@ -346,7 +330,6 @@ class AlertEngine:
                 queries_processed = 0
 
                 while queries_processed < max_queries and len(matches) < max_matches:
-                    # Get batch of recent queries
                     stmt = (
                         select(Query)
                         .where(Query.timestamp >= since)
@@ -360,7 +343,6 @@ class AlertEngine:
                     if not queries:
                         break  # No more queries
 
-                    # Evaluate each query against all rules (in-memory, using cached patterns)
                     for query in queries:
                         rule_ids = self._evaluate_query_against_rules(query, rules, cached_patterns)
                         if rule_ids:

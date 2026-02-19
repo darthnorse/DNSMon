@@ -97,7 +97,6 @@ async def update_app_setting(
     }
 
 
-# Pi-hole server endpoints
 
 @router.get("/pihole-servers")
 async def get_servers(
@@ -119,13 +118,11 @@ async def create_server(
     _: User = Depends(require_admin)
 ):
     """Create a new Pi-hole server"""
-    # Check for duplicate name
     stmt = select(PiholeServerModel).where(PiholeServerModel.name == server_data.name)
     existing = await db.execute(stmt)
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Server with this name already exists")
 
-    # Get max display order
     stmt = (
         select(PiholeServerModel.display_order)
         .order_by(PiholeServerModel.display_order.desc())

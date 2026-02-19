@@ -38,7 +38,6 @@ export default function Login() {
     }
   }, [searchParams]);
 
-  // Load OIDC providers
   useEffect(() => {
     const loadOidcProviders = async () => {
       try {

@@ -11,7 +11,6 @@ export default function Search() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
-  // Search form state
   const [searchParams, setSearchParams] = useState<QuerySearchParams>({
     domain: '',
     client_ip: '',
@@ -121,7 +120,6 @@ export default function Search() {
     <div className="space-y-6">
       <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Query Search</h1>
 
-      {/* Search Form */}
       <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <div>
@@ -225,21 +223,18 @@ export default function Search() {
         </div>
       </div>
 
-      {/* Error Message */}
       {error && (
         <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800/50 text-red-700 dark:text-red-300 px-4 py-3 rounded">
           {error}
         </div>
       )}
 
-      {/* Success Message */}
       {successMessage && (
         <div className="bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800/50 text-green-700 dark:text-green-300 px-4 py-3 rounded">
           {successMessage}
         </div>
       )}
 
-      {/* Results */}
       {queries.length > 0 && (
         <div className="bg-white dark:bg-gray-800 shadow rounded-lg overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
@@ -334,7 +329,6 @@ export default function Search() {
             </table>
           </div>
 
-          {/* Pagination */}
           <div className="bg-white dark:bg-gray-800 px-4 py-3 flex items-center justify-between border-t border-gray-200 dark:border-gray-700 sm:px-6">
             <div className="flex-1 flex justify-between sm:hidden">
               <button

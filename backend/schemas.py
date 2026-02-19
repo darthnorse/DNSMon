@@ -3,9 +3,11 @@ Pydantic schemas for DNSMon API.
 Shared across all route modules.
 """
 
-from pydantic import BaseModel, Field as PydanticField, field_validator
+import re
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List
-from datetime import datetime
+
+from pydantic import BaseModel, Field as PydanticField, field_validator
 
 
 # ============================================================================
@@ -128,7 +130,6 @@ class SetupRequest(BaseModel):
     @field_validator('username')
     @classmethod
     def validate_username(cls, v: str) -> str:
-        import re
         if not re.match(r'^[a-zA-Z0-9_-]+$', v):
             raise ValueError("Username can only contain letters, numbers, underscores, and hyphens")
         return v.lower()
@@ -138,7 +139,6 @@ class SetupRequest(BaseModel):
     def validate_email(cls, v: Optional[str]) -> Optional[str]:
         if v is None or v == '':
             return None
-        import re
         if not re.match(r'^[^@]+@[^@]+\.[^@]+$', v):
             raise ValueError("Invalid email format")
         return v.lower()
@@ -173,7 +173,6 @@ class UserCreate(BaseModel):
     @field_validator('username')
     @classmethod
     def validate_username(cls, v: str) -> str:
-        import re
         if not re.match(r'^[a-zA-Z0-9_-]+$', v):
             raise ValueError("Username can only contain letters, numbers, underscores, and hyphens")
         return v.lower()
@@ -235,7 +234,6 @@ class OIDCProviderCreate(BaseModel):
     @field_validator('name')
     @classmethod
     def validate_name(cls, v: str) -> str:
-        import re
         if not re.match(r'^[a-z0-9_-]+$', v):
             raise ValueError("Name can only contain lowercase letters, numbers, underscores, and hyphens")
         return v.lower()
@@ -332,3 +330,33 @@ class DomainRequest(BaseModel):
 class BlockingSetRequest(BaseModel):
     enabled: bool
     duration_minutes: Optional[int] = PydanticField(default=None, ge=1, le=1440)
+
+
+# ============================================================================
+# API Key Schemas
+# ============================================================================
+
+class ApiKeyCreate(BaseModel):
+    name: str = PydanticField(min_length=1, max_length=100)
+    is_admin: bool = False
+    expires_at: Optional[datetime] = None
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Name cannot be blank")
+        if not re.match(r'^[a-zA-Z0-9 _-]+$', v):
+            raise ValueError("Name can only contain letters, numbers, spaces, underscores, and hyphens")
+        return v
+
+    @field_validator('expires_at')
+    @classmethod
+    def validate_expires_at(cls, v: Optional[datetime]) -> Optional[datetime]:
+        if v is not None:
+            if v.tzinfo is None:
+                v = v.replace(tzinfo=timezone.utc)
+            if v <= datetime.now(timezone.utc) + timedelta(minutes=1):
+                raise ValueError("Expiration date must be at least 1 minute in the future")
+        return v

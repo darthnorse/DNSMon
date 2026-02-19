@@ -40,9 +40,14 @@ async def check_auth(
     setup_complete = await is_setup_complete(db)
     user = await get_current_user_optional(request, db)
 
+    # Transient API key users (id=-1) are authenticated but lack full profile fields
+    user_response = None
+    if user is not None:
+        user_response = UserResponse(**user.to_dict())
+
     return AuthCheckResponse(
         authenticated=user is not None,
-        user=UserResponse(**user.to_dict()) if user else None,
+        user=user_response,
         setup_complete=setup_complete
     )
 
@@ -82,7 +87,6 @@ async def login(
     db: AsyncSession = Depends(get_db)
 ):
     """Login with username and password"""
-    # Check if local auth is disabled
     stmt = select(AppSetting).where(AppSetting.key == 'disable_local_auth')
     result = await db.execute(stmt)
     setting = result.scalar_one_or_none()
@@ -97,8 +101,6 @@ async def login(
         logger.warning(f"Rate limit exceeded for IP: {client_ip}")
         raise HTTPException(status_code=429, detail="Too many login attempts. Please try again later.")
 
-    record_login_attempt(client_ip)
-
     if not await is_setup_complete(db):
         raise HTTPException(status_code=400, detail="Setup not complete. Please create an admin account first.")
 
@@ -107,12 +109,15 @@ async def login(
     user = result.scalar_one_or_none()
 
     if not user or not user.password_hash:
+        record_login_attempt(client_ip)
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
     if not user.is_active:
+        record_login_attempt(client_ip)
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
     if not verify_password(data.password, user.password_hash):
+        record_login_attempt(client_ip)
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
     session = await create_session(db, user, request)

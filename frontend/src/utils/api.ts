@@ -29,6 +29,9 @@ import type {
   NotificationChannelUpdate,
   TemplateVariablesResponse,
   ChannelTypesResponse,
+  ApiKey,
+  ApiKeyCreate,
+  ApiKeyCreateResponse,
 } from '../types';
 
 const API_BASE_URL = '/api';
@@ -108,19 +111,16 @@ export const alertRuleApi = {
 };
 
 export const settingsApi = {
-  // Get all settings
   get: async (): Promise<SettingsResponse> => {
     const response = await api.get<SettingsResponse>('/settings');
     return response.data;
   },
 
-  // Update a single app setting
   updateSetting: async (key: string, value: string): Promise<{ message: string; setting: any; requires_restart: boolean }> => {
     const response = await api.put<{ message: string; setting: any; requires_restart: boolean }>(`/settings/${key}`, { value });
     return response.data;
   },
 
-  // Trigger application restart
   restart: async (): Promise<void> => {
     await api.post('/settings/restart');
   },
@@ -154,19 +154,16 @@ export const settingsApi = {
 };
 
 export const syncApi = {
-  // Preview what would be synced
   preview: async (): Promise<any> => {
     const response = await api.get('/sync/preview');
     return response.data;
   },
 
-  // Execute sync from all sources to their respective targets
   execute: async (): Promise<{ message: string; sync_history_ids: number[]; sync_history_id: number | null }> => {
     const response = await api.post<{ message: string; sync_history_ids: number[]; sync_history_id: number | null }>('/sync/execute');
     return response.data;
   },
 
-  // Get sync history
   getHistory: async (limit: number = 20): Promise<any[]> => {
     const response = await api.get<{ history: any[] }>('/sync/history', { params: { limit } });
     return response.data.history;
@@ -174,7 +171,6 @@ export const syncApi = {
 };
 
 export const domainApi = {
-  // Quick actions - add to whitelist/blacklist
   whitelist: async (domain: string): Promise<void> => {
     await api.post('/domains/whitelist', { domain });
   },
@@ -183,7 +179,6 @@ export const domainApi = {
     await api.post('/domains/blacklist', { domain });
   },
 
-  // List management
   getWhitelist: async (): Promise<DomainEntry[]> => {
     const response = await api.get<{ domains: DomainEntry[] }>('/domains/whitelist');
     return response.data.domains;
@@ -230,19 +225,16 @@ export const domainApi = {
 };
 
 export const blockingApi = {
-  // Get blocking status for all servers
   getStatus: async (): Promise<BlockingStatusResponse> => {
     const response = await api.get<BlockingStatusResponse>('/blocking/status');
     return response.data;
   },
 
-  // Set blocking for a specific server
   setBlocking: async (serverId: number, request: BlockingSetRequest): Promise<BlockingSetResponse> => {
     const response = await api.post<BlockingSetResponse>(`/blocking/${serverId}`, request);
     return response.data;
   },
 
-  // Set blocking for all servers
   setAllBlocking: async (request: BlockingSetRequest): Promise<BlockingSetResponse> => {
     const response = await api.post<BlockingSetResponse>('/blocking/all', request);
     return response.data;
@@ -421,6 +413,30 @@ export const notificationChannelApi = {
   getChannelTypes: async (): Promise<ChannelTypesResponse> => {
     const response = await api.get<ChannelTypesResponse>('/notification-channels/channel-types');
     return response.data;
+  },
+};
+
+// ============================================================================
+// API Key Management API (Admin only)
+// ============================================================================
+
+export const apiKeyApi = {
+  getAll: async (): Promise<ApiKey[]> => {
+    const response = await api.get<ApiKey[]>('/api-keys');
+    return response.data;
+  },
+
+  create: async (data: ApiKeyCreate): Promise<ApiKeyCreateResponse> => {
+    const payload = { ...data };
+    if (payload.expires_at && !payload.expires_at.endsWith('Z') && !/[+-]\d{2}:?\d{2}$/.test(payload.expires_at)) {
+      payload.expires_at = new Date(payload.expires_at).toISOString();
+    }
+    const response = await api.post<ApiKeyCreateResponse>('/api-keys', payload);
+    return response.data;
+  },
+
+  revoke: async (id: number): Promise<void> => {
+    await api.delete(`/api-keys/${id}`);
   },
 };
 

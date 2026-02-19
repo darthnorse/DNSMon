@@ -3,7 +3,6 @@ import os
 from logging.handlers import RotatingFileHandler
 import uvicorn
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -33,10 +32,7 @@ except (PermissionError, OSError) as e:
 
 
 def main():
-    """Main entry point"""
     logger.info("Starting DNSMon...")
-
-    # Start FastAPI server - initialization happens in startup event
     uvicorn.run(
         "backend.api:app",
         host="0.0.0.0",

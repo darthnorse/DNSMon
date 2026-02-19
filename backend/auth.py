@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from passlib.context import CryptContext
 
 from .database import get_db
-from .models import User, Session, OIDCProvider, utcnow
+from .models import User, Session, OIDCProvider, ApiKey, utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -202,14 +202,61 @@ async def is_setup_complete(db: AsyncSession) -> bool:
 # FastAPI Dependencies
 # ============================================================================
 
+API_KEY_USER_SENTINEL_ID = -1
+
+
+async def _get_user_from_api_key(token: str, db: AsyncSession, client_ip: str) -> User:
+    """
+    Validate a Bearer token against stored API keys.
+    Returns a transient User object if valid, raises 401 otherwise.
+    """
+    if not _api_key_limiter.check(client_ip):
+        raise HTTPException(status_code=429, detail="Too many invalid API key attempts. Please try again later.")
+
+    key_hash = ApiKey.hash_key(token)
+    stmt = select(ApiKey).where(ApiKey.key_hash == key_hash)
+    result = await db.execute(stmt)
+    api_key = result.scalar_one_or_none()
+
+    if not api_key:
+        _api_key_limiter.record(client_ip)
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    if api_key.expires_at and api_key.expires_at < utcnow():
+        _api_key_limiter.record(client_ip)
+        raise HTTPException(status_code=401, detail="API key has expired")
+
+    now = utcnow()
+    if not api_key.last_used_at or (now - api_key.last_used_at) > timedelta(minutes=5):
+        api_key.last_used_at = now
+        await db.commit()
+
+    # Sentinel ID can never match a real DB row, preventing false
+    # positives in user self-protection guards (e.g. "cannot delete yourself")
+    user = User(
+        id=API_KEY_USER_SENTINEL_ID,
+        username=f"api-key:{api_key.name}",
+        is_admin=api_key.is_admin,
+        is_active=True,
+    )
+    return user
+
+
 async def get_current_user(
     request: Request,
     db: AsyncSession = Depends(get_db)
 ) -> User:
     """
     FastAPI dependency to get the current authenticated user.
+    If an Authorization: Bearer header is present, only API key auth is
+    attempted (no fallback to session cookie). Otherwise checks session cookie.
     Raises 401 if not authenticated.
     """
+    auth_header = request.headers.get("authorization")
+    if auth_header and auth_header.lower().startswith("bearer "):
+        token = auth_header[7:]
+        return await _get_user_from_api_key(token, db, get_client_ip(request))
+
     session_id = get_session_id_from_request(request)
     if not session_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -270,62 +317,53 @@ OIDC_STATE_EXPIRY_MINUTES = 10
 
 
 # ============================================================================
-# Rate Limiting (Login)
+# Rate Limiting
 # ============================================================================
 
-# In-memory rate limit tracking (cleared on restart)
-# For production with multiple instances, use Redis
-_login_attempts: Dict[str, list] = {}
+class InMemoryRateLimiter:
+    """Simple in-memory rate limiter by key (e.g. IP address).
+    For production with multiple instances, use Redis."""
 
-LOGIN_RATE_LIMIT_ATTEMPTS = 5  # Max attempts
-LOGIN_RATE_LIMIT_WINDOW_SECONDS = 60  # Window in seconds
+    def __init__(self, max_attempts: int, window_seconds: int):
+        self._attempts: Dict[str, list] = {}
+        self.max_attempts = max_attempts
+        self.window_seconds = window_seconds
+
+    def check(self, key: str) -> bool:
+        """Returns True if allowed, False if rate limited."""
+        cutoff = utcnow() - timedelta(seconds=self.window_seconds)
+        attempts = self._attempts.get(key, [])
+        recent = [t for t in attempts if t > cutoff]
+        self._attempts[key] = recent
+        return len(recent) < self.max_attempts
+
+    def record(self, key: str) -> None:
+        """Record a failed attempt."""
+        if key not in self._attempts:
+            self._attempts[key] = []
+        self._attempts[key].append(utcnow())
+        if len(self._attempts) > 100:
+            self._cleanup()
+
+    def _cleanup(self) -> None:
+        """Remove expired attempt records."""
+        cutoff = utcnow() - timedelta(seconds=self.window_seconds * 2)
+        expired = [k for k, v in self._attempts.items() if not any(t > cutoff for t in v)]
+        for k in expired:
+            self._attempts.pop(k, None)
 
 
+_login_limiter = InMemoryRateLimiter(max_attempts=5, window_seconds=60)
+_api_key_limiter = InMemoryRateLimiter(max_attempts=10, window_seconds=60)
+
+
+# Backwards-compatible aliases used by routes/auth.py
 def check_login_rate_limit(ip_address: str) -> bool:
-    """
-    Check if IP address is rate limited.
-    Returns True if allowed, False if rate limited.
-    """
-    now = utcnow()
-    cutoff = now - timedelta(seconds=LOGIN_RATE_LIMIT_WINDOW_SECONDS)
-
-    # Get attempts for this IP
-    attempts = _login_attempts.get(ip_address, [])
-
-    # Filter to only recent attempts
-    recent_attempts = [t for t in attempts if t > cutoff]
-
-    # Update stored attempts
-    _login_attempts[ip_address] = recent_attempts
-
-    # Check if under limit
-    return len(recent_attempts) < LOGIN_RATE_LIMIT_ATTEMPTS
+    return _login_limiter.check(ip_address)
 
 
 def record_login_attempt(ip_address: str) -> None:
-    """Record a login attempt for rate limiting."""
-    now = utcnow()
-    if ip_address not in _login_attempts:
-        _login_attempts[ip_address] = []
-    _login_attempts[ip_address].append(now)
-
-    # Cleanup old entries periodically (every 100th call)
-    if len(_login_attempts) > 100:
-        cleanup_login_attempts()
-
-
-def cleanup_login_attempts() -> None:
-    """Remove expired login attempt records."""
-    cutoff = utcnow() - timedelta(seconds=LOGIN_RATE_LIMIT_WINDOW_SECONDS * 2)
-    expired_ips = []
-    for ip, attempts in _login_attempts.items():
-        recent = [t for t in attempts if t > cutoff]
-        if not recent:
-            expired_ips.append(ip)
-        else:
-            _login_attempts[ip] = recent
-    for ip in expired_ips:
-        _login_attempts.pop(ip, None)
+    _login_limiter.record(ip_address)
 
 
 def generate_oidc_state() -> str:

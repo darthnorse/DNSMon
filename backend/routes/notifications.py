@@ -140,11 +140,9 @@ async def create_channel(
     _: User = Depends(require_admin)
 ):
     """Create a new notification channel"""
-    # Validate channel type
     if data.channel_type not in SENDERS:
         raise HTTPException(400, f"Invalid channel_type. Must be one of: {list(SENDERS.keys())}")
 
-    # Validate config
     sender = SENDERS[data.channel_type]
     errors = sender.validate_config(data.config)
     if errors:
@@ -188,9 +186,7 @@ async def update_channel(
 
     update_data = data.model_dump(exclude_unset=True)
 
-    # If config is being updated, validate it
     if 'config' in update_data and update_data['config']:
-        # Merge with existing config, but skip masked values
         new_config = channel.config.copy() if channel.config else {}
         for key, value in update_data['config'].items():
             # Skip masked values - keep existing value

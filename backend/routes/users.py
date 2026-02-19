@@ -36,13 +36,11 @@ async def create_user(
     admin: User = Depends(require_admin)
 ) -> UserResponse:
     """Create a new user (admin only)"""
-    # Check if username exists
     stmt = select(User).where(User.username == data.username.lower())
     result = await db.execute(stmt)
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Username already exists")
 
-    # Check if email exists (if provided)
     if data.email:
         stmt = select(User).where(User.email == data.email.lower())
         result = await db.execute(stmt)

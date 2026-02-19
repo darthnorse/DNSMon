@@ -7,6 +7,7 @@ import AlertRules from './pages/AlertRules';
 import Statistics from './pages/Statistics';
 import Settings from './pages/Settings';
 import Users from './pages/Users';
+import ApiKeys from './pages/ApiKeys';
 import Login from './pages/Login';
 import Setup from './pages/Setup';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -14,7 +15,6 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import { blockingApi } from './utils/api';
 import type { BlockingStatus } from './types';
 
-// Duration options for blocking disable
 const DURATION_OPTIONS = [
   { label: '1 minute', value: 1 },
   { label: '5 minutes', value: 5 },
@@ -29,7 +29,6 @@ function Navigation({ darkMode, toggleDarkMode }: { darkMode: boolean; toggleDar
   const navigate = useNavigate();
   const { user, logout } = useAuth();
 
-  // Blocking state
   const [blockingStatuses, setBlockingStatuses] = useState<BlockingStatus[]>([]);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -48,6 +47,7 @@ function Navigation({ darkMode, toggleDarkMode }: { darkMode: boolean; toggleDar
       { path: '/alerts', label: 'Alert Rules' },
       { path: '/settings', label: 'Settings' },
       { path: '/users', label: 'Users' },
+      { path: '/api-keys', label: 'API Keys' },
     ] : []),
   ];
 
@@ -137,7 +137,6 @@ function Navigation({ darkMode, toggleDarkMode }: { darkMode: boolean; toggleDar
     }
   };
 
-  // Compute status
   const anyDisabled = blockingStatuses.some(s => s.blocking === false);
   const anyUnknown = blockingStatuses.some(s => s.blocking === null);
   const hasServers = blockingStatuses.length > 0;
@@ -176,7 +175,6 @@ function Navigation({ darkMode, toggleDarkMode }: { darkMode: boolean; toggleDar
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {/* Blocking Control Dropdown */}
             {hasServers && (
               <div className="relative" ref={dropdownRef}>
                 <button
@@ -196,7 +194,6 @@ function Navigation({ darkMode, toggleDarkMode }: { darkMode: boolean; toggleDar
                   </svg>
                 </button>
 
-                {/* Dropdown Panel */}
                 {dropdownOpen && (
                   <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-50">
                     <div className="p-3 border-b border-gray-200 dark:border-gray-700">
@@ -206,7 +203,6 @@ function Navigation({ darkMode, toggleDarkMode }: { darkMode: boolean; toggleDar
                       </p>
                     </div>
 
-                    {/* Status Display */}
                     <div className="p-3 border-b border-gray-200 dark:border-gray-700">
                       <div className="flex items-center justify-between">
                         <span className="text-sm text-gray-700 dark:text-gray-300">Status</span>
@@ -237,10 +233,8 @@ function Navigation({ darkMode, toggleDarkMode }: { darkMode: boolean; toggleDar
                       )}
                     </div>
 
-                    {/* Action Section - Admin only */}
                     {user?.is_admin ? (
                       anyDisabled ? (
-                        /* Enable button when disabled */
                         <div className="p-3">
                           <button
                             onClick={handleEnable}
@@ -251,7 +245,6 @@ function Navigation({ darkMode, toggleDarkMode }: { darkMode: boolean; toggleDar
                           </button>
                         </div>
                       ) : (
-                        /* Disable controls when enabled */
                         <>
                           <div className="p-3 border-b border-gray-200 dark:border-gray-700">
                             <label className="block text-sm text-gray-700 dark:text-gray-300 mb-1">
@@ -290,7 +283,6 @@ function Navigation({ darkMode, toggleDarkMode }: { darkMode: boolean; toggleDar
               </div>
             )}
 
-            {/* Dark Mode Toggle */}
             <button
               onClick={toggleDarkMode}
               className="flex-shrink-0 p-2 rounded-md text-gray-300 hover:bg-gray-700 dark:hover:bg-gray-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-white"
@@ -307,7 +299,6 @@ function Navigation({ darkMode, toggleDarkMode }: { darkMode: boolean; toggleDar
               )}
             </button>
 
-            {/* User Menu */}
             {user && (
               <div className="relative" ref={userMenuRef}>
                 <button
@@ -390,6 +381,7 @@ function AppLayout() {
           <Route path="/alerts" element={<ProtectedRoute requireAdmin><AlertRules /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute requireAdmin><Settings /></ProtectedRoute>} />
           <Route path="/users" element={<ProtectedRoute requireAdmin><Users /></ProtectedRoute>} />
+          <Route path="/api-keys" element={<ProtectedRoute requireAdmin><ApiKeys /></ProtectedRoute>} />
         </Routes>
       </main>
     </div>
@@ -401,11 +393,8 @@ function App() {
     <Router>
       <AuthProvider>
         <Routes>
-          {/* Public routes */}
           <Route path="/login" element={<Login />} />
           <Route path="/setup" element={<Setup />} />
-
-          {/* Protected routes - wrapped in layout */}
           <Route path="/*" element={<AppLayout />} />
         </Routes>
       </AuthProvider>

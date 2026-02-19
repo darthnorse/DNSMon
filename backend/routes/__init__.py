@@ -13,6 +13,7 @@ from .sync import router as sync_router
 from .domains import router as domains_router
 from .blocking import router as blocking_router
 from .notifications import router as notifications_router
+from .api_keys import router as api_keys_router
 
 __all__ = [
     'auth_router',
@@ -26,4 +27,5 @@ __all__ = [
     'domains_router',
     'blocking_router',
     'notifications_router',
+    'api_keys_router',
 ]

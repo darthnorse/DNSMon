@@ -23,17 +23,14 @@ class PiholeClient(DNSBlockerClient):
 
     @property
     def supports_regex_lists(self) -> bool:
-        """Pi-hole supports regex-based lists."""
         return True
 
     @property
     def supports_teleporter(self) -> bool:
-        """Pi-hole supports backup/restore via teleporter."""
         return True
 
     @property
     def supports_sync(self) -> bool:
-        """Pi-hole supports cross-instance configuration sync."""
         return True
 
     async def __aenter__(self):
@@ -48,7 +45,6 @@ class PiholeClient(DNSBlockerClient):
         try:
             auth_url = f"{self.url}/api/auth"
 
-            # First, check current session status
             response = await self.client.get(auth_url)
 
             if response.status_code not in [200, 401]:
@@ -57,12 +53,10 @@ class PiholeClient(DNSBlockerClient):
 
             auth_data = response.json()
 
-            # Check if already authenticated
             if auth_data.get("session", {}).get("valid", False):
                 logger.info(f"Already authenticated to {self.server_name}")
                 return True
 
-            # Not authenticated, send password
             auth_payload = {"password": self.password}
             response = await self.client.post(auth_url, json=auth_payload)
 
@@ -71,17 +65,14 @@ class PiholeClient(DNSBlockerClient):
                 if auth_result.get("session", {}).get("valid", False):
                     logger.info(f"Authentication successful for {self.server_name}")
 
-                    # Store session info
                     session_data = auth_result.get("session", {})
                     self.session_info["sid"] = session_data.get("sid")
                     self.session_info["csrf"] = session_data.get("csrf")
                     self.session_info["auth_time"] = time.time()
 
-                    # Set session cookie
                     if self.session_info["sid"]:
                         self.client.cookies.set('sid', self.session_info["sid"])
 
-                    # Set CSRF header if provided
                     if self.session_info["csrf"]:
                         self.client.headers['X-FTL-CSRF'] = self.session_info["csrf"]
 
@@ -90,7 +81,6 @@ class PiholeClient(DNSBlockerClient):
                     logger.error(f"Authentication failed for {self.server_name}")
                     return False
             else:
-                # Try challenge-response method
                 if "challenge" in response.text or response.status_code == 400:
                     logger.info(f"Trying challenge-response authentication for {self.server_name}")
                     return await self._authenticate_challenge_response()
@@ -105,7 +95,7 @@ class PiholeClient(DNSBlockerClient):
         try:
             auth_url = f"{self.url}/api/auth"
 
-            # POST empty to get challenge
+            # POST empty body to get challenge nonce from Pi-hole
             response = await self.client.post(auth_url, json={})
 
             if response.status_code != 200:
@@ -123,7 +113,6 @@ class PiholeClient(DNSBlockerClient):
             password_hash = hashlib.sha256(self.password.encode()).hexdigest()
             response_hash = hashlib.sha256((password_hash + challenge).encode()).hexdigest()
 
-            # Send authentication response
             auth_payload = {"response": response_hash}
             response = await self.client.post(auth_url, json=auth_payload)
 
@@ -132,17 +121,14 @@ class PiholeClient(DNSBlockerClient):
                 if auth_result.get("session", {}).get("valid", False):
                     logger.info(f"Challenge-response authentication successful for {self.server_name}")
 
-                    # Store session info (was missing!)
                     session_data = auth_result.get("session", {})
                     self.session_info["sid"] = session_data.get("sid")
                     self.session_info["csrf"] = session_data.get("csrf")
                     self.session_info["auth_time"] = time.time()
 
-                    # Set session cookie
                     if self.session_info["sid"]:
                         self.client.cookies.set('sid', self.session_info["sid"])
 
-                    # Set CSRF header if provided
                     if self.session_info["csrf"]:
                         self.client.headers['X-FTL-CSRF'] = self.session_info["csrf"]
 
@@ -174,7 +160,6 @@ class PiholeClient(DNSBlockerClient):
                 "length": 5000,  # Increase limit to retrieve more queries
             }
 
-            # Add SID to headers
             headers = {}
             if self.session_info["sid"]:
                 headers["sid"] = self.session_info["sid"]
@@ -188,19 +173,15 @@ class PiholeClient(DNSBlockerClient):
                 query_count = len(queries)
                 logger.info(f"Successfully retrieved {query_count} queries from {self.server_name}")
 
-                # Warn if we hit the limit
                 if query_count >= 5000:
                     logger.warning(f"Retrieved maximum number of queries (5000) from {self.server_name}. Some queries might be missed.")
 
                 return queries
             elif response.status_code == 401:
-                # Try to re-authenticate
                 logger.warning(f"Got 401 for {self.server_name}, re-authenticating...")
                 if await self.authenticate():
-                    # Update headers
                     if self.session_info["sid"]:
                         headers["sid"] = self.session_info["sid"]
-                    # Retry request
                     response = await self.client.get(endpoint, params=params, headers=headers)
                     if response.status_code == 200:
                         data = response.json()

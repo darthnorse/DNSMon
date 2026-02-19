@@ -174,7 +174,6 @@ export default function Dashboard() {
     <div className="space-y-6">
       <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
 
-      {/* Stats Cards */}
       <div className="grid grid-cols-1 gap-4 sm:gap-5 sm:grid-cols-2">
         <div className="bg-white dark:bg-gray-800 overflow-hidden shadow rounded-lg">
           <div className="px-4 py-5 sm:p-6">
@@ -195,21 +194,18 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Error Message */}
       {error && (
         <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800/50 text-red-700 dark:text-red-300 px-4 py-3 rounded">
           {error}
         </div>
       )}
 
-      {/* Success Message */}
       {successMessage && (
         <div className="bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800/50 text-green-700 dark:text-green-300 px-4 py-3 rounded">
           {successMessage}
         </div>
       )}
 
-      {/* Search and Query Table */}
       <div className="bg-white dark:bg-gray-800 shadow rounded-lg">
         <div className="px-4 py-5 sm:p-6">
           <div className="mb-4">
@@ -251,7 +247,6 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Mobile Card View */}
           <div className="md:hidden space-y-3">
             {paginatedQueries.length === 0 ? (
               <div className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">
@@ -342,7 +337,6 @@ export default function Dashboard() {
             )}
           </div>
 
-          {/* Desktop Table View */}
           <div className="hidden md:block overflow-x-auto">
             <table className="min-w-full table-fixed divide-y divide-gray-200 dark:divide-gray-700">
               <thead className="bg-gray-50 dark:bg-gray-700">
@@ -459,7 +453,6 @@ export default function Dashboard() {
             </table>
           </div>
 
-          {/* Pagination */}
           {totalPages > 1 && (
             <div className="mt-4 flex items-center justify-between">
               <p className="text-sm text-gray-500 dark:text-gray-400">

@@ -349,3 +349,27 @@ export interface TemplateVariablesResponse {
 export interface ChannelTypesResponse {
   channel_types: ChannelTypeInfo[];
 }
+
+// ============================================================================
+// API Key Types
+// ============================================================================
+
+export interface ApiKey {
+  id: number;
+  name: string;
+  key_prefix: string;
+  is_admin: boolean;
+  expires_at: string | null;
+  created_at: string | null;
+  last_used_at: string | null;
+}
+
+export interface ApiKeyCreate {
+  name: string;
+  is_admin?: boolean;
+  expires_at?: string;
+}
+
+export interface ApiKeyCreateResponse extends ApiKey {
+  raw_key: string;
+}

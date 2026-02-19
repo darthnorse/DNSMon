@@ -24,7 +24,6 @@ async def get_blocking_status(
     _: User = Depends(get_current_user)
 ):
     """Get blocking status for all enabled DNS servers"""
-    # Get all enabled servers
     stmt = select(PiholeServerModel).where(
         PiholeServerModel.enabled == True
     ).order_by(PiholeServerModel.display_order)
@@ -34,7 +33,6 @@ async def get_blocking_status(
     if not servers:
         return {"servers": []}
 
-    # Get pending blocking overrides
     override_stmt = select(BlockingOverride).where(
         BlockingOverride.enabled_at.is_(None)
     )
@@ -82,7 +80,6 @@ async def set_blocking_for_all(
     _: User = Depends(require_admin)
 ):
     """Enable or disable blocking for all enabled DNS servers"""
-    # Get all enabled servers
     stmt = select(PiholeServerModel).where(
         PiholeServerModel.enabled == True
     ).order_by(PiholeServerModel.display_order)
@@ -113,9 +110,7 @@ async def set_blocking_for_all(
                 success = await client.set_blocking(data.enabled, timer_seconds)
 
                 if success:
-                    # Track blocking override
                     if not data.enabled:
-                        # Clear existing pending overrides
                         existing_stmt = select(BlockingOverride).where(
                             BlockingOverride.server_id == server.id,
                             BlockingOverride.enabled_at.is_(None)
@@ -124,7 +119,6 @@ async def set_blocking_for_all(
                         for existing in existing_result.scalars():
                             existing.enabled_at = datetime.now(timezone.utc)
 
-                        # Create new override
                         override = BlockingOverride(
                             server_id=server.id,
                             auto_enable_at=auto_enable_at,
@@ -132,7 +126,6 @@ async def set_blocking_for_all(
                         )
                         db.add(override)
                     else:
-                        # Mark pending overrides as completed
                         existing_stmt = select(BlockingOverride).where(
                             BlockingOverride.server_id == server.id,
                             BlockingOverride.enabled_at.is_(None)
@@ -174,7 +167,6 @@ async def set_blocking_for_server(
     _: User = Depends(require_admin)
 ):
     """Enable or disable blocking for a specific DNS server"""
-    # Get server
     stmt = select(PiholeServerModel).where(PiholeServerModel.id == server_id)
     result = await db.execute(stmt)
     server = result.scalar_one_or_none()
@@ -197,7 +189,6 @@ async def set_blocking_for_server(
                 raise HTTPException(status_code=500, detail=f"Failed to set blocking on {server.name}")
 
             if not data.enabled:
-                # Clear existing pending overrides
                 existing_stmt = select(BlockingOverride).where(
                     BlockingOverride.server_id == server_id,
                     BlockingOverride.enabled_at.is_(None)
@@ -206,7 +197,6 @@ async def set_blocking_for_server(
                 for existing in existing_result.scalars():
                     existing.enabled_at = datetime.now(timezone.utc)
 
-                # Create new override
                 auto_enable_at = None
                 if data.duration_minutes:
                     auto_enable_at = datetime.now(timezone.utc) + timedelta(minutes=data.duration_minutes)
@@ -226,7 +216,6 @@ async def set_blocking_for_server(
                     "auto_enable_at": auto_enable_at.isoformat() if auto_enable_at else None
                 }
             else:
-                # Mark pending overrides as completed
                 existing_stmt = select(BlockingOverride).where(
                     BlockingOverride.server_id == server_id,
                     BlockingOverride.enabled_at.is_(None)

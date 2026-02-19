@@ -1,3 +1,4 @@
+import hashlib
 from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Index, BigInteger, ForeignKey, JSON
 from sqlalchemy.ext.declarative import declarative_base
@@ -500,6 +501,39 @@ class OIDCProvider(Base):
             'display_order': self.display_order,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+KEY_PREFIX_LENGTH = 12
+
+
+class ApiKey(Base):
+    """Standalone API key for programmatic access"""
+    __tablename__ = "api_keys"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), unique=True, nullable=False)
+    key_hash = Column(String(64), unique=True, nullable=False, index=True)
+    key_prefix = Column(String(KEY_PREFIX_LENGTH), nullable=False)
+    is_admin = Column(Boolean, default=False)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+
+    @staticmethod
+    def hash_key(raw_key: str) -> str:
+        """Hash a raw API key using SHA-256."""
+        return hashlib.sha256(raw_key.encode()).hexdigest()
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'key_prefix': self.key_prefix,
+            'is_admin': self.is_admin,
+            'expires_at': self.expires_at.isoformat() if self.expires_at else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'last_used_at': self.last_used_at.isoformat() if self.last_used_at else None,
         }
 
 
