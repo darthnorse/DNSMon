@@ -117,7 +117,8 @@ export interface Statistics {
   queries_week: number;
   queries_month: number;
   queries_total: number;
-  blocked_today: number;
+  queries_period: number;
+  blocked_period: number;
   blocked_percentage: number;
 
   // Time Series
@@ -136,6 +137,21 @@ export interface Statistics {
   unique_clients: number;
   most_active_client: { client_ip: string; client_hostname: string | null; count: number } | null;
   new_clients_24h: number;
+}
+
+export interface StatisticsParams {
+  period?: string;
+  servers?: string;
+  clients?: string;
+  from_date?: string;
+  to_date?: string;
+}
+
+export interface StatisticsClientsParams {
+  period?: string;
+  servers?: string;
+  from_date?: string;
+  to_date?: string;
 }
 
 export interface ClientInfo {

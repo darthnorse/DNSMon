@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { statisticsApi, settingsApi } from '../utils/api';
 import type { Statistics, PiholeServer, ClientInfo } from '../types';
 import { format } from 'date-fns';
@@ -18,7 +18,12 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 
-type Period = '24h' | '7d' | '30d';
+type Period = '24h' | '7d' | '30d' | 'custom';
+
+function toLocalDatetimeString(date: Date): string {
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
 
 export default function StatisticsPage() {
   const [stats, setStats] = useState<Statistics | null>(null);
@@ -32,6 +37,13 @@ export default function StatisticsPage() {
   const [serverDropdownOpen, setServerDropdownOpen] = useState(false);
   const serverDropdownRef = useRef<HTMLDivElement>(null);
 
+  // Custom period state
+  const [showCustomPanel, setShowCustomPanel] = useState(false);
+  const [customFrom, setCustomFrom] = useState(() => toLocalDatetimeString(new Date(Date.now() - 24 * 60 * 60 * 1000)));
+  const [customTo, setCustomTo] = useState(() => toLocalDatetimeString(new Date()));
+  const [appliedFrom, setAppliedFrom] = useState<string | null>(null);
+  const [appliedTo, setAppliedTo] = useState<string | null>(null);
+
   // Client filter state
   const [clients, setClients] = useState<ClientInfo[]>([]);
   const [selectedClients, setSelectedClients] = useState<string[]>([]);
@@ -40,16 +52,15 @@ export default function StatisticsPage() {
   const [clientSearch, setClientSearch] = useState('');
   const clientDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Load servers on mount
   useEffect(() => {
     loadServers();
   }, []);
 
-  // Load clients when period or servers change.
+  // Load clients when period or servers change (or when custom range is applied).
   // This resets selectedClients, which triggers loadStats via the effect below.
   useEffect(() => {
     loadClients();
-  }, [period, selectedServers]);
+  }, [period, selectedServers, appliedFrom, appliedTo]);
 
   // Load stats when selected clients change.
   // Period/server changes flow through here indirectly: they trigger loadClients,
@@ -59,7 +70,7 @@ export default function StatisticsPage() {
     loadStats();
   }, [selectedClients]);
 
-  const applyClientSelection = () => {
+  const applyClientSelection = useCallback(() => {
     if (clientSearch) {
       const s = clientSearch.toLowerCase();
       const matching = clients.filter(c =>
@@ -74,21 +85,24 @@ export default function StatisticsPage() {
     }
     setClientDropdownOpen(false);
     setClientSearch('');
-  };
+  }, [clientSearch, clients, pendingClients]);
 
-  // Close dropdowns when clicking outside
+  // Keep a stable ref so the click-outside listener doesn't churn on every keystroke
+  const applyClientSelectionRef = useRef(applyClientSelection);
+  applyClientSelectionRef.current = applyClientSelection;
+
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (serverDropdownRef.current && !serverDropdownRef.current.contains(event.target as Node)) {
         setServerDropdownOpen(false);
       }
       if (clientDropdownOpen && clientDropdownRef.current && !clientDropdownRef.current.contains(event.target as Node)) {
-        applyClientSelection();
+        applyClientSelectionRef.current();
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  });
+  }, [clientDropdownOpen]);
 
   const loadServers = async () => {
     try {
@@ -99,15 +113,31 @@ export default function StatisticsPage() {
     }
   };
 
+  /** Build the period/date params shared by both loadClients and loadStats.
+   *  Returns null if custom range is selected but not yet applied. */
+  const buildPeriodParams = (): { period?: string; from_date?: string; to_date?: string } | null => {
+    if (period === 'custom' && appliedFrom && appliedTo) {
+      return {
+        from_date: new Date(appliedFrom).toISOString(),
+        to_date: new Date(appliedTo).toISOString(),
+      };
+    }
+    if (period !== 'custom') {
+      return { period };
+    }
+    return null; // Custom not yet applied
+  };
+
   const loadClients = async () => {
     try {
-      const params: { period: string; servers?: string } = { period };
+      const periodParams = buildPeriodParams();
+      if (!periodParams) return;
+      const params: { period?: string; servers?: string; from_date?: string; to_date?: string } = { ...periodParams };
       if (selectedServers.length > 0) {
         params.servers = selectedServers.join(',');
       }
       const clientList = await statisticsApi.getClients(params);
       setClients(clientList);
-      // Select all clients by default
       const allIps = clientList.map(c => c.client_ip);
       setSelectedClients(allIps);
       setPendingClients(allIps);
@@ -119,7 +149,12 @@ export default function StatisticsPage() {
   const loadStats = async () => {
     try {
       setLoading(true);
-      const params: { period: string; servers?: string; clients?: string } = { period };
+      const periodParams = buildPeriodParams();
+      if (!periodParams) {
+        setLoading(false);
+        return;
+      }
+      const params: { period?: string; servers?: string; clients?: string; from_date?: string; to_date?: string } = { ...periodParams };
       if (selectedServers.length > 0) {
         params.servers = selectedServers.join(',');
       }
@@ -168,6 +203,49 @@ export default function StatisticsPage() {
     }
   };
 
+  const selectPresetPeriod = (p: '24h' | '7d' | '30d') => {
+    setPeriod(p);
+    setShowCustomPanel(false);
+    setAppliedFrom(null);
+    setAppliedTo(null);
+  };
+
+  const applyCustomRange = () => {
+    if (!customFrom || !customTo) return;
+    const from = new Date(customFrom);
+    const to = new Date(customTo);
+    if (from >= to) {
+      setError('Start date must be before end date');
+      return;
+    }
+    if (to > new Date()) {
+      setError('End date cannot be in the future');
+      return;
+    }
+    setError(null);
+    setAppliedFrom(customFrom);
+    setAppliedTo(customTo);
+    setPeriod('custom');
+  };
+
+  const toggleCustomPanel = () => {
+    if (period === 'custom') {
+      setShowCustomPanel(!showCustomPanel);
+    } else {
+      setPeriod('custom');
+      setShowCustomPanel(true);
+    }
+  };
+
+  const getCustomLabel = (): string => {
+    if (appliedFrom && appliedTo) {
+      const from = new Date(appliedFrom);
+      const to = new Date(appliedTo);
+      return `${format(from, 'MMM d HH:mm')} - ${format(to, 'MMM d HH:mm')}`;
+    }
+    return 'Custom';
+  };
+
   const getClientLabel = () => {
     if (clients.length === 0) return 'No Clients';
     if (selectedClients.length === 0) return 'None Selected';
@@ -206,22 +284,28 @@ export default function StatisticsPage() {
 
   if (!stats) return null;
 
-  // Prepare pie chart data
-  const allowedCount = period === '24h' ? stats.queries_today - stats.blocked_today
-    : period === '7d' ? stats.queries_week - stats.blocked_today
-    : stats.queries_month - stats.blocked_today;
+  const getPeriodTotal = (): number => {
+    switch (period) {
+      case 'custom': return stats.queries_period;
+      case '24h': return stats.queries_today;
+      case '7d': return stats.queries_week;
+      case '30d': return stats.queries_month;
+    }
+  };
+  const allowedCount = getPeriodTotal() - stats.blocked_period;
   const pieData = [
     { name: 'Allowed', value: Math.max(0, allowedCount), color: '#10B981' },
-    { name: 'Blocked', value: stats.blocked_today, color: '#EF4444' },
+    { name: 'Blocked', value: stats.blocked_period, color: '#EF4444' },
   ];
 
-  // Prepare time series data (filter out entries with invalid timestamps)
-  const timeData = period === '24h'
+  const useHourly = period === '24h' || period === 'custom';
+  const hourlyFormat = period === 'custom' ? 'MM/dd HH:mm' : 'HH:mm';
+  const timeData = useHourly
     ? stats.queries_hourly
         .filter(item => item.hour && item.hour !== '')
         .map(item => ({
           ...item,
-          time: format(new Date(item.hour), 'HH:mm'),
+          time: format(new Date(item.hour), hourlyFormat),
           allowed: item.queries - item.blocked,
         }))
     : stats.queries_daily
@@ -232,14 +316,12 @@ export default function StatisticsPage() {
           allowed: item.queries - item.blocked,
         }));
 
-  // Format large numbers
   const formatNumber = (num: number): string => {
     if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
     if (num >= 1000) return `${(num / 1000).toFixed(1)}K`;
     return num.toLocaleString();
   };
 
-  // Get server dropdown label
   const getServerLabel = () => {
     if (selectedServers.length === 0) return 'All Servers';
     if (selectedServers.length === 1) return selectedServers[0];
@@ -255,10 +337,10 @@ export default function StatisticsPage() {
         <div className="flex flex-wrap items-center gap-3">
           {/* Period Selector */}
           <div className="flex rounded-lg overflow-hidden border border-gray-300 dark:border-gray-600">
-            {(['24h', '7d', '30d'] as Period[]).map((p) => (
+            {(['24h', '7d', '30d'] as const).map((p) => (
               <button
                 key={p}
-                onClick={() => setPeriod(p)}
+                onClick={() => selectPresetPeriod(p)}
                 className={`px-4 py-2 text-sm font-medium transition-colors ${
                   period === p
                     ? 'bg-blue-600 text-white'
@@ -268,6 +350,19 @@ export default function StatisticsPage() {
                 {p}
               </button>
             ))}
+            <button
+              onClick={toggleCustomPanel}
+              className={`px-4 py-2 text-sm font-medium transition-colors flex items-center gap-1 ${
+                period === 'custom'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+              }`}
+            >
+              {period === 'custom' && appliedFrom ? getCustomLabel() : 'Custom'}
+              <svg className={`w-3 h-3 transition-transform ${showCustomPanel ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
           </div>
 
           {/* Server Dropdown */}
@@ -421,6 +516,45 @@ export default function StatisticsPage() {
         </div>
       </div>
 
+      {/* Custom Period Panel */}
+      {showCustomPanel && (
+        <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+          <div className="flex flex-wrap items-end gap-4">
+            <div>
+              <label htmlFor="custom_from" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                From
+              </label>
+              <input
+                type="datetime-local"
+                id="custom_from"
+                value={customFrom}
+                onChange={(e) => setCustomFrom(e.target.value)}
+                className="block rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm px-3 py-2 border"
+              />
+            </div>
+            <div>
+              <label htmlFor="custom_to" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                To
+              </label>
+              <input
+                type="datetime-local"
+                id="custom_to"
+                value={customTo}
+                onChange={(e) => setCustomTo(e.target.value)}
+                className="block rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm px-3 py-2 border"
+              />
+            </div>
+            <button
+              onClick={applyCustomRange}
+              disabled={loading}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 text-sm font-medium"
+            >
+              Apply
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Query Overview Cards */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <StatCard label="24 Hours" value={formatNumber(stats.queries_today)} highlight={period === '24h'} />
@@ -434,7 +568,7 @@ export default function StatisticsPage() {
         {/* Blocked vs Allowed Pie Chart */}
         <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-            Blocked vs Allowed ({period})
+            Blocked vs Allowed ({period === 'custom' ? 'Custom' : period})
           </h2>
           <div className="flex items-center justify-center">
             <ResponsiveContainer width="100%" height={250}>
@@ -478,7 +612,7 @@ export default function StatisticsPage() {
         {/* Queries Over Time Line Chart */}
         <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-            Queries Over Time ({period})
+            Queries Over Time ({period === 'custom' ? 'Custom' : period})
           </h2>
           {timeData.length > 0 ? (
             <ResponsiveContainer width="100%" height={280}>
@@ -646,7 +780,7 @@ export default function StatisticsPage() {
               </span>
             </div>
             <div className="flex justify-between items-center py-3 border-b border-gray-200 dark:border-gray-700">
-              <span className="text-gray-600 dark:text-gray-400">New Clients ({period})</span>
+              <span className="text-gray-600 dark:text-gray-400">New Clients ({period === 'custom' ? 'Custom' : period})</span>
               <span className="text-2xl font-semibold text-blue-600 dark:text-blue-400">
                 {stats.new_clients_24h.toLocaleString()}
               </span>
@@ -676,7 +810,6 @@ export default function StatisticsPage() {
   );
 }
 
-// Stat Card Component
 function StatCard({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
   return (
     <div className={`overflow-hidden shadow rounded-lg ${
@@ -700,7 +833,6 @@ function StatCard({ label, value, highlight }: { label: string; value: string; h
   );
 }
 
-// Top List Component
 interface TopListItem {
   rank: number;
   label: string;

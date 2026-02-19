@@ -92,7 +92,8 @@ class StatisticsResponse(BaseModel):
     queries_week: int
     queries_month: int
     queries_total: int
-    blocked_today: int
+    queries_period: int  # Total queries for the active period/custom range
+    blocked_period: int
     blocked_percentage: float
 
     # Time Series

@@ -183,8 +183,7 @@ def get_client_ip(request: Request) -> str:
     configure uvicorn's --proxy-headers --forwarded-allow-ips flags instead of
     trusting X-Forwarded-For here (which is client-spoofable).
     """
-    host = request.client.host if request.client else None
-    return host or "unknown"
+    return request.client.host if request.client else "unknown"
 
 
 async def get_user_count(db: AsyncSession) -> int:

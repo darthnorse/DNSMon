@@ -10,6 +10,8 @@ import type {
   PiholeServerCreate,
   DomainEntry,
   Statistics,
+  StatisticsParams,
+  StatisticsClientsParams,
   ClientInfo,
   BlockingStatusResponse,
   BlockingSetRequest,
@@ -81,11 +83,11 @@ export const statsApi = {
 };
 
 export const statisticsApi = {
-  get: async (params?: { period?: string; servers?: string; clients?: string }): Promise<Statistics> => {
+  get: async (params?: StatisticsParams): Promise<Statistics> => {
     const response = await api.get<Statistics>('/statistics', { params });
     return response.data;
   },
-  getClients: async (params?: { period?: string; servers?: string }): Promise<ClientInfo[]> => {
+  getClients: async (params?: StatisticsClientsParams): Promise<ClientInfo[]> => {
     const response = await api.get<ClientInfo[]>('/statistics/clients', { params });
     return response.data;
   },
