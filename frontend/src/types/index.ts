@@ -373,3 +373,49 @@ export interface ApiKeyCreate {
 export interface ApiKeyCreateResponse extends ApiKey {
   raw_key: string;
 }
+
+// ============================================================================
+// Sync Types
+// ============================================================================
+
+export interface SyncPreviewSource {
+  source: { name: string; server_type?: string } | null;
+  targets: { name: string }[];
+  teleporter?: {
+    backup_size_bytes: number;
+    includes?: string[];
+  };
+  config?: {
+    keys?: Record<string, string[]>;
+    summary?: Record<string, number>;
+  };
+}
+
+export interface SyncPreview {
+  sources?: SyncPreviewSource[];
+  source?: SyncPreviewSource['source'];
+  targets?: SyncPreviewSource['targets'];
+  teleporter?: SyncPreviewSource['teleporter'];
+  config?: SyncPreviewSource['config'];
+  error?: string;
+  message?: string;
+}
+
+export interface SyncItemsSynced {
+  _teleporter_size_bytes?: number;
+  _config_sections?: string[];
+  _server_type?: string;
+  [key: string]: unknown;
+}
+
+export interface SyncHistoryEntry {
+  id: number;
+  source_server_id: number;
+  target_server_ids: number[];
+  started_at: string;
+  completed_at: string | null;
+  sync_type: string;
+  status: string;
+  items_synced: SyncItemsSynced | null;
+  errors: string[];
+}

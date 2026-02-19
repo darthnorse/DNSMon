@@ -2,6 +2,7 @@ import { useState, useEffect, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { authApi } from '../utils/api';
+import { getErrorMessage } from '../utils/errors';
 
 export default function Setup() {
   const [username, setUsername] = useState('');
@@ -73,8 +74,7 @@ export default function Setup() {
       setSetupComplete(true);
       navigate('/', { replace: true });
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      setError(error.response?.data?.detail || 'Setup failed');
+      setError(getErrorMessage(err, 'Setup failed'));
     } finally {
       setLoading(false);
     }

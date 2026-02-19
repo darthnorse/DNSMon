@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { queryApi, domainApi } from '../utils/api';
+import { getErrorMessage } from '../utils/errors';
 import type { Query, QuerySearchParams } from '../types';
 
 export default function Search() {
@@ -49,8 +50,7 @@ export default function Search() {
       setTotalCount(count);
       setSearchParams({ ...searchParams, offset });
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      setError(error.response?.data?.detail || 'Failed to search queries');
+      setError(getErrorMessage(err, 'Failed to search queries'));
       console.error(err);
     } finally {
       setLoading(false);
@@ -95,8 +95,7 @@ export default function Search() {
       await domainApi.whitelist(domain);
       setSuccessMessage(`Added "${domain}" to whitelist`);
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      setError(error.response?.data?.detail || `Failed to whitelist ${domain}`);
+      setError(getErrorMessage(err, `Failed to whitelist ${domain}`));
     } finally {
       setActionLoading(null);
     }
@@ -109,8 +108,7 @@ export default function Search() {
       await domainApi.blacklist(domain);
       setSuccessMessage(`Added "${domain}" to blacklist`);
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      setError(error.response?.data?.detail || `Failed to blacklist ${domain}`);
+      setError(getErrorMessage(err, `Failed to blacklist ${domain}`));
     } finally {
       setActionLoading(null);
     }

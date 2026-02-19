@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { notificationChannelApi } from '../utils/api';
+import { getErrorMessage } from '../utils/errors';
 import type {
   NotificationChannel,
   NotificationChannelCreate,
@@ -83,8 +84,7 @@ export default function NotificationsSettings({ onError, onSuccess }: Props) {
       handleCancelForm();
       onSuccess(`Channel ${editingChannel ? 'updated' : 'created'} successfully`);
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      onError(error.response?.data?.detail || 'Failed to save channel');
+      onError(getErrorMessage(err, 'Failed to save channel'));
     } finally {
       setSaving(false);
     }
@@ -114,8 +114,7 @@ export default function NotificationsSettings({ onError, onSuccess }: Props) {
       await loadData();
       onSuccess('Channel deleted successfully');
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      onError(error.response?.data?.detail || 'Failed to delete channel');
+      onError(getErrorMessage(err, 'Failed to delete channel'));
     } finally {
       setSaving(false);
     }
@@ -134,8 +133,7 @@ export default function NotificationsSettings({ onError, onSuccess }: Props) {
         await loadData(); // Refresh to show error
       }
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      onError(error.response?.data?.detail || 'Test failed');
+      onError(getErrorMessage(err, 'Test failed'));
       await loadData();
     } finally {
       setTesting(null);

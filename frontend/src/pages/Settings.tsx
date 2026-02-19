@@ -1,10 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { settingsApi, syncApi, oidcProviderApi } from '../utils/api';
 import { useAuth } from '../contexts/AuthContext';
+import { getErrorMessage } from '../utils/errors';
+import { copyToClipboard } from '../utils/clipboard';
 import NotificationsSettings from '../components/NotificationsSettings';
-import type { PiholeServer, PiholeServerCreate, ServerType, OIDCProvider, OIDCProviderCreate } from '../types';
+import Users from './Users';
+import ApiKeys from './ApiKeys';
+import type { PiholeServer, PiholeServerCreate, ServerType, OIDCProvider, OIDCProviderCreate, SyncPreview, SyncPreviewSource, SyncHistoryEntry } from '../types';
 
-type TabType = 'servers' | 'notifications' | 'polling' | 'sync' | 'oidc' | 'advanced';
+type TabType = 'servers' | 'notifications' | 'polling' | 'sync' | 'oidc' | 'advanced' | 'users' | 'api-keys';
 
 export default function Settings() {
   const [activeTab, setActiveTab] = useState<TabType>('servers');
@@ -13,7 +17,6 @@ export default function Settings() {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Pi-hole servers
   const [servers, setServers] = useState<PiholeServer[]>([]);
   const [showServerForm, setShowServerForm] = useState(false);
   const [editingServer, setEditingServer] = useState<PiholeServer | null>(null);
@@ -29,7 +32,6 @@ export default function Settings() {
     sync_enabled: false
   });
 
-  // Polling & Retention settings
   const [pollingData, setPollingData] = useState({
     poll_interval_seconds: 60,
     query_lookback_seconds: 65,
@@ -37,18 +39,15 @@ export default function Settings() {
     max_catchup_seconds: 300
   });
 
-  // Sync settings
   const [syncInterval, setSyncInterval] = useState(900); // 15 minutes default
-  const [syncPreview, setSyncPreview] = useState<any>(null);
-  const [syncHistory, setSyncHistory] = useState<any[]>([]);
+  const [syncPreview, setSyncPreview] = useState<SyncPreview | null>(null);
+  const [syncHistory, setSyncHistory] = useState<SyncHistoryEntry[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [loadingSync, setLoadingSync] = useState(false);
   const [expandedSyncId, setExpandedSyncId] = useState<number | null>(null);
 
-  // CORS settings
   const [corsOrigins, setCorsOrigins] = useState<string>('');
 
-  // OIDC providers
   const { user } = useAuth();
   const [oidcProviders, setOidcProviders] = useState<OIDCProvider[] | null>(null);
   const [loadingOidc, setLoadingOidc] = useState(false);
@@ -72,11 +71,9 @@ export default function Settings() {
   const [testingOidc, setTestingOidc] = useState(false);
   const [oidcTestResult, setOidcTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
-  // Restart modal state
   const [showRestartModal, setShowRestartModal] = useState(false);
   const [restarting, setRestarting] = useState(false);
 
-  // Test connection state
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
@@ -92,14 +89,12 @@ export default function Settings() {
     }
   }, [successMessage]);
 
-  // Load sync history when sync tab becomes active
   useEffect(() => {
     if (activeTab === 'sync') {
       handleLoadSyncHistory();
     }
   }, [activeTab]);
 
-  // Load OIDC providers when OIDC tab becomes active
   useEffect(() => {
     if (activeTab === 'oidc' && user?.is_admin) {
       loadOidcProviders();
@@ -111,7 +106,6 @@ export default function Settings() {
       setLoading(true);
       const data = await settingsApi.get();
 
-      // Populate form states
       setPollingData({
         poll_interval_seconds: Number(data.app_settings.poll_interval_seconds?.value || 60),
         query_lookback_seconds: Number(data.app_settings.query_lookback_seconds?.value || 65),
@@ -144,7 +138,6 @@ export default function Settings() {
     }
   };
 
-  // Server CRUD
   const validateServer = (data: PiholeServerCreate, isEditing: boolean = false): string[] => {
     const errors: string[] = [];
 
@@ -162,7 +155,6 @@ export default function Settings() {
       errors.push('URL must be 255 characters or less');
     }
 
-    // Password is required only when creating (not when editing)
     if (!isEditing && (!data.password || data.password.trim().length === 0)) {
       errors.push('Password is required');
     }
@@ -193,8 +185,7 @@ export default function Settings() {
       handleCancelServerForm();
       setSuccessMessage('Pi-hole server saved successfully');
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      setError(error.response?.data?.detail || 'Failed to save server');
+      setError(getErrorMessage(err, 'Failed to save server'));
     } finally {
       setSaving(false);
     }
@@ -205,7 +196,7 @@ export default function Settings() {
     setServerFormData({
       name: server.name,
       url: server.url,
-      password: '', // Don't populate password when editing (it's masked in API response)
+      password: '',
       username: server.username || '',
       server_type: server.server_type || 'pihole',
       skip_ssl_verify: server.skip_ssl_verify || false,
@@ -228,8 +219,7 @@ export default function Settings() {
       await loadServers();
       setSuccessMessage('Server deleted successfully');
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      setError(error.response?.data?.detail || 'Failed to delete server');
+      setError(getErrorMessage(err, 'Failed to delete server'));
     } finally {
       setSaving(false);
     }
@@ -272,18 +262,14 @@ export default function Settings() {
         setError(result.message);
       }
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      setTestResult({
-        success: false,
-        message: error.response?.data?.detail || 'Test connection failed'
-      });
-      setError(error.response?.data?.detail || 'Test connection failed');
+      const msg = getErrorMessage(err, 'Test connection failed');
+      setTestResult({ success: false, message: msg });
+      setError(msg);
     } finally {
       setTesting(false);
     }
   };
 
-  // Settings save handlers
   const handleSavePolling = async () => {
     const errors: string[] = [];
 
@@ -327,8 +313,7 @@ export default function Settings() {
         await loadSettings();
       }
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      setError(error.response?.data?.detail || 'Failed to save settings');
+      setError(getErrorMessage(err, 'Failed to save settings'));
     } finally {
       setSaving(false);
     }
@@ -353,8 +338,7 @@ export default function Settings() {
         await loadSettings();
       }
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      setError(error.response?.data?.detail || 'Failed to save sync interval');
+      setError(getErrorMessage(err, 'Failed to save sync interval'));
     } finally {
       setSaving(false);
     }
@@ -367,8 +351,7 @@ export default function Settings() {
       const preview = await syncApi.preview();
       setSyncPreview(preview);
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      setError(error.response?.data?.detail || 'Failed to load sync preview');
+      setError(getErrorMessage(err, 'Failed to load sync preview'));
       setSyncPreview(null);
     } finally {
       setLoadingSync(false);
@@ -381,11 +364,10 @@ export default function Settings() {
       setError(null);
       await syncApi.execute();
       setSuccessMessage('Sync completed successfully');
-      await handleLoadSyncPreview(); // Refresh preview
-      await handleLoadSyncHistory(); // Refresh history
+      await handleLoadSyncPreview();
+      await handleLoadSyncHistory();
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      setError(error.response?.data?.detail || 'Failed to execute sync');
+      setError(getErrorMessage(err, 'Failed to execute sync'));
     } finally {
       setSyncing(false);
     }
@@ -396,8 +378,7 @@ export default function Settings() {
       const history = await syncApi.getHistory(10);
       setSyncHistory(history);
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      console.error('Failed to load sync history:', error.response?.data?.detail);
+      console.error('Failed to load sync history:', getErrorMessage(err, 'Unknown error'));
     }
   };
 
@@ -431,16 +412,13 @@ export default function Settings() {
         await loadSettings();
       }
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      setError(error.response?.data?.detail || 'Failed to save settings');
+      setError(getErrorMessage(err, 'Failed to save settings'));
     } finally {
       setSaving(false);
     }
   };
 
-  // Disable local auth toggle
   const handleToggleDisableLocalAuth = async (enabled: boolean) => {
-    // Check if any OIDC provider is enabled before allowing this to be turned on
     if (enabled && (!oidcProviders || oidcProviders.filter(p => p.enabled).length === 0)) {
       setError('Cannot disable local authentication: At least one OIDC provider must be enabled first.');
       return;
@@ -455,22 +433,19 @@ export default function Settings() {
         ? 'Local password authentication disabled. Users must now use OIDC.'
         : 'Local password authentication enabled.');
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      setError(error.response?.data?.detail || 'Failed to update setting');
+      setError(getErrorMessage(err, 'Failed to update setting'));
     } finally {
       setSaving(false);
     }
   };
 
-  // OIDC Provider CRUD
   const loadOidcProviders = async () => {
     try {
       setLoadingOidc(true);
       const providers = await oidcProviderApi.getAll();
       setOidcProviders(providers);
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      console.error('Failed to load OIDC providers:', error.response?.data?.detail);
+      console.error('Failed to load OIDC providers:', getErrorMessage(err, 'Unknown error'));
     } finally {
       setLoadingOidc(false);
     }
@@ -499,7 +474,6 @@ export default function Settings() {
       errors.push('Client ID is required');
     }
 
-    // Client secret required for new providers, optional for edits (empty = keep existing)
     if (!isEdit && (!data.client_secret || data.client_secret.trim().length === 0)) {
       errors.push('Client secret is required');
     }
@@ -530,8 +504,7 @@ export default function Settings() {
       handleCancelOidcForm();
       setSuccessMessage('OIDC provider saved successfully');
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      setError(error.response?.data?.detail || 'Failed to save OIDC provider');
+      setError(getErrorMessage(err, 'Failed to save OIDC provider'));
     } finally {
       setSaving(false);
     }
@@ -544,7 +517,7 @@ export default function Settings() {
       display_name: provider.display_name,
       issuer_url: provider.issuer_url,
       client_id: provider.client_id,
-      client_secret: '',  // Don't copy masked value - leave empty to keep current
+      client_secret: '',
       scopes: provider.scopes,
       username_claim: provider.username_claim,
       email_claim: provider.email_claim,
@@ -569,8 +542,7 @@ export default function Settings() {
       await loadOidcProviders();
       setSuccessMessage('OIDC provider deleted successfully');
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      setError(error.response?.data?.detail || 'Failed to delete OIDC provider');
+      setError(getErrorMessage(err, 'Failed to delete OIDC provider'));
     } finally {
       setSaving(false);
     }
@@ -598,7 +570,6 @@ export default function Settings() {
   };
 
   const handleTestOidcProvider = async () => {
-    // Skip validation when testing existing provider (uses saved data)
     if (!editingOidc) {
       const errors = validateOidcProvider(oidcFormData, false);
       if (errors.length > 0) {
@@ -612,7 +583,6 @@ export default function Settings() {
       setError(null);
       setOidcTestResult(null);
 
-      // Use testById for existing providers, test for new ones
       const result = editingOidc
         ? await oidcProviderApi.testById(editingOidc.id)
         : await oidcProviderApi.test(oidcFormData);
@@ -622,20 +592,9 @@ export default function Settings() {
         setError(result.message);
       }
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string | Array<{ msg: string; loc: string[] }> } } };
-      let errorMessage = 'Test connection failed';
-      const detail = error.response?.data?.detail;
-      if (typeof detail === 'string') {
-        errorMessage = detail;
-      } else if (Array.isArray(detail) && detail.length > 0) {
-        // Pydantic validation errors
-        errorMessage = detail.map(e => `${e.loc?.join('.')}: ${e.msg}`).join(', ');
-      }
-      setOidcTestResult({
-        success: false,
-        message: errorMessage
-      });
-      setError(errorMessage);
+      const msg = getErrorMessage(err, 'Test connection failed');
+      setOidcTestResult({ success: false, message: msg });
+      setError(msg);
     } finally {
       setTestingOidc(false);
     }
@@ -646,10 +605,8 @@ export default function Settings() {
       setRestarting(true);
       await settingsApi.restart();
 
-      // Wait a bit before polling
       await new Promise(resolve => setTimeout(resolve, 3000));
 
-      // Poll health check
       const maxAttempts = 15;
 
       const checkHealth = async (): Promise<boolean> => {
@@ -662,7 +619,6 @@ export default function Settings() {
               return true;
             }
           } catch (e) {
-            // Continue polling
           }
         }
         return false;
@@ -684,13 +640,17 @@ export default function Settings() {
     }
   };
 
-  const tabs = [
-    { id: 'servers' as TabType, label: 'DNS Servers' },
-    { id: 'notifications' as TabType, label: 'Notifications' },
-    { id: 'polling' as TabType, label: 'Polling & Retention' },
-    { id: 'sync' as TabType, label: 'Sync' },
+  const tabs: { id: TabType; label: string }[] = [
+    { id: 'servers', label: 'DNS Servers' },
+    { id: 'notifications', label: 'Notifications' },
+    { id: 'polling', label: 'Polling & Retention' },
+    { id: 'sync', label: 'Sync' },
     ...(user?.is_admin ? [{ id: 'oidc' as TabType, label: 'OIDC' }] : []),
-    { id: 'advanced' as TabType, label: 'Advanced' },
+    { id: 'advanced', label: 'Advanced' },
+    ...(user?.is_admin ? [
+      { id: 'users' as TabType, label: 'Users' },
+      { id: 'api-keys' as TabType, label: 'API Keys' },
+    ] : []),
   ];
 
   if (loading) {
@@ -866,7 +826,6 @@ export default function Settings() {
                 </div>
                 {/* Sync options - sync only works within the same server type */}
                 {(() => {
-                  // Check if another server of the same type is already source
                   const anotherServerIsSource = servers.some(s =>
                     s.is_source &&
                     s.server_type === serverFormData.server_type &&
@@ -1203,10 +1162,10 @@ export default function Settings() {
             {syncPreview && (
               <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-700 rounded-md">
                 <h4 className="font-medium text-gray-900 dark:text-white mb-2">Sync Preview</h4>
-                {(syncPreview.sources || [syncPreview]).map((preview: any, idx: number) => (
+                {(syncPreview.sources || [syncPreview as SyncPreviewSource]).map((preview, idx) => (
                   <div key={idx} className={`text-sm text-gray-700 dark:text-gray-300 ${idx > 0 ? 'mt-4 pt-4 border-t border-gray-200 dark:border-gray-600' : ''}`}>
                     <p><strong>Source:</strong> {preview.source?.name} ({preview.source?.server_type || 'pihole'})</p>
-                    <p><strong>Targets:</strong> {preview.targets?.length > 0 ? preview.targets.map((t: any) => t.name).join(', ') : 'None'}</p>
+                    <p><strong>Targets:</strong> {preview.targets?.length > 0 ? preview.targets.map((t) => t.name).join(', ') : 'None'}</p>
                     {preview.teleporter && preview.teleporter.backup_size_bytes > 0 && (
                       <div className="mt-2">
                         <p><strong>Teleporter (Gravity Database):</strong></p>
@@ -1230,12 +1189,12 @@ export default function Settings() {
                         </ul>
                         {preview.config.summary && (
                           <div className="mt-1 ml-4 text-xs text-gray-500 dark:text-gray-400">
-                            {preview.config.summary.dns_hosts > 0 && <span>Local DNS: {preview.config.summary.dns_hosts} | </span>}
-                            {preview.config.summary.dns_cnameRecords > 0 && <span>CNAME: {preview.config.summary.dns_cnameRecords} | </span>}
-                            {preview.config.summary.dns_upstreams > 0 && <span>Upstreams: {preview.config.summary.dns_upstreams} | </span>}
-                            {preview.config.summary.dns_revServers > 0 && <span>Reverse DNS: {preview.config.summary.dns_revServers}</span>}
-                            {preview.config.summary.upstream_dns > 0 && <span>Upstream DNS: {preview.config.summary.upstream_dns}</span>}
-                            {preview.config.summary.user_rules > 0 && <span>User Rules: {preview.config.summary.user_rules}</span>}
+                            {(preview.config.summary.dns_hosts ?? 0) > 0 && <span>Local DNS: {preview.config.summary.dns_hosts} | </span>}
+                            {(preview.config.summary.dns_cnameRecords ?? 0) > 0 && <span>CNAME: {preview.config.summary.dns_cnameRecords} | </span>}
+                            {(preview.config.summary.dns_upstreams ?? 0) > 0 && <span>Upstreams: {preview.config.summary.dns_upstreams} | </span>}
+                            {(preview.config.summary.dns_revServers ?? 0) > 0 && <span>Reverse DNS: {preview.config.summary.dns_revServers}</span>}
+                            {(preview.config.summary.upstream_dns ?? 0) > 0 && <span>Upstream DNS: {preview.config.summary.upstream_dns}</span>}
+                            {(preview.config.summary.user_rules ?? 0) > 0 && <span>User Rules: {preview.config.summary.user_rules}</span>}
                           </div>
                         )}
                       </div>
@@ -1263,7 +1222,7 @@ export default function Settings() {
                     </tr>
                   </thead>
                   <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                    {syncHistory.map((sync: any) => (
+                    {syncHistory.map((sync) => (
                       <React.Fragment key={sync.id}>
                         <tr
                           className="cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700"
@@ -1300,17 +1259,17 @@ export default function Settings() {
                                   </div>
                                 )}
                                 {/* Teleporter size */}
-                                {sync.items_synced?._teleporter_size_bytes > 0 && (
+                                {(sync.items_synced?._teleporter_size_bytes ?? 0) > 0 && (
                                   <div>
                                     <span className="font-medium">Teleporter backup:</span>{' '}
-                                    {Math.round(sync.items_synced._teleporter_size_bytes / 1024)} KB
+                                    {Math.round((sync.items_synced?._teleporter_size_bytes ?? 0) / 1024)} KB
                                   </div>
                                 )}
                                 {/* Config sections */}
-                                {sync.items_synced?._config_sections?.length > 0 && (
+                                {(sync.items_synced?._config_sections?.length ?? 0) > 0 && (
                                   <div>
                                     <span className="font-medium">Config sections:</span>{' '}
-                                    {sync.items_synced._config_sections.join(', ')}
+                                    {sync.items_synced?._config_sections?.join(', ')}
                                   </div>
                                 )}
                                 {/* Items breakdown */}
@@ -1349,7 +1308,7 @@ export default function Settings() {
         </div>
       )}
 
-      {activeTab === 'oidc' && user?.is_admin && (
+      {activeTab === 'oidc' && (
         <div>
           <div className="flex justify-between items-center mb-4">
             <div>
@@ -1464,22 +1423,14 @@ export default function Settings() {
                       />
                       <button
                         type="button"
-                        onClick={() => {
+                        onClick={async () => {
                           const url = `${window.location.origin}/api/auth/oidc/${oidcFormData.name}/callback`;
-                          if (navigator.clipboard && navigator.clipboard.writeText) {
-                            navigator.clipboard.writeText(url);
-                          } else {
-                            // Fallback for HTTP (clipboard API requires HTTPS)
-                            const textArea = document.createElement('textarea');
-                            textArea.value = url;
-                            textArea.style.position = 'fixed';
-                            textArea.style.left = '-999999px';
-                            document.body.appendChild(textArea);
-                            textArea.select();
-                            document.execCommand('copy');
-                            document.body.removeChild(textArea);
+                          try {
+                            await copyToClipboard(url);
+                            setSuccessMessage('Callback URL copied to clipboard');
+                          } catch {
+                            setError('Failed to copy to clipboard');
                           }
-                          setSuccessMessage('Callback URL copied to clipboard');
                         }}
                         className="px-3 py-2 text-sm bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 rounded-md text-gray-700 dark:text-gray-300"
                         title="Copy to clipboard"
@@ -1774,6 +1725,10 @@ export default function Settings() {
           </button>
         </div>
       )}
+
+      {activeTab === 'users' && <Users />}
+
+      {activeTab === 'api-keys' && <ApiKeys />}
 
       {/* Restart Modal */}
       {showRestartModal && !restarting && (

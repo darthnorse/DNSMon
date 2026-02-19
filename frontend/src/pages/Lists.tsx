@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { domainApi } from '../utils/api';
+import { getErrorMessage } from '../utils/errors';
 import type { DomainEntry } from '../types';
 
 type ListType = 'whitelist' | 'blacklist' | 'regex-whitelist' | 'regex-blacklist';
@@ -53,8 +54,7 @@ export default function Lists() {
 
       setDomains(data);
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      setError(error.response?.data?.detail || 'Failed to load domains');
+      setError(getErrorMessage(err, 'Failed to load domains'));
     } finally {
       setLoading(false);
     }
@@ -82,8 +82,7 @@ export default function Lists() {
       setNewDomain('');
       await loadDomains();
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      setError(error.response?.data?.detail || 'Failed to add domain');
+      setError(getErrorMessage(err, 'Failed to add domain'));
     } finally {
       setAddingDomain(false);
     }
@@ -112,8 +111,7 @@ export default function Lists() {
       setSuccessMessage(`Removed "${domain.domain}" from ${activeTab}`);
       await loadDomains();
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      setError(error.response?.data?.detail || 'Failed to remove domain');
+      setError(getErrorMessage(err, 'Failed to remove domain'));
     } finally {
       setDeletingId(null);
     }

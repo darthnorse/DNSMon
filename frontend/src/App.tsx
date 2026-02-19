@@ -6,8 +6,6 @@ import Lists from './pages/Lists';
 import AlertRules from './pages/AlertRules';
 import Statistics from './pages/Statistics';
 import Settings from './pages/Settings';
-import Users from './pages/Users';
-import ApiKeys from './pages/ApiKeys';
 import Login from './pages/Login';
 import Setup from './pages/Setup';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -46,19 +44,15 @@ function Navigation({ darkMode, toggleDarkMode }: { darkMode: boolean; toggleDar
       { path: '/lists', label: 'Lists' },
       { path: '/alerts', label: 'Alert Rules' },
       { path: '/settings', label: 'Settings' },
-      { path: '/users', label: 'Users' },
-      { path: '/api-keys', label: 'API Keys' },
     ] : []),
   ];
 
-  // Load blocking status on mount and poll every 10s
   useEffect(() => {
     loadBlockingStatus();
     const interval = setInterval(loadBlockingStatus, 10000);
     return () => clearInterval(interval);
   }, []);
 
-  // Update countdown timer every second when blocking is disabled
   useEffect(() => {
     const updateCountdown = () => {
       const disabledServer = blockingStatuses.find(s => s.blocking === false && s.auto_enable_at);
@@ -83,7 +77,6 @@ function Navigation({ darkMode, toggleDarkMode }: { darkMode: boolean; toggleDar
     return () => clearInterval(interval);
   }, [blockingStatuses]);
 
-  // Close dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -142,7 +135,6 @@ function Navigation({ darkMode, toggleDarkMode }: { darkMode: boolean; toggleDar
   const hasServers = blockingStatuses.length > 0;
   const serverCount = blockingStatuses.length;
 
-  // Status priority: red (any disabled) > yellow (unknown) > green (all enabled)
   const getStatusColor = () => {
     if (anyDisabled) return { button: 'bg-red-600 hover:bg-red-700 text-white', dot: 'bg-red-400' };
     if (anyUnknown) return { button: 'bg-yellow-600 hover:bg-yellow-700 text-white', dot: 'bg-yellow-400' };
@@ -380,8 +372,6 @@ function AppLayout() {
           <Route path="/lists" element={<ProtectedRoute requireAdmin><Lists /></ProtectedRoute>} />
           <Route path="/alerts" element={<ProtectedRoute requireAdmin><AlertRules /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute requireAdmin><Settings /></ProtectedRoute>} />
-          <Route path="/users" element={<ProtectedRoute requireAdmin><Users /></ProtectedRoute>} />
-          <Route path="/api-keys" element={<ProtectedRoute requireAdmin><ApiKeys /></ProtectedRoute>} />
         </Routes>
       </main>
     </div>

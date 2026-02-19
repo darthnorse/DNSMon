@@ -1,11 +1,8 @@
 import { useState, useEffect } from 'react';
 import { apiKeyApi } from '../utils/api';
+import { getErrorMessage } from '../utils/errors';
+import { copyToClipboard } from '../utils/clipboard';
 import type { ApiKey, ApiKeyCreate, ApiKeyCreateResponse } from '../types';
-
-function getErrorMessage(err: unknown, fallback: string): string {
-  const error = err as { response?: { data?: { detail?: string } } };
-  return error.response?.data?.detail || fallback;
-}
 
 export default function ApiKeys() {
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
@@ -14,14 +11,12 @@ export default function ApiKeys() {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Form state
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState<ApiKeyCreate>({
     name: '',
     is_admin: false,
   });
 
-  // One-time key reveal
   const [newKeyData, setNewKeyData] = useState<ApiKeyCreateResponse | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -93,7 +88,7 @@ export default function ApiKeys() {
   const handleCopyKey = async () => {
     if (newKeyData?.raw_key) {
       try {
-        await navigator.clipboard.writeText(newKeyData.raw_key);
+        await copyToClipboard(newKeyData.raw_key);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
       } catch {
@@ -118,7 +113,7 @@ export default function ApiKeys() {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">API Keys</h1>
+        <h2 className="text-lg font-medium text-gray-900 dark:text-white">API Keys</h2>
         <button
           onClick={() => {
             resetForm();

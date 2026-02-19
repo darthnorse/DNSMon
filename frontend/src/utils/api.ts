@@ -32,6 +32,8 @@ import type {
   ApiKey,
   ApiKeyCreate,
   ApiKeyCreateResponse,
+  SyncPreview,
+  SyncHistoryEntry,
 } from '../types';
 
 const API_BASE_URL = '/api';
@@ -154,8 +156,8 @@ export const settingsApi = {
 };
 
 export const syncApi = {
-  preview: async (): Promise<any> => {
-    const response = await api.get('/sync/preview');
+  preview: async (): Promise<SyncPreview> => {
+    const response = await api.get<SyncPreview>('/sync/preview');
     return response.data;
   },
 
@@ -164,8 +166,8 @@ export const syncApi = {
     return response.data;
   },
 
-  getHistory: async (limit: number = 20): Promise<any[]> => {
-    const response = await api.get<{ history: any[] }>('/sync/history', { params: { limit } });
+  getHistory: async (limit: number = 20): Promise<SyncHistoryEntry[]> => {
+    const response = await api.get<{ history: SyncHistoryEntry[] }>('/sync/history', { params: { limit } });
     return response.data.history;
   },
 };

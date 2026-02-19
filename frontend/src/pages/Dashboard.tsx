@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { statsApi, queryApi, domainApi } from '../utils/api';
+import { getErrorMessage } from '../utils/errors';
 import type { Stats, Query } from '../types';
 import { format } from 'date-fns';
 
@@ -111,8 +112,7 @@ export default function Dashboard() {
       await domainApi.whitelist(domain);
       setSuccessMessage(`Added "${domain}" to whitelist`);
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      setError(error.response?.data?.detail || `Failed to whitelist ${domain}`);
+      setError(getErrorMessage(err, `Failed to whitelist ${domain}`));
     } finally {
       setActionLoading(null);
     }
@@ -125,8 +125,7 @@ export default function Dashboard() {
       await domainApi.blacklist(domain);
       setSuccessMessage(`Added "${domain}" to blacklist`);
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      setError(error.response?.data?.detail || `Failed to blacklist ${domain}`);
+      setError(getErrorMessage(err, `Failed to blacklist ${domain}`));
     } finally {
       setActionLoading(null);
     }

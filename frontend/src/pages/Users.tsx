@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { userApi } from '../utils/api';
 import { useAuth } from '../contexts/AuthContext';
+import { getErrorMessage } from '../utils/errors';
 import type { User, UserCreate, UserUpdate } from '../types';
 
 export default function Users() {
@@ -11,7 +12,6 @@ export default function Users() {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Form state
   const [showForm, setShowForm] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [formData, setFormData] = useState<UserCreate & { confirmPassword?: string }>({
@@ -41,8 +41,7 @@ export default function Users() {
       setUsers(data);
       setError(null);
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      setError(error.response?.data?.detail || 'Failed to load users');
+      setError(getErrorMessage(err, 'Failed to load users'));
     } finally {
       setLoading(false);
     }
@@ -78,7 +77,6 @@ export default function Users() {
     e.preventDefault();
     setError(null);
 
-    // Validation
     if (!editingUser && !formData.username.trim()) {
       setError('Username is required');
       return;
@@ -138,8 +136,7 @@ export default function Users() {
       await loadUsers();
       resetForm();
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      setError(error.response?.data?.detail || 'Failed to save user');
+      setError(getErrorMessage(err, 'Failed to save user'));
     } finally {
       setSaving(false);
     }
@@ -160,8 +157,7 @@ export default function Users() {
       setSuccessMessage('User deleted successfully');
       await loadUsers();
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      setError(error.response?.data?.detail || 'Failed to delete user');
+      setError(getErrorMessage(err, 'Failed to delete user'));
     }
   };
 
@@ -176,8 +172,7 @@ export default function Users() {
       setSuccessMessage(`User ${user.is_active ? 'deactivated' : 'activated'} successfully`);
       await loadUsers();
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      setError(error.response?.data?.detail || 'Failed to update user');
+      setError(getErrorMessage(err, 'Failed to update user'));
     }
   };
 
@@ -192,7 +187,7 @@ export default function Users() {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">User Management</h1>
+        <h2 className="text-lg font-medium text-gray-900 dark:text-white">User Management</h2>
         <button
           onClick={() => {
             resetForm();
