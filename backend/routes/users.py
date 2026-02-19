@@ -3,8 +3,7 @@ User management routes (admin only)
 """
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from typing import List
+from sqlalchemy import select, func
 import logging
 
 from ..database import get_db
@@ -17,11 +16,23 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/users", tags=["users"])
 
 
+async def _ensure_other_admin_exists(db: AsyncSession, exclude_user_id: int) -> None:
+    """Raise 400 if no other active admin would remain."""
+    stmt = select(func.count()).select_from(User).where(
+        User.is_admin == True,
+        User.is_active == True,
+        User.id != exclude_user_id
+    )
+    result = await db.execute(stmt)
+    if (result.scalar() or 0) == 0:
+        raise HTTPException(status_code=400, detail="Cannot remove the last admin user")
+
+
 @router.get("")
 async def list_users(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_admin)
-) -> List[UserResponse]:
+) -> list[UserResponse]:
     """List all users (admin only)"""
     stmt = select(User).order_by(User.created_at.desc())
     result = await db.execute(stmt)
@@ -71,6 +82,9 @@ async def update_user(
     admin: User = Depends(require_admin)
 ) -> UserResponse:
     """Update a user (admin only)"""
+    if user_id <= 0:
+        raise HTTPException(status_code=400, detail="Invalid user ID")
+
     stmt = select(User).where(User.id == user_id)
     result = await db.execute(stmt)
     user = result.scalar_one_or_none()
@@ -81,6 +95,10 @@ async def update_user(
     # Prevent admin from demoting themselves
     if user.id == admin.id and data.is_admin is False:
         raise HTTPException(status_code=400, detail="Cannot remove your own admin privileges")
+
+    # Prevent removing the last admin (covers both active and inactive admins)
+    if user.is_admin and (data.is_admin is False or data.is_active is False):
+        await _ensure_other_admin_exists(db, user.id)
 
     if data.email is not None:
         user.email = data.email.lower() if data.email else None
@@ -105,8 +123,11 @@ async def delete_user(
     user_id: int,
     db: AsyncSession = Depends(get_db),
     admin: User = Depends(require_admin)
-):
+) -> dict:
     """Delete a user (admin only)"""
+    if user_id <= 0:
+        raise HTTPException(status_code=400, detail="Invalid user ID")
+
     if user_id == admin.id:
         raise HTTPException(status_code=400, detail="Cannot delete your own account")
 
@@ -116,6 +137,10 @@ async def delete_user(
 
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+
+    # Prevent deleting the last admin (covers both active and inactive admins)
+    if user.is_admin:
+        await _ensure_other_admin_exists(db, user.id)
 
     username = user.username
     await db.delete(user)

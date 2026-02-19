@@ -8,7 +8,7 @@ import re
 import secrets
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from urllib.parse import urlencode
 
 import httpx
@@ -177,12 +177,14 @@ def get_session_id_from_request(request: Request) -> Optional[str]:
 # ============================================================================
 
 def get_client_ip(request: Request) -> str:
-    """Get client IP from request, checking X-Forwarded-For header."""
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        # Take the first IP in the chain
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    """Get client IP from request.
+
+    Uses request.client.host directly. For deployments behind a reverse proxy,
+    configure uvicorn's --proxy-headers --forwarded-allow-ips flags instead of
+    trusting X-Forwarded-For here (which is client-spoofable).
+    """
+    host = request.client.host if request.client else None
+    return host or "unknown"
 
 
 async def get_user_count(db: AsyncSession) -> int:
@@ -325,7 +327,7 @@ class InMemoryRateLimiter:
     For production with multiple instances, use Redis."""
 
     def __init__(self, max_attempts: int, window_seconds: int):
-        self._attempts: Dict[str, list] = {}
+        self._attempts: Dict[str, List[datetime]] = {}
         self.max_attempts = max_attempts
         self.window_seconds = window_seconds
 
@@ -334,7 +336,10 @@ class InMemoryRateLimiter:
         cutoff = utcnow() - timedelta(seconds=self.window_seconds)
         attempts = self._attempts.get(key, [])
         recent = [t for t in attempts if t > cutoff]
-        self._attempts[key] = recent
+        if recent:
+            self._attempts[key] = recent
+        elif key in self._attempts:
+            del self._attempts[key]
         return len(recent) < self.max_attempts
 
     def record(self, key: str) -> None:
@@ -342,12 +347,15 @@ class InMemoryRateLimiter:
         if key not in self._attempts:
             self._attempts[key] = []
         self._attempts[key].append(utcnow())
+        # Prune this key's expired entries to prevent unbounded list growth
+        cutoff = utcnow() - timedelta(seconds=self.window_seconds)
+        self._attempts[key] = [t for t in self._attempts[key] if t > cutoff]
         if len(self._attempts) > 100:
             self._cleanup()
 
     def _cleanup(self) -> None:
-        """Remove expired attempt records."""
-        cutoff = utcnow() - timedelta(seconds=self.window_seconds * 2)
+        """Remove keys whose attempts have all expired."""
+        cutoff = utcnow() - timedelta(seconds=self.window_seconds)
         expired = [k for k, v in self._attempts.items() if not any(t > cutoff for t in v)]
         for k in expired:
             self._attempts.pop(k, None)
