@@ -45,8 +45,8 @@ jobs:
       - name: Inject version from release tag
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          echo "export const APP_VERSION = '${VERSION}';" > frontend/src/version.ts
-          echo "export const GITHUB_REPO = '${GITHUB_REPOSITORY}';" >> frontend/src/version.ts
+          echo "export const APP_VERSION: string = '${VERSION}';" > frontend/src/version.ts
+          echo "export const GITHUB_REPO: string = '${GITHUB_REPOSITORY}';" >> frontend/src/version.ts
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
