@@ -146,6 +146,15 @@ services:
       POSTGRES_PASSWORD: changeme  # Change this!
     volumes:
       - dnsmon_postgres_data:/var/lib/postgresql/data
+    # Uncomment to tune Postgres memory usage (adjust to your system):
+    # command:
+    #   - "postgres"
+    #   - "-c"
+    #   - "shared_buffers=256MB"
+    #   - "-c"
+    #   - "work_mem=64MB"
+    #   - "-c"
+    #   - "effective_cache_size=1GB"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U dnsmon"]
       interval: 10s
