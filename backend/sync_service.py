@@ -52,7 +52,6 @@ class PiholeSyncService:
                 for key in keys:
                     if key in config[section]:
                         value = config[section][key]
-                        # Only include non-null values
                         if value is not None:
                             section_data[key] = value
                 if section_data:
@@ -64,9 +63,10 @@ class PiholeSyncService:
         summary = {}
 
         if server_type == 'adguard':
-            # AdGuard config summary
-            if 'user_rules' in config and config['user_rules']:
-                summary['user_rules'] = len(config['user_rules'])
+            # AdGuard config summary — count list-type sections uniformly
+            for key in ('user_rules', 'rewrites', 'filters', 'whitelist_filters', 'clients'):
+                if key in config:
+                    summary[key] = len(config[key]) if config[key] else 0
             if 'dns' in config and config['dns']:
                 dns = config['dns']
                 if 'upstream_dns' in dns and dns['upstream_dns']:
@@ -97,7 +97,6 @@ class PiholeSyncService:
                 'message': f'No {source_type} target servers configured for sync'
             }
 
-        # Connect to source and get preview data
         async with _create_client_from_server(source) as client:
             if not client.supports_sync:
                 return {'source': source.to_dict(), 'error': f'Server {source.name} does not support sync'}
@@ -106,14 +105,12 @@ class PiholeSyncService:
                 logger.error(f"Failed to authenticate with source {source.name}")
                 return {'source': source.to_dict(), 'error': f'Failed to authenticate with source {source.name}'}
 
-            # Get teleporter backup size (Pi-hole only)
             teleporter_data = None
             teleporter_size = 0
             if client.supports_teleporter:
                 teleporter_data = await client.get_teleporter()
                 teleporter_size = len(teleporter_data) if teleporter_data else 0
 
-            # Get config
             config = await client.get_config()
             config_summary = self._get_config_summary(config, source_type) if config else {}
 
@@ -215,7 +212,6 @@ class PiholeSyncService:
 
         logger.info(f"Starting {sync_type} sync from {source.name} ({source_type}) to {len(targets)} targets")
 
-        # === Phase 1: Get data from source ===
         teleporter_data = None
         source_config = None
 
@@ -228,14 +224,12 @@ class PiholeSyncService:
                 logger.error(f"Failed to authenticate with source {source.name}")
                 return None
 
-            # Get teleporter backup (Pi-hole only)
             if client.supports_teleporter:
                 teleporter_data = await client.get_teleporter()
                 if not teleporter_data:
                     logger.error(f"Failed to get teleporter backup from {source.name}")
                     all_errors.append("Failed to get teleporter backup from source")
 
-            # Get config (both Pi-hole and AdGuard)
             source_config = await client.get_config()
             if not source_config:
                 logger.error(f"Failed to get config from {source.name}")
@@ -255,7 +249,6 @@ class PiholeSyncService:
         else:
             sync_config = source_config
 
-        # === Phase 2: Push to targets ===
         successful_syncs = 0
         target_server_ids = [t.id for t in targets]
 
@@ -271,7 +264,6 @@ class PiholeSyncService:
                         all_errors.append(error_msg)
                         continue
 
-                    # Push teleporter backup (Pi-hole only)
                     if teleporter_data and client.supports_teleporter:
                         if not await client.post_teleporter(teleporter_data):
                             error_msg = f"{target.name}: Failed to upload teleporter backup"
@@ -280,7 +272,6 @@ class PiholeSyncService:
                                 all_errors.append(error_msg)
                             target_success = False
 
-                    # Push config
                     if sync_config:
                         if not await client.patch_config(sync_config):
                             error_msg = f"{target.name}: Failed to apply config"
@@ -309,7 +300,6 @@ class PiholeSyncService:
                 if len(all_errors) < max_errors:
                     all_errors.append(error_msg)
 
-        # === Phase 3: Record history ===
         if successful_syncs == len(targets) and not all_errors:
             status = 'success'
         elif successful_syncs > 0:
@@ -317,7 +307,6 @@ class PiholeSyncService:
         else:
             status = 'failed'
 
-        # Build items_synced summary (counts only, for display)
         items_synced = {}
         if source_config:
             items_synced.update(self._get_config_summary(source_config, source_type))

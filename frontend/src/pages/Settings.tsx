@@ -1189,12 +1189,11 @@ export default function Settings() {
                         </ul>
                         {preview.config.summary && (
                           <div className="mt-1 ml-4 text-xs text-gray-500 dark:text-gray-400">
-                            {(preview.config.summary.dns_hosts ?? 0) > 0 && <span>Local DNS: {preview.config.summary.dns_hosts} | </span>}
-                            {(preview.config.summary.dns_cnameRecords ?? 0) > 0 && <span>CNAME: {preview.config.summary.dns_cnameRecords} | </span>}
-                            {(preview.config.summary.dns_upstreams ?? 0) > 0 && <span>Upstreams: {preview.config.summary.dns_upstreams} | </span>}
-                            {(preview.config.summary.dns_revServers ?? 0) > 0 && <span>Reverse DNS: {preview.config.summary.dns_revServers}</span>}
-                            {(preview.config.summary.upstream_dns ?? 0) > 0 && <span>Upstream DNS: {preview.config.summary.upstream_dns}</span>}
-                            {(preview.config.summary.user_rules ?? 0) > 0 && <span>User Rules: {preview.config.summary.user_rules}</span>}
+                            {Object.entries(preview.config.summary as Record<string, unknown>)
+                              .filter(([, value]) => typeof value === 'number' && (value as number) > 0)
+                              .map(([key, value], i, arr) => (
+                                <span key={key}>{key.replace(/^dns_/, '').replace(/_/g, ' ')}: {value as number}{i < arr.length - 1 ? ' | ' : ''}</span>
+                              ))}
                           </div>
                         )}
                       </div>

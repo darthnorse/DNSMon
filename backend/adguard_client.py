@@ -426,37 +426,35 @@ class AdGuardHomeClient(DNSBlockerClient):
 
     # ========== Config/Sync Methods ==========
 
-    async def get_config(self) -> Optional[Dict[str, Any]]:
-        """
-        Get AdGuard Home configuration for sync.
+    async def _get_json(self, endpoint: str, label: str) -> Optional[Any]:
+        """GET an endpoint and return parsed JSON, or None on any failure."""
+        try:
+            response = await self.client.get(
+                f"{self.url}{endpoint}",
+                headers=self._get_auth_header()
+            )
+            if response.status_code == 200:
+                return response.json()
+            logger.error(f"Failed to get {label} from {self.server_name}: {response.status_code}")
+        except Exception as e:
+            logger.error(f"Failed to parse {label} response from {self.server_name}: {e}")
+        return None
 
-        Returns a dict with:
-        - user_rules: List of filter rules (whitelist/blacklist)
-        - dns: DNS configuration (upstreams, etc.)
-        - filtering: Filtering settings
-        """
+    async def get_config(self) -> Optional[Dict[str, Any]]:
+        """Get AdGuard Home configuration for sync."""
         try:
             config = {}
 
-            # Get filtering status (includes user_rules)
-            response = await self.client.get(
-                f"{self.url}/control/filtering/status",
-                headers=self._get_auth_header()
-            )
-            if response.status_code == 200:
-                data = response.json()
-                config['user_rules'] = data.get('user_rules') or []
-                config['filtering_enabled'] = data.get('enabled', True)
-                config['filtering_interval'] = data.get('filtering_interval') or data.get('interval') or 24
+            filtering = await self._get_json('/control/filtering/status', 'filtering status')
+            if filtering is not None:
+                config['user_rules'] = filtering.get('user_rules') or []
+                config['filtering_enabled'] = filtering.get('enabled', True)
+                config['filtering_interval'] = filtering.get('filtering_interval') or filtering.get('interval') or 24
+                config['filters'] = filtering.get('filters') or []
+                config['whitelist_filters'] = filtering.get('whitelist_filters') or []
 
-            # Get DNS config
-            response = await self.client.get(
-                f"{self.url}/control/dns_info",
-                headers=self._get_auth_header()
-            )
-            if response.status_code == 200:
-                dns_data = response.json()
-                # Only sync specific DNS settings, not device-specific ones
+            dns_data = await self._get_json('/control/dns_info', 'DNS config')
+            if dns_data is not None:
                 config['dns'] = {
                     'upstream_dns': dns_data.get('upstream_dns') or [],
                     'bootstrap_dns': dns_data.get('bootstrap_dns') or [],
@@ -467,6 +465,14 @@ class AdGuardHomeClient(DNSBlockerClient):
                     'disable_ipv6': dns_data.get('disable_ipv6') or False,
                 }
 
+            rewrites = await self._get_json('/control/rewrite/list', 'rewrites')
+            if rewrites is not None:
+                config['rewrites'] = rewrites or []
+
+            clients_data = await self._get_json('/control/clients', 'clients')
+            if clients_data is not None:
+                config['clients'] = clients_data.get('clients') or []
+
             logger.info(f"Retrieved config from {self.server_name}")
             return config
 
@@ -474,13 +480,63 @@ class AdGuardHomeClient(DNSBlockerClient):
             logger.error(f"Error getting config from {self.server_name}: {e}")
             return None
 
-    async def patch_config(self, config: Dict[str, Any]) -> bool:
-        """
-        Apply configuration to AdGuard Home.
+    async def _replace_all(
+        self,
+        label: str,
+        get_endpoint: str,
+        delete_endpoint: str,
+        add_endpoint: str,
+        source_entries: List[Dict[str, Any]],
+        existing_key: Optional[str] = None,
+        delete_payload_fn: Optional[Any] = None,
+    ) -> bool:
+        """Replace-all sync: delete everything on target, re-add from source."""
+        ok = True
 
-        Args:
-            config: Dict with user_rules, dns, and/or filtering settings
-        """
+        existing_data = await self._get_json(get_endpoint, label)
+        if existing_data is None:
+            logger.error(f"Cannot sync {label} on {self.server_name}: failed to retrieve existing entries")
+            return False
+        if existing_key and isinstance(existing_data, dict):
+            existing_data = existing_data.get(existing_key) or []
+        if not isinstance(existing_data, list):
+            existing_data = []
+
+        for entry in existing_data:
+            payload = delete_payload_fn(entry) if delete_payload_fn else entry
+            if payload is None:
+                continue
+            r = await self.client.post(
+                f"{self.url}{delete_endpoint}",
+                json=payload,
+                headers=self._get_auth_header()
+            )
+            if r.status_code != 200:
+                logger.error(f"Failed to delete {label} entry on {self.server_name}: {r.status_code}")
+                ok = False
+
+        if not ok:
+            logger.error(f"Aborting {label} add phase on {self.server_name} due to delete failures")
+            return False
+
+        for entry in source_entries:
+            r = await self.client.post(
+                f"{self.url}{add_endpoint}",
+                json=entry,
+                headers=self._get_auth_header()
+            )
+            if r.status_code != 200:
+                logger.error(f"Failed to add {label} entry on {self.server_name}: {r.status_code}")
+                ok = False
+
+        if ok:
+            logger.info(f"Applied {len(source_entries)} {label} to {self.server_name}")
+        else:
+            logger.error(f"Partial {label} sync to {self.server_name}: target may be in inconsistent state")
+        return ok
+
+    async def patch_config(self, config: Dict[str, Any]) -> bool:
+        """Apply configuration to AdGuard Home."""
         try:
             success = True
 
@@ -493,7 +549,7 @@ class AdGuardHomeClient(DNSBlockerClient):
                     logger.info(f"Applied {len(config['user_rules'])} user rules to {self.server_name}")
 
             # Apply DNS config
-            if 'dns' in config and config['dns']:
+            if 'dns' in config and config['dns'] is not None:
                 response = await self.client.post(
                     f"{self.url}/control/dns_config",
                     json=config['dns'],
@@ -516,14 +572,148 @@ class AdGuardHomeClient(DNSBlockerClient):
                     headers=self._get_auth_header()
                 )
                 if response.status_code != 200:
-                    logger.warning(f"Failed to set filtering config on {self.server_name}: {response.status_code}")
-                    # Don't fail the whole sync for this
+                    logger.error(f"Failed to set filtering config on {self.server_name}: {response.status_code}")
+                    success = False
+
+            # Apply DNS rewrites (replace-all)
+            if 'rewrites' in config and config['rewrites'] is not None:
+                try:
+                    if not await self._replace_all(
+                        label='rewrites',
+                        get_endpoint='/control/rewrite/list',
+                        delete_endpoint='/control/rewrite/delete',
+                        add_endpoint='/control/rewrite/add',
+                        source_entries=config['rewrites'],
+                    ):
+                        success = False
+                except Exception as e:
+                    logger.error(f"Failed to sync rewrites to {self.server_name}: {e}")
+                    success = False
+
+            # Apply blocklist/allowlist filter subscriptions (diff by URL)
+            for filter_key, whitelist_flag in [('filters', False), ('whitelist_filters', True)]:
+                if filter_key in config and config[filter_key] is not None:
+                    try:
+                        if not await self._sync_filter_subscriptions(
+                            config[filter_key], whitelist=whitelist_flag
+                        ):
+                            logger.error(f"Partial {filter_key} sync to {self.server_name}")
+                            success = False
+                        else:
+                            logger.info(f"Applied {len(config[filter_key])} {filter_key} to {self.server_name}")
+                    except Exception as e:
+                        logger.error(f"Failed to sync {filter_key} to {self.server_name}: {e}")
+                        success = False
+
+            # Apply persistent clients (replace-all)
+            if 'clients' in config and config['clients'] is not None:
+                def _client_delete_payload(entry: Dict[str, Any]) -> Optional[Dict[str, str]]:
+                    name = entry.get('name')
+                    if not name:
+                        logger.warning(f"Skipping client entry with missing name on {self.server_name}")
+                        return None
+                    return {'name': name}
+
+                try:
+                    if not await self._replace_all(
+                        label='clients',
+                        get_endpoint='/control/clients',
+                        delete_endpoint='/control/clients/delete',
+                        add_endpoint='/control/clients/add',
+                        source_entries=config['clients'],
+                        existing_key='clients',
+                        delete_payload_fn=_client_delete_payload,
+                    ):
+                        success = False
+                except Exception as e:
+                    logger.error(f"Failed to sync clients to {self.server_name}: {e}")
+                    success = False
 
             return success
 
         except Exception as e:
             logger.error(f"Error patching config on {self.server_name}: {e}")
             return False
+
+    async def _sync_filter_subscriptions(
+        self, source_filters: List[Dict[str, Any]], whitelist: bool = False
+    ) -> bool:
+        """
+        Sync blocklist or allowlist filter subscriptions by diffing on URL.
+
+        Removes filters not in source, adds new ones, updates name/enabled if changed.
+        Returns True if all operations succeeded.
+        """
+        ok = True
+        label = 'whitelist_filters' if whitelist else 'filters'
+
+        filtering = await self._get_json('/control/filtering/status', 'filtering status')
+        if filtering is None:
+            raise RuntimeError("Failed to get filtering status from target")
+
+        existing = filtering.get(label) or []
+
+        for tag, items in [('target', existing), ('source', source_filters)]:
+            urls = [f.get('url') for f in items if f.get('url')]
+            if len(urls) != len(set(urls)):
+                logger.warning(f"Duplicate filter URLs detected in {tag} {label} on {self.server_name}")
+
+        existing_by_url = {f['url']: f for f in existing if f.get('url')}
+        source_by_url = {f['url']: f for f in source_filters if f.get('url')}
+
+        def _set_url_payload(url: str, f: Dict[str, Any]) -> Dict[str, Any]:
+            return {
+                'url': url,
+                'data': {'name': f.get('name', ''), 'url': url, 'enabled': f.get('enabled', True)},
+                'whitelist': whitelist,
+            }
+
+        for url in existing_by_url:
+            if url not in source_by_url:
+                r = await self.client.post(
+                    f"{self.url}/control/filtering/remove_url",
+                    json={'url': url, 'whitelist': whitelist},
+                    headers=self._get_auth_header()
+                )
+                if r.status_code != 200:
+                    logger.error(f"Failed to remove filter {url} on {self.server_name}: {r.status_code}")
+                    ok = False
+
+        for url, f in source_by_url.items():
+            if url not in existing_by_url:
+                r = await self.client.post(
+                    f"{self.url}/control/filtering/add_url",
+                    json={'name': f.get('name', ''), 'url': url, 'whitelist': whitelist},
+                    headers=self._get_auth_header()
+                )
+                if r.status_code != 200:
+                    logger.error(f"Failed to add filter {url} on {self.server_name}: {r.status_code}")
+                    ok = False
+                    continue
+                # Set enabled state if disabled (add_url defaults to enabled)
+                if not f.get('enabled', True):
+                    r = await self.client.post(
+                        f"{self.url}/control/filtering/set_url",
+                        json=_set_url_payload(url, f),
+                        headers=self._get_auth_header()
+                    )
+                    if r.status_code != 200:
+                        logger.error(f"Failed to disable filter {url} on {self.server_name}: {r.status_code}")
+                        ok = False
+            else:
+                existing_f = existing_by_url[url]
+                if (existing_f.get('name') != f.get('name') or
+                        existing_f.get('enabled') != f.get('enabled')):
+                    r = await self.client.post(
+                        f"{self.url}/control/filtering/set_url",
+                        json=_set_url_payload(url, f),
+                        headers=self._get_auth_header()
+                    )
+                    if r.status_code != 200:
+                        logger.error(f"Failed to update filter {url} on {self.server_name}: {r.status_code}")
+                        ok = False
+
+        return ok
 
     # ========== Capability Properties ==========
 
