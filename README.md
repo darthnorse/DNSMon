@@ -88,9 +88,16 @@ Includes sync history with detailed logs and error tracking.
 - Quick whitelist/blacklist actions from query results
 - Regex list support (Pi-hole)
 
+### API Keys & Programmatic Access
+- Create API keys for scripting and automation
+- Read-only or admin-level key permissions
+- Optional expiration dates
+- All REST endpoints accessible via `Authorization: Bearer <key>`
+
 ### Security
 - Built-in authentication with session management
 - Admin and regular user roles
+- API key authentication for programmatic access
 - OIDC/SSO integration (Google, Authentik, Keycloak, etc.)
 - Rate-limited login attempts
 - Secure password hashing (bcrypt)
@@ -258,6 +265,8 @@ Supported architectures:
 - `linux/arm64` (ARM 64-bit, e.g., Raspberry Pi 4+)
 
 ## API Endpoints
+
+All endpoints support API key authentication via the `Authorization: Bearer <key>` header. Create keys in **Settings** → **API Keys**.
 
 ### Authentication
 - `POST /api/auth/login` - Login
