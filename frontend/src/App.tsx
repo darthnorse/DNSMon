@@ -10,6 +10,8 @@ import Login from './pages/Login';
 import Setup from './pages/Setup';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
+import UpdateBanner from './components/UpdateBanner';
+import { APP_VERSION } from './version';
 import { blockingApi } from './utils/api';
 import type { BlockingStatus } from './types';
 
@@ -331,6 +333,9 @@ function Navigation({ darkMode, toggleDarkMode }: { darkMode: boolean; toggleDar
                         Sign out
                       </button>
                     </div>
+                    <div className="px-4 py-2 border-t border-gray-200 dark:border-gray-700">
+                      <span className="text-xs text-gray-400 dark:text-gray-500">DNSMon v{APP_VERSION}</span>
+                    </div>
                   </div>
                 )}
               </div>
@@ -363,6 +368,7 @@ function AppLayout() {
 
   return (
     <div className="min-h-screen bg-gray-100 dark:bg-gray-900">
+      <UpdateBanner />
       <Navigation darkMode={darkMode} toggleDarkMode={toggleDarkMode} />
       <main className="max-w-[1400px] mx-auto py-4 px-4 sm:py-6 sm:px-6 lg:px-8">
         <Routes>
