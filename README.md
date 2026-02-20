@@ -264,9 +264,30 @@ Supported architectures:
 - `linux/amd64` (x86 64-bit)
 - `linux/arm64` (ARM 64-bit, e.g., Raspberry Pi 4+)
 
-## API Endpoints
+## API
+
+Full interactive API documentation is available at `/docs` (Swagger UI) or `/redoc` (ReDoc) on your DNSMon instance.
 
 All endpoints support API key authentication via the `Authorization: Bearer <key>` header. Create keys in **Settings** → **API Keys**.
+
+### Quick Examples
+
+```bash
+# Get dashboard statistics
+curl -H "Authorization: Bearer YOUR_API_KEY" http://localhost:8000/api/stats
+
+# Search queries
+curl -H "Authorization: Bearer YOUR_API_KEY" "http://localhost:8000/api/queries?domain=example.com&limit=10"
+
+# Get blocking status
+curl -H "Authorization: Bearer YOUR_API_KEY" http://localhost:8000/api/blocking/status
+
+# Disable blocking on all servers for 5 minutes
+curl -X POST -H "Authorization: Bearer YOUR_API_KEY" -H "Content-Type: application/json" \
+  -d '{"enabled": false, "duration": 300}' http://localhost:8000/api/blocking/all
+```
+
+### Endpoints
 
 ### Authentication
 - `POST /api/auth/login` - Login
