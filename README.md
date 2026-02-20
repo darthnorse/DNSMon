@@ -8,6 +8,22 @@ A comprehensive web-based dashboard for monitoring and managing multiple Pi-hole
 ![Docker](https://img.shields.io/badge/Docker-Multi--arch-2496ED?style=flat-square&logo=docker)
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-ffdd00?style=flat-square&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/darthnorse)
 
+## Table of Contents
+
+- [Screenshots](#screenshots)
+- [Features](#features)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Architecture](#architecture)
+- [Docker Images](#docker-images)
+- [API](#api)
+- [Development](#development)
+- [Troubleshooting](#troubleshooting)
+- [Performance](#performance)
+- [License](#license)
+- [Contributing](#contributing)
+- [Support](#support)
+
 ## Screenshots
 
 | Dashboard | Statistics |
@@ -73,8 +89,10 @@ Designate a "source" server and sync its configuration to target servers automat
 
 **AdGuard Home syncs:**
 - User filtering rules
-- DNS configuration
-- Upstream servers
+- DNS configuration and upstream servers
+- DNS rewrites
+- Blocklist and allowlist subscriptions
+- Persistent client settings
 
 Includes sync history with detailed logs and error tracking.
 
