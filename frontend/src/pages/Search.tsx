@@ -38,8 +38,8 @@ export default function Search() {
       if (searchParams.client_ip) params.client_ip = searchParams.client_ip;
       if (searchParams.client_hostname) params.client_hostname = searchParams.client_hostname;
       if (searchParams.server) params.server = searchParams.server;
-      if (searchParams.from_date) params.from_date = searchParams.from_date;
-      if (searchParams.to_date) params.to_date = searchParams.to_date;
+      if (searchParams.from_date) params.from_date = new Date(searchParams.from_date).toISOString();
+      if (searchParams.to_date) params.to_date = new Date(searchParams.to_date).toISOString();
 
       const [results, count] = await Promise.all([
         queryApi.search(params),

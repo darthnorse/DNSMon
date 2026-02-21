@@ -165,7 +165,7 @@ class AlertEngine:
             return not patterns  # No patterns = match all
 
         for pattern in patterns:
-            if pattern.match(value):
+            if pattern.fullmatch(value):
                 return True
         return False
 

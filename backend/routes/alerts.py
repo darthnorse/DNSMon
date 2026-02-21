@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 from ..database import get_db
 from ..models import AlertRule, User
-from ..schemas import AlertRuleCreate, AlertRuleResponse
+from ..schemas import AlertRuleCreate, AlertRuleUpdate, AlertRuleResponse
 from ..auth import get_current_user, require_admin
 from ..service import get_service
 from ..utils import ensure_utc
@@ -77,7 +77,7 @@ async def create_alert_rule(
 @router.put("/{rule_id}", response_model=AlertRuleResponse)
 async def update_alert_rule(
     rule_id: int,
-    rule_update: AlertRuleCreate,
+    rule_update: AlertRuleUpdate,
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_admin)
 ):

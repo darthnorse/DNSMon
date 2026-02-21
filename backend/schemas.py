@@ -54,6 +54,17 @@ class AlertRuleCreate(BaseModel):
     enabled: bool = True
 
 
+class AlertRuleUpdate(BaseModel):
+    name: Optional[str] = PydanticField(default=None, max_length=100)
+    description: Optional[str] = PydanticField(default=None, max_length=500)
+    domain_pattern: Optional[str] = PydanticField(default=None, max_length=5000)
+    client_ip_pattern: Optional[str] = PydanticField(default=None, max_length=500)
+    client_hostname_pattern: Optional[str] = PydanticField(default=None, max_length=500)
+    exclude_domains: Optional[str] = PydanticField(default=None, max_length=5000)
+    cooldown_minutes: Optional[int] = PydanticField(default=None, ge=0, le=10080)
+    enabled: Optional[bool] = None
+
+
 class AlertRuleResponse(BaseModel):
     id: int
     name: str
@@ -64,8 +75,8 @@ class AlertRuleResponse(BaseModel):
     exclude_domains: Optional[str]
     cooldown_minutes: int
     enabled: bool
-    created_at: str
-    updated_at: str
+    created_at: Optional[str]
+    updated_at: Optional[str]
 
     class Config:
         from_attributes = True

@@ -62,6 +62,14 @@ export default function Dashboard() {
     return () => clearTimeout(delayDebounceFn);
   }, [searchTerm]);
 
+  // Clamp currentPage when filtered results shrink (e.g. toggling system query filter)
+  useEffect(() => {
+    const total = Math.max(1, Math.ceil(queries.length / pageSize));
+    if (currentPage > total) {
+      setCurrentPage(total);
+    }
+  }, [queries.length, pageSize, currentPage]);
+
   const loadData = async () => {
     try {
       setLoading(true);
@@ -166,12 +174,6 @@ export default function Dashboard() {
 
   const totalPages = Math.max(1, Math.ceil(filteredQueries.length / pageSize));
   const safePage = Math.min(currentPage, totalPages);
-
-  useEffect(() => {
-    if (currentPage > totalPages) {
-      setCurrentPage(totalPages);
-    }
-  }, [filteredQueries.length, pageSize, currentPage, totalPages]);
 
   const paginatedQueries = filteredQueries.slice((safePage - 1) * pageSize, safePage * pageSize);
 

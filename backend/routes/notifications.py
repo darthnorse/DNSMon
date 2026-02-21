@@ -186,10 +186,9 @@ async def update_channel(
 
     update_data = data.model_dump(exclude_unset=True)
 
-    if 'config' in update_data and update_data['config']:
+    if 'config' in update_data:
         new_config = channel.config.copy() if channel.config else {}
-        for key, value in update_data['config'].items():
-            # Skip masked values - keep existing value
+        for key, value in (update_data['config'] or {}).items():
             if value != '********':
                 new_config[key] = value
 

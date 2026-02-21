@@ -317,7 +317,7 @@ class PiholeClient(DNSBlockerClient):
         """Remove a domain from whitelist"""
         try:
             response = await self.client.delete(
-                f"{self.url}/api/domains/allow/exact/{domain}",
+                f"{self.url}/api/domains/allow/exact/{quote(domain, safe='')}",
                 headers=self.get_auth_headers()
             )
             if response.status_code in [200, 204]:
@@ -333,7 +333,7 @@ class PiholeClient(DNSBlockerClient):
         """Remove a domain from blacklist"""
         try:
             response = await self.client.delete(
-                f"{self.url}/api/domains/deny/exact/{domain}",
+                f"{self.url}/api/domains/deny/exact/{quote(domain, safe='')}",
                 headers=self.get_auth_headers()
             )
             if response.status_code in [200, 204]:

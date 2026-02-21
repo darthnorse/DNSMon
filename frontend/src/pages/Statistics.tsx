@@ -48,6 +48,7 @@ export default function StatisticsPage() {
   const [clients, setClients] = useState<ClientInfo[]>([]);
   const [selectedClients, setSelectedClients] = useState<string[]>([]);
   const [pendingClients, setPendingClients] = useState<string[]>([]);
+  const totalClientsRef = useRef(0);
   const [clientDropdownOpen, setClientDropdownOpen] = useState(false);
   const [clientSearch, setClientSearch] = useState('');
   const clientDropdownRef = useRef<HTMLDivElement>(null);
@@ -138,6 +139,7 @@ export default function StatisticsPage() {
       }
       const clientList = await statisticsApi.getClients(params);
       setClients(clientList);
+      totalClientsRef.current = clientList.length;
       const allIps = clientList.map(c => c.client_ip);
       setSelectedClients(allIps);
       setPendingClients(allIps);
@@ -159,7 +161,7 @@ export default function StatisticsPage() {
         params.servers = selectedServers.join(',');
       }
       // Only send client filter when a subset is selected (not all)
-      if (selectedClients.length > 0 && selectedClients.length < clients.length) {
+      if (selectedClients.length > 0 && selectedClients.length < totalClientsRef.current) {
         params.clients = selectedClients.join(',');
       }
       const data = await statisticsApi.get(params);
