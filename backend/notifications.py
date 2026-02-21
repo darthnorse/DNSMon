@@ -2,10 +2,13 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Tuple
 import httpx
 
-from .models import Query, AlertRule
+from sqlalchemy import select as sa_select
+
+from .database import async_session_maker
+from .models import AlertRule, NotificationChannel
 from .utils import validate_url_safety, async_validate_url_safety
 
 logger = logging.getLogger(__name__)
@@ -50,9 +53,18 @@ class NotificationSender(ABC):
 
     channel_type: str = ""
 
-    @abstractmethod
     async def send(self, message: str, config: dict) -> Tuple[bool, Optional[str]]:
-        """Send notification. Returns (success, error_message)"""
+        """Send notification with standard error handling. Subclasses override _send."""
+        try:
+            return await self._send(message, config)
+        except httpx.TimeoutException:
+            return False, "Request timed out"
+        except Exception as e:
+            return False, str(e)
+
+    @abstractmethod
+    async def _send(self, message: str, config: dict) -> Tuple[bool, Optional[str]]:
+        """Implementation-specific send logic. May raise httpx exceptions."""
         pass
 
     @abstractmethod
@@ -65,27 +77,22 @@ class TelegramSender(NotificationSender):
     """Telegram notification sender using HTTP API"""
     channel_type = "telegram"
 
-    async def send(self, message: str, config: dict) -> Tuple[bool, Optional[str]]:
+    async def _send(self, message: str, config: dict) -> Tuple[bool, Optional[str]]:
         bot_token = config.get('bot_token')
         chat_id = config.get('chat_id')
 
         if not bot_token or not chat_id:
             return False, "Missing bot_token or chat_id"
 
-        try:
-            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-                response = await client.post(
-                    f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                    json={"chat_id": chat_id, "text": message}
-                )
-                if response.status_code == 200:
-                    return True, None
-                else:
-                    return False, f"HTTP {response.status_code}: {response.text[:200]}"
-        except httpx.TimeoutException:
-            return False, "Request timed out"
-        except Exception as e:
-            return False, str(e)
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            response = await client.post(
+                f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                json={"chat_id": chat_id, "text": message}
+            )
+            if response.status_code == 200:
+                return True, None
+            else:
+                return False, f"HTTP {response.status_code}: {response.text[:200]}"
 
     def validate_config(self, config: dict) -> List[str]:
         errors = []
@@ -100,39 +107,34 @@ class PushoverSender(NotificationSender):
     """Pushover notification sender"""
     channel_type = "pushover"
 
-    async def send(self, message: str, config: dict) -> Tuple[bool, Optional[str]]:
+    async def _send(self, message: str, config: dict) -> Tuple[bool, Optional[str]]:
         app_token = config.get('app_token')
         user_key = config.get('user_key')
 
         if not app_token or not user_key:
             return False, "Missing app_token or user_key"
 
-        try:
-            data = {
-                "token": app_token,
-                "user": user_key,
-                "message": message,
-            }
-            if config.get('priority') not in (None, ''):
-                data["priority"] = int(config['priority'])
-            if config.get('sound'):
-                data["sound"] = config['sound']
-            if config.get('title'):
-                data["title"] = config['title']
+        data = {
+            "token": app_token,
+            "user": user_key,
+            "message": message,
+        }
+        if config.get('priority') not in (None, ''):
+            data["priority"] = int(config['priority'])
+        if config.get('sound'):
+            data["sound"] = config['sound']
+        if config.get('title'):
+            data["title"] = config['title']
 
-            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-                response = await client.post(
-                    "https://api.pushover.net/1/messages.json",
-                    data=data
-                )
-                if response.status_code == 200:
-                    return True, None
-                else:
-                    return False, f"HTTP {response.status_code}: {response.text[:200]}"
-        except httpx.TimeoutException:
-            return False, "Request timed out"
-        except Exception as e:
-            return False, str(e)
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            response = await client.post(
+                "https://api.pushover.net/1/messages.json",
+                data=data
+            )
+            if response.status_code == 200:
+                return True, None
+            else:
+                return False, f"HTTP {response.status_code}: {response.text[:200]}"
 
     def validate_config(self, config: dict) -> List[str]:
         errors = []
@@ -154,7 +156,7 @@ class NtfySender(NotificationSender):
     """Ntfy notification sender"""
     channel_type = "ntfy"
 
-    async def send(self, message: str, config: dict) -> Tuple[bool, Optional[str]]:
+    async def _send(self, message: str, config: dict) -> Tuple[bool, Optional[str]]:
         server_url = config.get('server_url', 'https://ntfy.sh').rstrip('/')
         topic = config.get('topic')
 
@@ -173,21 +175,16 @@ class NtfySender(NotificationSender):
         if config.get('auth_token'):
             headers["Authorization"] = f"Bearer {config['auth_token']}"
 
-        try:
-            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-                response = await client.post(
-                    f"{server_url}/{topic}",
-                    content=message,
-                    headers=headers
-                )
-                if response.status_code == 200:
-                    return True, None
-                else:
-                    return False, f"HTTP {response.status_code}: {response.text[:200]}"
-        except httpx.TimeoutException:
-            return False, "Request timed out"
-        except Exception as e:
-            return False, str(e)
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            response = await client.post(
+                f"{server_url}/{topic}",
+                content=message,
+                headers=headers
+            )
+            if response.status_code == 200:
+                return True, None
+            else:
+                return False, f"HTTP {response.status_code}: {response.text[:200]}"
 
     def validate_config(self, config: dict) -> List[str]:
         errors = []
@@ -212,25 +209,24 @@ class DiscordSender(NotificationSender):
     """Discord webhook notification sender"""
     channel_type = "discord"
 
-    async def send(self, message: str, config: dict) -> Tuple[bool, Optional[str]]:
+    async def _send(self, message: str, config: dict) -> Tuple[bool, Optional[str]]:
         webhook_url = config.get('webhook_url')
         if not webhook_url:
             return False, "Missing webhook_url"
 
-        try:
-            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-                response = await client.post(
-                    webhook_url,
-                    json={"content": message}
-                )
-                if response.status_code in (200, 204):
-                    return True, None
-                else:
-                    return False, f"HTTP {response.status_code}: {response.text[:200]}"
-        except httpx.TimeoutException:
-            return False, "Request timed out"
-        except Exception as e:
-            return False, str(e)
+        safety_err = await async_validate_url_safety(webhook_url)
+        if safety_err:
+            return False, safety_err
+
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            response = await client.post(
+                webhook_url,
+                json={"content": message}
+            )
+            if response.status_code in (200, 204):
+                return True, None
+            else:
+                return False, f"HTTP {response.status_code}: {response.text[:200]}"
 
     def validate_config(self, config: dict) -> List[str]:
         errors = []
@@ -247,7 +243,7 @@ class WebhookSender(NotificationSender):
     """Generic webhook notification sender"""
     channel_type = "webhook"
 
-    async def send(self, message: str, config: dict) -> Tuple[bool, Optional[str]]:
+    async def _send(self, message: str, config: dict) -> Tuple[bool, Optional[str]]:
         url = config.get('url')
         if not url:
             return False, "Missing url"
@@ -266,21 +262,16 @@ class WebhookSender(NotificationSender):
             "source": "dnsmon"
         }
 
-        try:
-            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-                if method == 'GET':
-                    response = await client.get(url, headers=headers, params={"message": message})
-                else:
-                    response = await client.request(method, url, json=body, headers=headers)
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            if method == 'GET':
+                response = await client.get(url, headers=headers, params={"message": message})
+            else:
+                response = await client.request(method, url, json=body, headers=headers)
 
-                if response.status_code < 400:
-                    return True, None
-                else:
-                    return False, f"HTTP {response.status_code}: {response.text[:200]}"
-        except httpx.TimeoutException:
-            return False, "Request timed out"
-        except Exception as e:
-            return False, str(e)
+            if response.status_code < 400:
+                return True, None
+            else:
+                return False, f"HTTP {response.status_code}: {response.text[:200]}"
 
     def validate_config(self, config: dict) -> List[str]:
         errors = []
@@ -350,17 +341,34 @@ def truncate_message(message: str, channel_type: str) -> str:
 class NotificationService:
     """Service for sending notifications to all enabled channels"""
 
-    async def send_alert(self, context: AlertContext) -> Dict[int, bool]:
-        """Send alert to all enabled notification channels.
-        Returns dict of {channel_id: success}"""
-        from .database import async_session_maker
-        from .models import NotificationChannel
-        from sqlalchemy import select
+    @staticmethod
+    def _update_channel_status(channel: NotificationChannel, success: bool, error: Optional[str]) -> None:
+        now = datetime.now(timezone.utc)
+        if success:
+            channel.last_success_at = now
+            channel.last_error = None
+            channel.last_error_at = None
+            channel.consecutive_failures = 0
+        else:
+            channel.last_error = error
+            channel.last_error_at = now
+            channel.consecutive_failures += 1
 
-        results = {}
+    async def _send_to_all_channels(
+        self,
+        build_context,
+        log_label: str = "notification",
+    ) -> Dict[int, bool]:
+        """Send to all enabled channels using a per-channel context builder.
+
+        Args:
+            build_context: callable(channel) -> AlertContext
+            log_label: label for log messages (e.g. "notification", "batch alert (5 queries)")
+        """
+        results: Dict[int, bool] = {}
 
         async with async_session_maker() as session:
-            stmt = select(NotificationChannel).where(NotificationChannel.enabled == True)
+            stmt = sa_select(NotificationChannel).where(NotificationChannel.enabled == True)
             result = await session.execute(stmt)
             channels = result.scalars().all()
 
@@ -372,36 +380,30 @@ class NotificationService:
                     continue
 
                 try:
+                    context = build_context(channel)
                     message = render_template(channel.message_template, context)
                     message = truncate_message(message, channel.channel_type)
 
                     success, error = await sender.send(message, channel.config)
                     results[channel.id] = success
-
-                    # Update channel status
-                    now = datetime.now(timezone.utc)
+                    self._update_channel_status(channel, success, error)
                     if success:
-                        channel.last_success_at = now
-                        channel.last_error = None
-                        channel.last_error_at = None
-                        channel.consecutive_failures = 0
-                        logger.info(f"Sent notification to channel {channel.name}")
+                        logger.info(f"Sent {log_label} to channel {channel.name}")
                     else:
-                        channel.last_error = error
-                        channel.last_error_at = now
-                        channel.consecutive_failures += 1
                         logger.warning(f"Failed to send to channel {channel.name}: {error}")
 
                 except Exception as e:
                     logger.error(f"Error sending to channel {channel.name}: {e}")
-                    channel.last_error = str(e)
-                    channel.last_error_at = datetime.now(timezone.utc)
-                    channel.consecutive_failures += 1
+                    self._update_channel_status(channel, False, str(e))
                     results[channel.id] = False
 
             await session.commit()
 
         return results
+
+    async def send_alert(self, context: AlertContext) -> Dict[int, bool]:
+        """Send alert to all enabled notification channels."""
+        return await self._send_to_all_channels(lambda _channel: context, "notification")
 
     def _build_batch_context(self, queries: List, rule: AlertRule, dedupe: bool = False) -> AlertContext:
         """Build alert context from a batch of queries.
@@ -463,73 +465,21 @@ class NotificationService:
         )
 
     async def send_batch_alert(self, queries: List, rule: AlertRule) -> Dict[int, bool]:
-        """Send batched alert for multiple queries to all enabled channels.
-        Returns dict of {channel_id: success}"""
-        from .database import async_session_maker
-        from .models import NotificationChannel
-        from sqlalchemy import select
-
+        """Send batched alert for multiple queries to all enabled channels."""
         if not queries:
             return {}
 
-        results = {}
+        def build_context(channel: NotificationChannel) -> AlertContext:
+            dedupe = channel.config.get('dedupe_domains', False) if channel.config else False
+            return self._build_batch_context(queries, rule, dedupe=dedupe)
 
-        async with async_session_maker() as session:
-            stmt = select(NotificationChannel).where(NotificationChannel.enabled == True)
-            result = await session.execute(stmt)
-            channels = result.scalars().all()
-
-            for channel in channels:
-                sender = SENDERS.get(channel.channel_type)
-                if not sender:
-                    logger.warning(f"Unknown channel type: {channel.channel_type}")
-                    results[channel.id] = False
-                    continue
-
-                try:
-                    # Check if this channel wants deduplication (default: False = show all)
-                    dedupe = channel.config.get('dedupe_domains', False) if channel.config else False
-                    context = self._build_batch_context(queries, rule, dedupe=dedupe)
-
-                    message = render_template(channel.message_template, context)
-                    message = truncate_message(message, channel.channel_type)
-
-                    success, error = await sender.send(message, channel.config)
-                    results[channel.id] = success
-
-                    # Update channel status
-                    now = datetime.now(timezone.utc)
-                    if success:
-                        channel.last_success_at = now
-                        channel.last_error = None
-                        channel.last_error_at = None
-                        channel.consecutive_failures = 0
-                        logger.info(f"Sent batch notification ({len(queries)} queries) to channel {channel.name}")
-                    else:
-                        channel.last_error = error
-                        channel.last_error_at = now
-                        channel.consecutive_failures += 1
-                        logger.warning(f"Failed to send to channel {channel.name}: {error}")
-
-                except Exception as e:
-                    logger.error(f"Error sending to channel {channel.name}: {e}")
-                    channel.last_error = str(e)
-                    channel.last_error_at = datetime.now(timezone.utc)
-                    channel.consecutive_failures += 1
-                    results[channel.id] = False
-
-            await session.commit()
-
-        return results
+        return await self._send_to_all_channels(build_context, f"batch alert ({len(queries)} queries)")
 
     async def send_to_channel(self, channel_id: int, context: AlertContext) -> Tuple[bool, Optional[str]]:
         """Send alert to a specific channel. Returns (success, error_message)"""
-        from .database import async_session_maker
-        from .models import NotificationChannel
-        from sqlalchemy import select
 
         async with async_session_maker() as session:
-            stmt = select(NotificationChannel).where(NotificationChannel.id == channel_id)
+            stmt = sa_select(NotificationChannel).where(NotificationChannel.id == channel_id)
             result = await session.execute(stmt)
             channel = result.scalar_one_or_none()
 
@@ -544,18 +494,7 @@ class NotificationService:
             message = truncate_message(message, channel.channel_type)
 
             success, error = await sender.send(message, channel.config)
-
-            # Update channel status
-            now = datetime.now(timezone.utc)
-            if success:
-                channel.last_success_at = now
-                channel.last_error = None
-                channel.last_error_at = None
-                channel.consecutive_failures = 0
-            else:
-                channel.last_error = error
-                channel.last_error_at = now
-                channel.consecutive_failures += 1
+            self._update_channel_status(channel, success, error)
 
             await session.commit()
 

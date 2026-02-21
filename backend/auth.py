@@ -8,7 +8,7 @@ import re
 import secrets
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 from urllib.parse import urlencode
 
 import httpx
@@ -324,7 +324,7 @@ class InMemoryRateLimiter:
     For production with multiple instances, use Redis."""
 
     def __init__(self, max_attempts: int, window_seconds: int):
-        self._attempts: Dict[str, List[datetime]] = {}
+        self._attempts: Dict[str, list[datetime]] = {}
         self.max_attempts = max_attempts
         self.window_seconds = window_seconds
 
@@ -341,11 +341,11 @@ class InMemoryRateLimiter:
 
     def record(self, key: str) -> None:
         """Record a failed attempt."""
+        now = utcnow()
         if key not in self._attempts:
             self._attempts[key] = []
-        self._attempts[key].append(utcnow())
-        # Prune this key's expired entries to prevent unbounded list growth
-        cutoff = utcnow() - timedelta(seconds=self.window_seconds)
+        self._attempts[key].append(now)
+        cutoff = now - timedelta(seconds=self.window_seconds)
         self._attempts[key] = [t for t in self._attempts[key] if t > cutoff]
         if len(self._attempts) > 100:
             self._cleanup()
@@ -510,8 +510,8 @@ async def _decode_id_token(
         payload += '=' * (4 - len(payload) % 4)
         return json.loads(base64.urlsafe_b64decode(payload))
     except Exception as e:
-        logger.warning(f"Failed to decode id_token for {provider.name}: {e}")
-        return {}
+        logger.error(f"Failed to decode id_token for {provider.name}: {e}")
+        raise ValueError(f"ID token decode failed") from e
 
 
 async def exchange_oidc_code(
@@ -625,40 +625,40 @@ async def find_or_create_oidc_user(
     result = await db.execute(stmt)
     user = result.scalar_one_or_none()
 
-    if user:
-        # Update user info from latest claims
+    async def _link_and_return(user_to_link: User, link_oidc: bool = False, log_msg: str = "") -> User:
+        """Update claims on a user, optionally link OIDC, commit, and return."""
+        if link_oidc:
+            user_to_link.oidc_provider = provider.name
+            user_to_link.oidc_subject = sub
         if claims.get('email'):
-            user.email = claims['email'].lower()
+            if not user_to_link.email or not link_oidc:
+                user_to_link.email = claims['email'].lower()
         if claims.get('display_name'):
-            user.display_name = claims['display_name']
-        # Update admin status if group-based admin is configured
+            if not user_to_link.display_name or not link_oidc:
+                user_to_link.display_name = claims['display_name']
         if provider.admin_group:
-            user.is_admin = claims.get('is_admin', False)
-        user.last_login_at = utcnow()
+            user_to_link.is_admin = claims.get('is_admin', False)
+        user_to_link.last_login_at = utcnow()
         await db.commit()
-        await db.refresh(user)
-        return user
+        await db.refresh(user_to_link)
+        if log_msg:
+            logger.info(log_msg)
+        return user_to_link
 
-    # Try to find by email first (for linking existing local accounts)
+    if user:
+        return await _link_and_return(user)
+
+    # Try to find by email (for linking existing local accounts)
     email = claims.get('email')
     if email:
         stmt = select(User).where(User.email == email.lower())
         result = await db.execute(stmt)
         existing_user = result.scalar_one_or_none()
         if existing_user:
-            # Link OIDC to existing account
-            existing_user.oidc_provider = provider.name
-            existing_user.oidc_subject = sub
-            if claims.get('display_name') and not existing_user.display_name:
-                existing_user.display_name = claims['display_name']
-            # Update admin status if group-based admin is configured
-            if provider.admin_group:
-                existing_user.is_admin = claims.get('is_admin', False)
-            existing_user.last_login_at = utcnow()
-            await db.commit()
-            await db.refresh(existing_user)
-            logger.info(f"Linked OIDC {provider.name} to existing user {existing_user.username} by email")
-            return existing_user
+            return await _link_and_return(
+                existing_user, link_oidc=True,
+                log_msg=f"Linked OIDC {provider.name} to existing user {existing_user.username} by email",
+            )
 
     # Try to find by username (for linking existing local accounts)
     username = claims.get('username')
@@ -667,18 +667,10 @@ async def find_or_create_oidc_user(
         result = await db.execute(stmt)
         existing_user = result.scalar_one_or_none()
         if existing_user:
-            # Link OIDC to existing account
-            existing_user.oidc_provider = provider.name
-            existing_user.oidc_subject = sub
-            if claims.get('email') and not existing_user.email:
-                existing_user.email = claims['email'].lower()
-            if claims.get('display_name') and not existing_user.display_name:
-                existing_user.display_name = claims['display_name']
-            existing_user.last_login_at = utcnow()
-            await db.commit()
-            await db.refresh(existing_user)
-            logger.info(f"Linked OIDC {provider.name} to existing user {existing_user.username}")
-            return existing_user
+            return await _link_and_return(
+                existing_user, link_oidc=True,
+                log_msg=f"Linked OIDC {provider.name} to existing user {existing_user.username}",
+            )
 
     # Create new user
     # Generate unique username if needed

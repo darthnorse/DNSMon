@@ -50,8 +50,7 @@ def validate_url_safety(url: str) -> Optional[str]:
 
 async def async_validate_url_safety(url: str) -> Optional[str]:
     """Async version — runs DNS resolution in a thread pool to avoid blocking the event loop."""
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, validate_url_safety, url)
+    return await asyncio.get_running_loop().run_in_executor(None, validate_url_safety, url)
 
 
 def ensure_utc(dt: Optional[datetime]) -> Optional[str]:
