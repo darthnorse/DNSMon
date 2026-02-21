@@ -19,6 +19,7 @@ from passlib.context import CryptContext
 
 from .database import get_db
 from .models import User, Session, OIDCProvider, ApiKey, utcnow
+from .utils import validate_url_safety
 
 logger = logging.getLogger(__name__)
 
@@ -417,6 +418,9 @@ async def get_oidc_provider(db: AsyncSession, name: str) -> Optional[OIDCProvide
 
 async def discover_oidc_config(issuer_url: str) -> Dict[str, Any]:
     """Fetch OIDC discovery document from issuer."""
+    safety_err = validate_url_safety(issuer_url)
+    if safety_err:
+        raise ValueError(f"Blocked OIDC issuer URL: {safety_err}")
     discovery_url = f"{issuer_url.rstrip('/')}/.well-known/openid-configuration"
     async with httpx.AsyncClient() as client:
         response = await client.get(discovery_url, timeout=10.0)
@@ -446,6 +450,65 @@ async def create_oidc_authorization_url(
     }
 
     return f"{auth_endpoint}?{urlencode(params)}"
+
+
+async def _fetch_jwks(jwks_uri: str) -> Dict[str, Any]:
+    """Fetch JSON Web Key Set from provider."""
+    async with httpx.AsyncClient() as client:
+        response = await client.get(jwks_uri, timeout=10.0)
+        response.raise_for_status()
+        return response.json()
+
+
+async def _decode_id_token(
+    id_token: str,
+    oidc_config: Dict[str, Any],
+    provider: OIDCProvider
+) -> Dict[str, Any]:
+    """Decode and verify an OIDC ID token.
+
+    Attempts signature verification via the provider's JWKS endpoint.
+    If the provider has no jwks_uri, falls back to unverified decode with a warning.
+    """
+    jwks_uri = oidc_config.get('jwks_uri')
+
+    # Try verified decode first
+    if jwks_uri:
+        try:
+            from jose import jwt as jose_jwt, JWTError
+            from jose.exceptions import JWKError
+
+            jwks = await _fetch_jwks(jwks_uri)
+            claims = jose_jwt.decode(
+                id_token,
+                jwks,
+                algorithms=['RS256', 'RS384', 'RS512', 'ES256', 'ES384', 'ES512'],
+                audience=provider.client_id,
+                issuer=provider.issuer_url,
+            )
+            logger.info(f"ID token verified for OIDC provider {provider.name}")
+            return claims
+        except (JWTError, JWKError) as e:
+            logger.error(f"ID token verification failed for {provider.name}: {e}")
+            return {}
+        except Exception as e:
+            logger.error(f"Failed to fetch JWKS for {provider.name}: {e}")
+            return {}
+
+    # No jwks_uri — fall back to unverified decode with warning
+    logger.warning(
+        f"OIDC provider {provider.name} has no jwks_uri in discovery document; "
+        f"ID token claims cannot be verified"
+    )
+    try:
+        import base64
+        import json
+        payload = id_token.split('.')[1]
+        payload += '=' * (4 - len(payload) % 4)
+        return json.loads(base64.urlsafe_b64decode(payload))
+    except Exception as e:
+        logger.warning(f"Failed to decode id_token for {provider.name}: {e}")
+        return {}
 
 
 async def exchange_oidc_code(
@@ -496,18 +559,11 @@ async def exchange_oidc_code(
             except Exception as e:
                 logger.warning(f"Failed to fetch userinfo: {e}")
 
-        # If no userinfo, try to decode ID token (basic decode, not full validation)
+        # If no userinfo, decode ID token with signature verification
         if not user_info and 'id_token' in tokens:
-            try:
-                import base64
-                import json
-                # Simple JWT decode (payload is second segment)
-                payload = tokens['id_token'].split('.')[1]
-                # Add padding if needed
-                payload += '=' * (4 - len(payload) % 4)
-                user_info = json.loads(base64.urlsafe_b64decode(payload))
-            except Exception as e:
-                logger.warning(f"Failed to decode id_token: {e}")
+            user_info = await _decode_id_token(
+                tokens['id_token'], config, provider
+            )
 
         return {
             'tokens': tokens,

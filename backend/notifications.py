@@ -6,6 +6,7 @@ from typing import Optional, List, Dict, Any, Tuple
 import httpx
 
 from .models import Query, AlertRule
+from .utils import validate_url_safety
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +161,10 @@ class NtfySender(NotificationSender):
         if not topic:
             return False, "Missing topic"
 
+        safety_err = validate_url_safety(server_url)
+        if safety_err:
+            return False, safety_err
+
         headers = {}
         if config.get('priority'):
             headers["Priority"] = str(config['priority'])
@@ -188,6 +193,11 @@ class NtfySender(NotificationSender):
         errors = []
         if not config.get('topic'):
             errors.append('topic is required')
+        server_url = config.get('server_url', '')
+        if server_url:
+            safety_err = validate_url_safety(server_url)
+            if safety_err:
+                errors.append(safety_err)
         priority = config.get('priority')
         if priority is not None and priority != '':
             try:
@@ -242,6 +252,10 @@ class WebhookSender(NotificationSender):
         if not url:
             return False, "Missing url"
 
+        safety_err = validate_url_safety(url)
+        if safety_err:
+            return False, safety_err
+
         method = config.get('method', 'POST').upper()
         headers = config.get('headers', {}).copy()
         headers.setdefault('Content-Type', 'application/json')
@@ -275,6 +289,10 @@ class WebhookSender(NotificationSender):
             errors.append('url is required')
         elif not url.startswith(('http://', 'https://')):
             errors.append('url must start with http:// or https://')
+        else:
+            safety_err = validate_url_safety(url)
+            if safety_err:
+                errors.append(safety_err)
         method = config.get('method', 'POST').upper()
         if method not in ('GET', 'POST', 'PUT'):
             errors.append('method must be GET, POST, or PUT')
