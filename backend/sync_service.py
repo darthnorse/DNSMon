@@ -242,7 +242,6 @@ class PiholeSyncService:
             logger.error("Failed to get config from AdGuard source")
             return None
 
-        # Filter config to syncable sections
         if source_type == 'pihole':
             sync_config = self._filter_config_for_sync(source_config) if source_config else {}
         elif source_type == 'technitium':
@@ -359,7 +358,6 @@ class PiholeSyncService:
                     logger.error("No source server configured")
                     return None
 
-                # Execute sync for each source
                 sync_history_ids = []
                 for source in sources:
                     source_type = source.server_type or 'pihole'

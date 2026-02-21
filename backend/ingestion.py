@@ -117,7 +117,6 @@ class QueryIngestionService:
 
         try:
             async with async_session_maker() as session:
-                # Prepare bulk insert data
                 values_list = []
                 ingested_queries = []  # For alert checking
 
@@ -201,6 +200,7 @@ class QueryIngestionService:
                 # Each query has 8 columns, so max ~4000 queries per batch
                 batch_size = 4000
                 total_inserted = 0
+                inserted_keys: set = set()
 
                 for i in range(0, len(values_list), batch_size):
                     batch = values_list[i:i + batch_size]
@@ -208,14 +208,24 @@ class QueryIngestionService:
                     stmt = insert(Query).values(batch)
                     stmt = stmt.on_conflict_do_nothing(
                         index_elements=['timestamp', 'domain', 'client_ip', 'server']
-                    )
+                    ).returning(Query.timestamp, Query.domain, Query.client_ip, Query.server)
 
                     result = await session.execute(stmt)
-                    total_inserted += result.rowcount
+                    rows = result.fetchall()
+                    total_inserted += len(rows)
+                    for row in rows:
+                        inserted_keys.add((row[0], row[1], row[2], row[3]))
 
                 await session.commit()
 
-                logger.debug(f"Bulk inserted {total_inserted} queries in {(len(values_list) + batch_size - 1) // batch_size} batches, skipped {len(values_list) - total_inserted} duplicates")
+                skipped = len(values_list) - total_inserted
+                logger.debug(f"Bulk inserted {total_inserted} queries in {(len(values_list) + batch_size - 1) // batch_size} batches, skipped {skipped} duplicates")
+
+                if skipped > 0:
+                    ingested_queries = [
+                        q for q in ingested_queries
+                        if (q.timestamp, q.domain, q.client_ip, q.server) in inserted_keys
+                    ]
 
                 return total_inserted, ingested_queries
 
@@ -234,8 +244,6 @@ class QueryIngestionService:
                             'BLOCKED'}
         cache_statuses = {'CACHE', 'CACHE_STALE', 'CACHED'}
 
-        # Aggregate in memory
-        # Key: (hour, server)
         server_agg: dict[tuple, dict] = defaultdict(lambda: {'total': 0, 'blocked': 0, 'cached': 0})
         # Key: (hour, server, client_ip)
         client_agg: dict[tuple, dict] = defaultdict(lambda: {'hostname': None, 'total': 0, 'blocked': 0})
@@ -267,7 +275,6 @@ class QueryIngestionService:
 
         try:
             async with async_session_maker() as session:
-                # Upsert query_stats_hourly
                 if server_agg:
                     values = [
                         {'hour': k[0], 'server': k[1], 'total': v['total'], 'blocked': v['blocked'], 'cached': v['cached']}
@@ -282,7 +289,6 @@ class QueryIngestionService:
                     )
                     await session.execute(stmt)
 
-                # Upsert client_stats_hourly
                 if client_agg:
                     values = [
                         {'hour': k[0], 'server': k[1], 'client_ip': k[2],
@@ -301,7 +307,6 @@ class QueryIngestionService:
                         )
                         await session.execute(stmt)
 
-                # Upsert domain_stats_hourly
                 if domain_agg:
                     values = [
                         {'hour': k[0], 'server': k[1], 'domain': k[2],
@@ -329,13 +334,11 @@ class QueryIngestionService:
         logger.info("Starting hourly stats backfill...")
         try:
             async with async_session_maker() as session:
-                # Check if already backfilled
                 result = await session.execute(select(func.count()).select_from(QueryStatsHourly))
                 if (result.scalar() or 0) > 0:
                     logger.info("Hourly stats already populated, skipping backfill")
                     return
 
-                # Backfill query_stats_hourly
                 await session.execute(text("""
                     INSERT INTO query_stats_hourly (hour, server, total, blocked, cached)
                     SELECT date_trunc('hour', timestamp) AS hour,
@@ -348,7 +351,6 @@ class QueryIngestionService:
                     ON CONFLICT (hour, server) DO NOTHING
                 """))
 
-                # Backfill client_stats_hourly
                 await session.execute(text("""
                     INSERT INTO client_stats_hourly (hour, server, client_ip, client_hostname, total, blocked)
                     SELECT date_trunc('hour', timestamp) AS hour,
@@ -362,7 +364,6 @@ class QueryIngestionService:
                     ON CONFLICT (hour, server, client_ip) DO NOTHING
                 """))
 
-                # Backfill domain_stats_hourly
                 await session.execute(text("""
                     INSERT INTO domain_stats_hourly (hour, server, domain, total, blocked)
                     SELECT date_trunc('hour', timestamp) AS hour,
@@ -397,10 +398,6 @@ class QueryIngestionService:
             total_count += count
             all_queries.extend(queries)
 
-        # Update pre-aggregated hourly stats only if new queries were inserted.
-        # Note: ingested_queries includes all parsed queries, not just inserted ones
-        # (ON CONFLICT DO NOTHING doesn't tell us which). In practice the duplicate
-        # rate is near-zero since we fetch from the last known timestamp.
         if total_count > 0:
             await self.update_hourly_stats(all_queries)
 

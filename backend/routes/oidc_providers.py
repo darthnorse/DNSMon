@@ -36,7 +36,6 @@ async def create_oidc_provider(
     admin: User = Depends(require_admin)
 ) -> OIDCProviderResponse:
     """Create a new OIDC provider (admin only)"""
-    # Check if name exists
     stmt = select(OIDCProvider).where(OIDCProvider.name == data.name)
     result = await db.execute(stmt)
     if result.scalar_one_or_none():

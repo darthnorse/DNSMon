@@ -31,20 +31,17 @@ export default function StatisticsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Filter state
   const [period, setPeriod] = useState<Period>('24h');
   const [selectedServers, setSelectedServers] = useState<string[]>([]);
   const [serverDropdownOpen, setServerDropdownOpen] = useState(false);
   const serverDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Custom period state
   const [showCustomPanel, setShowCustomPanel] = useState(false);
   const [customFrom, setCustomFrom] = useState(() => toLocalDatetimeString(new Date(Date.now() - 24 * 60 * 60 * 1000)));
   const [customTo, setCustomTo] = useState(() => toLocalDatetimeString(new Date()));
   const [appliedFrom, setAppliedFrom] = useState<string | null>(null);
   const [appliedTo, setAppliedTo] = useState<string | null>(null);
 
-  // Client filter state
   const [clients, setClients] = useState<ClientInfo[]>([]);
   const [selectedClients, setSelectedClients] = useState<string[]>([]);
   const [pendingClients, setPendingClients] = useState<string[]>([]);
@@ -332,12 +329,10 @@ export default function StatisticsPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header with Filters */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Statistics</h1>
 
         <div className="flex flex-wrap items-center gap-3">
-          {/* Period Selector */}
           <div className="flex rounded-lg overflow-hidden border border-gray-300 dark:border-gray-600">
             {(['24h', '7d', '30d'] as const).map((p) => (
               <button
@@ -367,7 +362,6 @@ export default function StatisticsPage() {
             </button>
           </div>
 
-          {/* Server Dropdown */}
           <div className="relative" ref={serverDropdownRef}>
             <button
               onClick={() => setServerDropdownOpen(!serverDropdownOpen)}
@@ -382,7 +376,6 @@ export default function StatisticsPage() {
             {serverDropdownOpen && servers.length > 0 && (
               <div className="absolute right-0 mt-2 w-56 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-10">
                 <div className="p-2">
-                  {/* Select All Option */}
                   <label className="flex items-center gap-2 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
                     <input
                       type="checkbox"
@@ -397,7 +390,6 @@ export default function StatisticsPage() {
 
                   <div className="border-t border-gray-200 dark:border-gray-700 my-1" />
 
-                  {/* Individual Servers */}
                   {servers.map((server) => (
                     <label
                       key={server.id}
@@ -417,7 +409,6 @@ export default function StatisticsPage() {
             )}
           </div>
 
-          {/* Client Dropdown */}
           <div className="relative" ref={clientDropdownRef}>
             <button
               onClick={() => {
@@ -438,7 +429,6 @@ export default function StatisticsPage() {
 
             {clientDropdownOpen && (
               <div className="absolute right-0 mt-2 w-72 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-10">
-                {/* Search Input */}
                 <div className="p-2 border-b border-gray-200 dark:border-gray-700">
                   <input
                     type="text"
@@ -451,7 +441,6 @@ export default function StatisticsPage() {
                 </div>
 
                 <div className="p-2 max-h-64 overflow-y-auto" key={`client-list-${clientSearch}`}>
-                  {/* Select All Option */}
                   {!clientSearch && (
                     <>
                       <label className="flex items-center gap-2 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
@@ -469,7 +458,6 @@ export default function StatisticsPage() {
                     </>
                   )}
 
-                  {/* Individual Clients */}
                   {filteredClients.length === 0 ? (
                     <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
                       {clientSearch ? 'No clients match your search' : 'No clients found'}
@@ -507,7 +495,6 @@ export default function StatisticsPage() {
             )}
           </div>
 
-          {/* Refresh Button */}
           <button
             onClick={loadStats}
             disabled={loading}
@@ -518,7 +505,6 @@ export default function StatisticsPage() {
         </div>
       </div>
 
-      {/* Custom Period Panel */}
       {showCustomPanel && (
         <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-4 border border-gray-200 dark:border-gray-700">
           <div className="flex flex-wrap items-end gap-4">
@@ -557,7 +543,6 @@ export default function StatisticsPage() {
         </div>
       )}
 
-      {/* Query Overview Cards */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <StatCard label="24 Hours" value={formatNumber(stats.queries_today)} highlight={period === '24h'} />
         <StatCard label="7 Days" value={formatNumber(stats.queries_week)} highlight={period === '7d'} />
@@ -565,9 +550,7 @@ export default function StatisticsPage() {
         <StatCard label="Total" value={formatNumber(stats.queries_total)} />
       </div>
 
-      {/* Charts Row */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* Blocked vs Allowed Pie Chart */}
         <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
             Blocked vs Allowed ({period === 'custom' ? 'Custom' : period})
@@ -611,7 +594,6 @@ export default function StatisticsPage() {
           </div>
         </div>
 
-        {/* Queries Over Time Line Chart */}
         <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
             Queries Over Time ({period === 'custom' ? 'Custom' : period})
@@ -670,9 +652,7 @@ export default function StatisticsPage() {
         </div>
       </div>
 
-      {/* Top Lists */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        {/* Top Domains */}
         <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
             Top Domains
@@ -686,7 +666,6 @@ export default function StatisticsPage() {
           />
         </div>
 
-        {/* Top Blocked Domains */}
         <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
             Top Blocked Domains
@@ -701,7 +680,6 @@ export default function StatisticsPage() {
           />
         </div>
 
-        {/* Top Clients */}
         <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
             Top Clients
@@ -717,9 +695,7 @@ export default function StatisticsPage() {
         </div>
       </div>
 
-      {/* Per Server Stats & Client Insights */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* Per Server Bar Chart */}
         <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
             Queries by Server
@@ -769,7 +745,6 @@ export default function StatisticsPage() {
           )}
         </div>
 
-        {/* Client Insights */}
         <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
             Client Insights

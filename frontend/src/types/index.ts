@@ -114,7 +114,6 @@ export interface DomainEntry {
 }
 
 export interface Statistics {
-  // Query Overview
   queries_today: number;
   queries_week: number;
   queries_month: number;
@@ -122,20 +121,12 @@ export interface Statistics {
   queries_period: number;
   blocked_period: number;
   blocked_percentage: number;
-
-  // Time Series
   queries_hourly: Array<{ hour: string; queries: number; blocked: number }>;
   queries_daily: Array<{ date: string; queries: number; blocked: number }>;
-
-  // Top Lists
   top_domains: Array<{ domain: string; count: number }>;
   top_blocked_domains: Array<{ domain: string; count: number }>;
   top_clients: Array<{ client_ip: string; client_hostname: string | null; count: number }>;
-
-  // Per Server
   queries_by_server: Array<{ server: string; queries: number; blocked: number; cached: number }>;
-
-  // Client Insights
   unique_clients: number;
   most_active_client: { client_ip: string; client_hostname: string | null; count: number } | null;
   new_clients_24h: number;

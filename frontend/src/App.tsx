@@ -32,7 +32,7 @@ function Navigation({ darkMode, toggleDarkMode }: { darkMode: boolean; toggleDar
   const [blockingStatuses, setBlockingStatuses] = useState<BlockingStatus[]>([]);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const [selectedDuration, setSelectedDuration] = useState<number | undefined>(1); // Default to 1 minute
+  const [selectedDuration, setSelectedDuration] = useState<number | undefined>(1);
   const [blockingLoading, setBlockingLoading] = useState(false);
   const [countdown, setCountdown] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);

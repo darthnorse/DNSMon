@@ -328,7 +328,6 @@ class SyncHistory(Base):
 
         logger = logging.getLogger(__name__)
 
-        # Helper function to safely parse JSON with fallback
         def safe_json_parse(value, default):
             if not value:
                 return default

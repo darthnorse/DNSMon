@@ -23,11 +23,9 @@ from .utils import validate_url_safety, async_validate_url_safety
 
 logger = logging.getLogger(__name__)
 
-# Password hashing context
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# Session settings
-SESSION_TOKEN_BYTES = 32  # 64 hex characters
+SESSION_TOKEN_BYTES = 32
 DEFAULT_SESSION_HOURS = 24
 SESSION_COOKIE_NAME = "dnsmon_session"
 
@@ -77,7 +75,6 @@ async def create_session(
     )
     db.add(session)
 
-    # Update user's last login
     user.last_login_at = utcnow()
 
     await db.commit()
@@ -103,11 +100,9 @@ async def get_session_user(db: AsyncSession, session_id: str) -> Optional[User]:
     if not session:
         return None
 
-    # Update last activity
     session.last_activity_at = utcnow()
     await db.commit()
 
-    # Get user
     stmt = select(User).where(User.id == session.user_id, User.is_active == True)
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
@@ -378,13 +373,15 @@ def generate_oidc_state() -> str:
 
 def store_oidc_state(state: str, provider_name: str, redirect_uri: str) -> None:
     """Store OIDC state for validation during callback."""
+    cleanup_oidc_states()
+    if len(_oidc_states) >= 10000:
+        oldest_key = next(iter(_oidc_states))
+        _oidc_states.pop(oldest_key, None)
     _oidc_states[state] = {
         'provider_name': provider_name,
         'redirect_uri': redirect_uri,
         'created_at': utcnow(),
     }
-    # Clean up old states
-    cleanup_oidc_states()
 
 
 def get_oidc_state(state: str) -> Optional[Dict[str, Any]]:
@@ -392,7 +389,6 @@ def get_oidc_state(state: str) -> Optional[Dict[str, Any]]:
     data = _oidc_states.pop(state, None)
     if not data:
         return None
-    # Check expiry
     if utcnow() - data['created_at'] > timedelta(minutes=OIDC_STATE_EXPIRY_MINUTES):
         return None
     return data
@@ -551,7 +547,7 @@ async def exchange_oidc_code(
             timeout=10.0
         )
         if token_response.status_code != 200:
-            logger.error(f"Token exchange failed: {token_response.text}")
+            logger.error(f"Token exchange failed for {provider.name}: HTTP {token_response.status_code}")
             raise HTTPException(status_code=401, detail="Authentication failed")
 
         tokens = token_response.json()
@@ -648,34 +644,23 @@ async def find_or_create_oidc_user(
     if user:
         return await _link_and_return(user)
 
-    # Try to find by email (for linking existing local accounts)
+    # Auto-link by email only (not username — usernames across identity boundaries are unreliable).
+    # Only link to accounts without a local password to prevent account takeover.
     email = claims.get('email')
     if email:
         stmt = select(User).where(User.email == email.lower())
         result = await db.execute(stmt)
         existing_user = result.scalar_one_or_none()
         if existing_user:
-            return await _link_and_return(
-                existing_user, link_oidc=True,
-                log_msg=f"Linked OIDC {provider.name} to existing user {existing_user.username} by email",
-            )
+            if not existing_user.password_hash:
+                return await _link_and_return(
+                    existing_user, link_oidc=True,
+                    log_msg=f"Linked OIDC {provider.name} to existing user {existing_user.username} by email",
+                )
+            logger.warning(f"OIDC {provider.name}: skipped auto-link to {existing_user.username} (has local password)")
 
-    # Try to find by username (for linking existing local accounts)
     username = claims.get('username')
-    if username:
-        stmt = select(User).where(User.username == username.lower())
-        result = await db.execute(stmt)
-        existing_user = result.scalar_one_or_none()
-        if existing_user:
-            return await _link_and_return(
-                existing_user, link_oidc=True,
-                log_msg=f"Linked OIDC {provider.name} to existing user {existing_user.username}",
-            )
-
-    # Create new user
-    # Generate unique username if needed
     base_username = (username or sub).lower()
-    # Remove invalid characters
     base_username = re.sub(r'[^a-z0-9_-]', '', base_username)[:50]
     if not base_username:
         base_username = 'user'

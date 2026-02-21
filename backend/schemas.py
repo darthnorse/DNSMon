@@ -233,7 +233,7 @@ class OIDCProviderCreate(BaseModel):
     display_name: str = PydanticField(min_length=1, max_length=255)
     issuer_url: str = PydanticField(min_length=1, max_length=500)
     client_id: str = PydanticField(min_length=1, max_length=255)
-    client_secret: str = PydanticField(min_length=1)
+    client_secret: str = PydanticField(min_length=1, max_length=10000)
     scopes: str = 'openid profile email'
     username_claim: str = 'preferred_username'
     email_claim: str = 'email'
@@ -262,7 +262,7 @@ class OIDCProviderUpdate(BaseModel):
     display_name: Optional[str] = PydanticField(default=None, max_length=255)
     issuer_url: Optional[str] = PydanticField(default=None, max_length=500)
     client_id: Optional[str] = PydanticField(default=None, max_length=255)
-    client_secret: Optional[str] = None
+    client_secret: Optional[str] = PydanticField(default=None, max_length=10000)
     scopes: Optional[str] = None
     username_claim: Optional[str] = None
     email_claim: Optional[str] = None
@@ -278,7 +278,7 @@ class OIDCProviderUpdate(BaseModel):
 # ============================================================================
 
 class AppSettingUpdate(BaseModel):
-    value: str
+    value: str = PydanticField(max_length=65536)
 
 
 VALID_SERVER_TYPES = {'pihole', 'adguard', 'technitium'}
@@ -313,7 +313,7 @@ def _check_url(v: Optional[str]) -> Optional[str]:
 class PiholeServerCreate(BaseModel):
     name: str = PydanticField(max_length=100)
     url: str = PydanticField(max_length=255)
-    password: str
+    password: str = PydanticField(max_length=10000)
     username: Optional[str] = PydanticField(default=None, max_length=100)
     server_type: str = 'pihole'
     skip_ssl_verify: bool = False
@@ -336,7 +336,7 @@ class PiholeServerCreate(BaseModel):
 class PiholeServerUpdate(BaseModel):
     name: Optional[str] = PydanticField(default=None, max_length=100)
     url: Optional[str] = PydanticField(default=None, max_length=255)
-    password: Optional[str] = None
+    password: Optional[str] = PydanticField(default=None, max_length=10000)
     username: Optional[str] = None
     server_type: Optional[str] = None
     skip_ssl_verify: Optional[bool] = None

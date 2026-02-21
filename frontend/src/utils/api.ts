@@ -45,7 +45,7 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  withCredentials: true, // Include session cookie
+  withCredentials: true,
 });
 
 // 401 response interceptor - redirect to login when session expires
@@ -129,7 +129,6 @@ export const settingsApi = {
     await api.post('/settings/restart');
   },
 
-  // Pi-hole server operations
   servers: {
     getAll: async (): Promise<PiholeServer[]> => {
       const response = await api.get<{ servers: PiholeServer[] }>('/settings/pihole-servers');
@@ -250,42 +249,35 @@ export const blockingApi = {
 // ============================================================================
 
 export const authApi = {
-  // Check authentication status (for app initialization)
   check: async (): Promise<AuthCheckResponse> => {
     const response = await api.get<AuthCheckResponse>('/auth/check');
     return response.data;
   },
 
-  // Initial setup - create first admin user
   setup: async (data: SetupRequest): Promise<User> => {
     const response = await api.post<{ message: string; user: User }>('/auth/setup', data);
     return response.data.user;
   },
 
-  // Login with username/password
   login: async (data: LoginRequest): Promise<User> => {
     const response = await api.post<{ message: string; user: User }>('/auth/login', data);
     return response.data.user;
   },
 
-  // Logout - clear session
   logout: async (): Promise<void> => {
     await api.post('/auth/logout');
   },
 
-  // Get current user info
   getMe: async (): Promise<User> => {
     const response = await api.get<User>('/auth/me');
     return response.data;
   },
 
-  // Get enabled OIDC providers (public, for login page)
   getOIDCProviders: async (): Promise<OIDCProviderPublic[]> => {
     const response = await api.get<OIDCProviderPublic[]>('/auth/oidc/providers');
     return response.data;
   },
 
-  // Start OIDC login flow - returns the authorization URL
   getOIDCAuthorizeUrl: (providerName: string): string => {
     return `${API_BASE_URL}/auth/oidc/${encodeURIComponent(providerName)}/authorize`;
   },
@@ -296,25 +288,21 @@ export const authApi = {
 // ============================================================================
 
 export const userApi = {
-  // Get all users
   getAll: async (): Promise<User[]> => {
     const response = await api.get<User[]>('/users');
     return response.data;
   },
 
-  // Create a new user
   create: async (data: UserCreate): Promise<User> => {
     const response = await api.post<User>('/users', data);
     return response.data;
   },
 
-  // Update a user
   update: async (id: number, data: UserUpdate): Promise<User> => {
     const response = await api.put<User>(`/users/${id}`, data);
     return response.data;
   },
 
-  // Delete a user
   delete: async (id: number): Promise<void> => {
     await api.delete(`/users/${id}`);
   },
@@ -325,42 +313,35 @@ export const userApi = {
 // ============================================================================
 
 export const oidcProviderApi = {
-  // Get all OIDC providers (admin view with secrets)
   getAll: async (): Promise<OIDCProvider[]> => {
     const response = await api.get<OIDCProvider[]>('/oidc-providers');
     return response.data;
   },
 
-  // Get a single OIDC provider
   get: async (id: number): Promise<OIDCProvider> => {
     const response = await api.get<OIDCProvider>(`/oidc-providers/${id}`);
     return response.data;
   },
 
-  // Create a new OIDC provider
   create: async (data: OIDCProviderCreate): Promise<OIDCProvider> => {
     const response = await api.post<OIDCProvider>('/oidc-providers', data);
     return response.data;
   },
 
-  // Update an OIDC provider
   update: async (id: number, data: OIDCProviderUpdate): Promise<OIDCProvider> => {
     const response = await api.put<OIDCProvider>(`/oidc-providers/${id}`, data);
     return response.data;
   },
 
-  // Delete an OIDC provider
   delete: async (id: number): Promise<void> => {
     await api.delete(`/oidc-providers/${id}`);
   },
 
-  // Test OIDC provider configuration (for new providers)
   test: async (data: OIDCProviderCreate): Promise<{ success: boolean; message: string }> => {
     const response = await api.post<{ success: boolean; message: string }>('/oidc-providers/test', data);
     return response.data;
   },
 
-  // Test existing OIDC provider by ID (uses saved credentials)
   testById: async (id: number): Promise<{ success: boolean; message: string }> => {
     const response = await api.post<{ success: boolean; message: string }>(`/oidc-providers/${id}/test`);
     return response.data;
@@ -372,48 +353,40 @@ export const oidcProviderApi = {
 // ============================================================================
 
 export const notificationChannelApi = {
-  // Get all notification channels
   getAll: async (): Promise<NotificationChannel[]> => {
     const response = await api.get<NotificationChannel[]>('/notification-channels');
     return response.data;
   },
 
-  // Get a single notification channel
   get: async (id: number): Promise<NotificationChannel> => {
     const response = await api.get<NotificationChannel>(`/notification-channels/${id}`);
     return response.data;
   },
 
-  // Create a new notification channel
   create: async (data: NotificationChannelCreate): Promise<NotificationChannel> => {
     const response = await api.post<NotificationChannel>('/notification-channels', data);
     return response.data;
   },
 
-  // Update a notification channel
   update: async (id: number, data: NotificationChannelUpdate): Promise<NotificationChannel> => {
     const response = await api.put<NotificationChannel>(`/notification-channels/${id}`, data);
     return response.data;
   },
 
-  // Delete a notification channel
   delete: async (id: number): Promise<void> => {
     await api.delete(`/notification-channels/${id}`);
   },
 
-  // Test a notification channel
   test: async (id: number): Promise<{ success: boolean; message: string }> => {
     const response = await api.post<{ success: boolean; message: string }>(`/notification-channels/${id}/test`);
     return response.data;
   },
 
-  // Get available template variables
   getTemplateVariables: async (): Promise<TemplateVariablesResponse> => {
     const response = await api.get<TemplateVariablesResponse>('/notification-channels/template-variables');
     return response.data;
   },
 
-  // Get available channel types
   getChannelTypes: async (): Promise<ChannelTypesResponse> => {
     const response = await api.get<ChannelTypesResponse>('/notification-channels/channel-types');
     return response.data;

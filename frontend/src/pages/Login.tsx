@@ -53,7 +53,6 @@ export default function Login() {
     loadOidcProviders();
   }, []);
 
-  // Redirect if already authenticated
   useEffect(() => {
     if (!setupComplete) {
       navigate('/setup', { replace: true });
@@ -83,7 +82,6 @@ export default function Login() {
   };
 
   const handleOidcLogin = (providerName: string) => {
-    // Redirect to OIDC authorize endpoint
     window.location.href = authApi.getOIDCAuthorizeUrl(providerName);
   };
 
@@ -153,7 +151,6 @@ export default function Login() {
             </button>
           </form>
 
-          {/* OIDC Provider Buttons */}
           {!loadingOidc && oidcProviders.length > 0 && (
             <div className="mt-6">
               <div className="relative">

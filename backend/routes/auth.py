@@ -61,6 +61,11 @@ async def setup_admin(
     _: None = Depends(require_setup_incomplete)
 ):
     """Initial setup - create first admin user. Only works when no users exist."""
+    client_ip = get_client_ip(request)
+    if not check_login_rate_limit(client_ip):
+        raise HTTPException(status_code=429, detail="Too many attempts. Please try again later.")
+    record_login_attempt(client_ip)
+
     user = User(
         username=data.username,
         email=data.email,
@@ -170,6 +175,11 @@ async def oidc_authorize(
     db: AsyncSession = Depends(get_db)
 ):
     """Start OIDC authorization flow - redirects to provider"""
+    client_ip = get_client_ip(request)
+    if not check_login_rate_limit(client_ip):
+        raise HTTPException(status_code=429, detail="Too many requests. Please try again later.")
+    record_login_attempt(client_ip)
+
     provider = await get_oidc_provider(db, provider_name)
     if not provider:
         raise HTTPException(status_code=404, detail="OIDC provider not found")

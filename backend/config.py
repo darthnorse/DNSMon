@@ -131,7 +131,6 @@ async def bootstrap_settings_if_needed(db: AsyncSession):
         ),
     ]
 
-    # Check each setting and create if missing
     created = []
     for default in defaults:
         stmt = select(AppSetting).where(AppSetting.key == default.key)
@@ -160,12 +159,10 @@ async def load_settings_from_db(db: AsyncSession) -> Settings:
     # Ensure bootstrap
     await bootstrap_settings_if_needed(db)
 
-    # Load app settings
     stmt = select(AppSetting)
     result = await db.execute(stmt)
     app_settings = {row.key: row.get_typed_value() for row in result.scalars()}
 
-    # Load Pi-hole servers
     stmt = select(PiholeServerModel).where(PiholeServerModel.enabled == True).order_by(
         PiholeServerModel.display_order,
         PiholeServerModel.id
@@ -187,7 +184,6 @@ async def load_settings_from_db(db: AsyncSession) -> Settings:
         for server in result.scalars()
     ]
 
-    # Build Settings object with validation
     try:
         settings = Settings(
             database_url=database_url,

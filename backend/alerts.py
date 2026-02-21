@@ -380,7 +380,6 @@ class AlertEngine:
 
         try:
             async with async_session_maker() as session:
-                # Get all enabled alert rules
                 rules_stmt = select(AlertRule).where(AlertRule.enabled == True)
                 rules_result = await session.execute(rules_stmt)
                 rules = rules_result.scalars().all()
@@ -388,14 +387,12 @@ class AlertEngine:
                 if not rules:
                     return []
 
-                # Compile patterns for all rules (cached)
                 cached_patterns = {}
                 for rule in rules:
                     cached_patterns[rule.id] = await self._get_cached_patterns(rule)
 
                 matches = []
 
-                # Evaluate each query against all rules
                 for query in queries:
                     if len(matches) >= max_matches:
                         logger.warning(f"Reached matches limit ({max_matches}), stopping evaluation")
@@ -418,11 +415,9 @@ class AlertEngine:
         """
         async with self._cache_lock:
             if rule_id is None:
-                # Clear entire cache
                 self._pattern_cache.clear()
                 logger.debug("Cleared entire pattern cache")
             else:
-                # Clear specific rule
                 if rule_id in self._pattern_cache:
                     del self._pattern_cache[rule_id]
                     logger.debug(f"Cleared pattern cache for rule {rule_id}")

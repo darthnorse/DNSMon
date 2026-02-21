@@ -95,7 +95,6 @@ class PiholeClient(DNSBlockerClient):
         try:
             auth_url = f"{self.url}/api/auth"
 
-            # POST empty body to get challenge nonce from Pi-hole
             response = await self.client.post(auth_url, json={})
 
             if response.status_code != 200:
@@ -462,7 +461,6 @@ class PiholeClient(DNSBlockerClient):
         }
         """
         try:
-            # Build multipart form data
             files = {
                 'file': ('backup.zip', backup_data, 'application/zip')
             }

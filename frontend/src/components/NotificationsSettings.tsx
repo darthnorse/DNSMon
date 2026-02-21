@@ -23,7 +23,6 @@ export default function NotificationsSettings({ onError, onSuccess }: Props) {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState<number | null>(null);
 
-  // Form state
   const [showForm, setShowForm] = useState(false);
   const [editingChannel, setEditingChannel] = useState<NotificationChannel | null>(null);
   const [formData, setFormData] = useState<NotificationChannelCreate>({
@@ -214,7 +213,6 @@ export default function NotificationsSettings({ onError, onSuccess }: Props) {
         )}
       </div>
 
-      {/* Channel Form */}
       {showForm && (
         <form onSubmit={handleSubmit} className="mb-6 bg-gray-50 dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
           <h3 className="text-md font-medium text-gray-900 dark:text-white mb-4">
@@ -222,7 +220,6 @@ export default function NotificationsSettings({ onError, onSuccess }: Props) {
           </h3>
 
           <div className="space-y-4">
-            {/* Channel Type (only for new channels) */}
             {!editingChannel && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -250,7 +247,6 @@ export default function NotificationsSettings({ onError, onSuccess }: Props) {
               </div>
             )}
 
-            {/* Channel Name */}
             <div>
               <label htmlFor="channel_name" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 Name
@@ -265,7 +261,6 @@ export default function NotificationsSettings({ onError, onSuccess }: Props) {
               />
             </div>
 
-            {/* Channel-specific Config Fields */}
             {getChannelTypeInfo(formData.channel_type)?.config_fields.map((field) => (
               <div key={field.name}>
                 {field.type === 'checkbox' ? (
@@ -330,7 +325,6 @@ export default function NotificationsSettings({ onError, onSuccess }: Props) {
               </div>
             ))}
 
-            {/* Message Template */}
             <div>
               <label htmlFor="message_template" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 Message Template (optional)
@@ -364,7 +358,6 @@ export default function NotificationsSettings({ onError, onSuccess }: Props) {
               </div>
             </div>
 
-            {/* Enabled */}
             <div className="flex items-center">
               <input
                 type="checkbox"
@@ -379,7 +372,6 @@ export default function NotificationsSettings({ onError, onSuccess }: Props) {
             </div>
           </div>
 
-          {/* Form Actions */}
           <div className="flex space-x-3 mt-6">
             <button
               type="submit"
@@ -400,7 +392,6 @@ export default function NotificationsSettings({ onError, onSuccess }: Props) {
         </form>
       )}
 
-      {/* Channel List */}
       {channels.length === 0 ? (
         <div className="text-center py-8 text-gray-500 dark:text-gray-400">
           <p>No notification channels configured.</p>
@@ -436,7 +427,6 @@ export default function NotificationsSettings({ onError, onSuccess }: Props) {
                         </span>
                       )}
                     </div>
-                    {/* Status */}
                     <div className="mt-1 text-sm">
                       {channel.consecutive_failures > 0 ? (
                         <span className="text-red-600 dark:text-red-400">

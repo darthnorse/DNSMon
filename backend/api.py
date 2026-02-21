@@ -76,13 +76,10 @@ class DynamicCORSMiddleware:
         await inner(scope, receive, send)
 
 
-# Create FastAPI app
 app = FastAPI(title="DNSMon", description="DNS Ad-Blocker Monitor - Pi-hole & AdGuard Home")
 
-# CORS middleware with DB-loaded origins (initialized lazily on first request)
 app.add_middleware(DynamicCORSMiddleware)
 
-# Include routers
 app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(oidc_providers_router)
@@ -131,7 +128,6 @@ async def health_check(db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=503, detail="Database unavailable")
 
 
-# Serve React frontend in production
 if os.path.exists("/app/frontend/build"):
     app.mount("/assets", StaticFiles(directory="/app/frontend/build/assets"), name="assets")
 

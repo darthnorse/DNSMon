@@ -41,7 +41,6 @@ class AlertContext:
     query_type: str
     status: str
     count: int
-    answer: Optional[str] = None
     # Batch fields
     query_list: str = ""  # One query per line: "domain - client"
     domains: str = ""  # Comma-separated list of domains
@@ -290,7 +289,6 @@ class WebhookSender(NotificationSender):
         return errors
 
 
-# Registry of senders
 SENDERS: Dict[str, NotificationSender] = {
     'telegram': TelegramSender(),
     'pushover': PushoverSender(),
@@ -316,8 +314,6 @@ def render_template(template: Optional[str], context: AlertContext) -> str:
         '{query_type}': context.query_type or '',
         '{status}': context.status or '',
         '{count}': str(context.count),
-        '{answer}': context.answer or '',
-        # Batch fields
         '{query_list}': context.query_list or f"{context.domain} - {context.client_ip}",
         '{domains}': context.domains or context.domain or '',
         '{clients}': context.clients or context.client_ip or '',

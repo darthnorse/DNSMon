@@ -44,7 +44,6 @@ async def search_queries(
     stmt = select(Query)
     conditions = []
 
-    # General search across multiple fields (OR)
     if search:
         escaped_search = escape_sql_like(search)
         search_pattern = f"%{escaped_search}%"
@@ -54,7 +53,6 @@ async def search_queries(
             Query.client_hostname.ilike(search_pattern, escape='\\')
         ))
 
-    # Specific field filters (AND)
     if domain:
         escaped_domain = escape_sql_like(domain)
         conditions.append(Query.domain.ilike(f"%{escaped_domain}%", escape='\\'))

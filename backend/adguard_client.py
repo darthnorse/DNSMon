@@ -97,18 +97,14 @@ class AdGuardHomeClient(DNSBlockerClient):
                         f"Some queries in the time window may be missed."
                     )
 
-                # Filter by timestamp range and transform to common format
                 filtered = []
                 for q in queries:
-                    # AdGuard uses ISO format timestamps
                     ts = q.get("time", "")
                     if ts:
                         try:
-                            # Parse ISO timestamp
                             query_time = datetime.fromisoformat(ts.replace("Z", "+00:00"))
                             query_timestamp = int(query_time.timestamp())
 
-                            # Filter by time range
                             if from_timestamp <= query_timestamp <= until_timestamp:
                                 transformed = self._transform_query(q)
                                 if transformed is not None:
@@ -134,11 +130,9 @@ class AdGuardHomeClient(DNSBlockerClient):
         This allows the ingestion service to process queries from both
         Pi-hole and AdGuard Home using the same logic.
         """
-        # Map AdGuard status to common status
         reason = raw_query.get("reason", "")
         status = self._map_status(reason)
 
-        # Parse timestamp
         ts = raw_query.get("time", "")
         try:
             timestamp = int(datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp())
@@ -146,12 +140,10 @@ class AdGuardHomeClient(DNSBlockerClient):
             logger.warning(f"Unparseable timestamp {ts!r} from {self.server_name}, skipping entry")
             return None
 
-        # Extract question data
         question = raw_query.get("question", {})
         domain = question.get("name", "").rstrip(".")
         query_type = question.get("type", "")
 
-        # Extract client info
         client_ip = raw_query.get("client", "")
         client_info = raw_query.get("client_info", {})
         client_name = client_info.get("name", "") if isinstance(client_info, dict) else ""
@@ -549,7 +541,6 @@ class AdGuardHomeClient(DNSBlockerClient):
         try:
             success = True
 
-            # Apply user rules
             if 'user_rules' in config and config['user_rules'] is not None:
                 if not await self._set_user_rules(config['user_rules']):
                     logger.error(f"Failed to set user rules on {self.server_name}")
@@ -557,7 +548,6 @@ class AdGuardHomeClient(DNSBlockerClient):
                 else:
                     logger.info(f"Applied {len(config['user_rules'])} user rules to {self.server_name}")
 
-            # Apply DNS config
             if 'dns' in config and config['dns'] is not None:
                 response = await self.client.post(
                     f"{self.url}/control/dns_config",
@@ -570,7 +560,6 @@ class AdGuardHomeClient(DNSBlockerClient):
                 else:
                     logger.info(f"Applied DNS config to {self.server_name}")
 
-            # Apply filtering settings
             if 'filtering_enabled' in config:
                 response = await self.client.post(
                     f"{self.url}/control/filtering/config",
@@ -584,7 +573,6 @@ class AdGuardHomeClient(DNSBlockerClient):
                     logger.error(f"Failed to set filtering config on {self.server_name}: {response.status_code}")
                     success = False
 
-            # Apply DNS rewrites (replace-all)
             if 'rewrites' in config and config['rewrites'] is not None:
                 try:
                     if not await self._replace_all(
@@ -599,7 +587,6 @@ class AdGuardHomeClient(DNSBlockerClient):
                     logger.error(f"Failed to sync rewrites to {self.server_name}: {e}")
                     success = False
 
-            # Apply blocklist/allowlist filter subscriptions (diff by URL)
             for filter_key, whitelist_flag in [('filters', False), ('whitelist_filters', True)]:
                 if filter_key in config and config[filter_key] is not None:
                     try:
@@ -614,7 +601,6 @@ class AdGuardHomeClient(DNSBlockerClient):
                         logger.error(f"Failed to sync {filter_key} to {self.server_name}: {e}")
                         success = False
 
-            # Apply persistent clients (replace-all)
             if 'clients' in config and config['clients'] is not None:
                 def _client_delete_payload(entry: Dict[str, Any]) -> Optional[Dict[str, str]]:
                     name = entry.get('name')

@@ -28,7 +28,6 @@ export default function Search() {
       setLoading(true);
       setError(null);
 
-      // Build params, excluding empty strings
       const params: QuerySearchParams = {
         limit: searchParams.limit,
         offset,
@@ -80,7 +79,6 @@ export default function Search() {
     handleSearch(Math.max(0, (searchParams.offset || 0) - (searchParams.limit || 100)));
   };
 
-  // Auto-dismiss success messages
   useEffect(() => {
     if (successMessage) {
       const timer = setTimeout(() => setSuccessMessage(null), 5000);

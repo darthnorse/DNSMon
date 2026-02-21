@@ -27,7 +27,6 @@ export default function Dashboard() {
   useEffect(() => { localStorage.setItem('dashboard_pageSize', String(pageSize)); }, [pageSize]);
   useEffect(() => { localStorage.setItem('dashboard_hideSystemQueries', String(hideSystemQueries)); }, [hideSystemQueries]);
 
-  // Initial load only
   useEffect(() => {
     loadData();
   }, []);
@@ -101,11 +100,11 @@ export default function Dashboard() {
       });
       setQueries(searchResults);
     } catch (err) {
+      setError('Search failed');
       console.error('Search failed:', err);
     }
   };
 
-  // Auto-dismiss success messages
   useEffect(() => {
     if (successMessage) {
       const timer = setTimeout(() => setSuccessMessage(null), 5000);

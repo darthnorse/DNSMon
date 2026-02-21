@@ -26,7 +26,6 @@ export default function Setup() {
     }
   }, []);
 
-  // Redirect if setup is already complete
   useEffect(() => {
     if (setupComplete) {
       navigate('/login', { replace: true });
@@ -37,7 +36,6 @@ export default function Setup() {
     e.preventDefault();
     setError(null);
 
-    // Validation
     if (!username.trim()) {
       setError('Username is required');
       return;

@@ -49,7 +49,6 @@ async def get_template_variables(_: User = Depends(get_current_user)):
             {"name": "{timestamp}", "description": "First query timestamp", "example": "2026-01-16 09:30:45"},
             {"name": "{query_type}", "description": "First DNS query type", "example": "A"},
             {"name": "{status}", "description": "First query status", "example": "Blocked"},
-            {"name": "{answer}", "description": "First DNS answer", "example": "93.184.216.34"},
         ],
         "default_template": DEFAULT_TEMPLATE,
     }
@@ -58,7 +57,6 @@ async def get_template_variables(_: User = Depends(get_current_user)):
 @router.get("/channel-types")
 async def get_channel_types(_: User = Depends(get_current_user)):
     """Get list of supported channel types with their configuration requirements"""
-    # Common option for all channel types
     dedupe_option = {"name": "dedupe_domains", "label": "Deduplicate domains", "type": "checkbox", "required": False, "description": "Show only unique domains instead of all matches"}
 
     return {
@@ -264,7 +262,6 @@ async def test_channel(
         message = truncate_message(message, channel.channel_type)
         success, error = await sender.send(message, channel.config)
 
-        # Update channel status
         now = datetime.now(timezone.utc)
         if success:
             channel.last_success_at = now

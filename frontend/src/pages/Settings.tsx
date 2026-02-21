@@ -131,7 +131,6 @@ export default function Settings() {
       const origins = data.app_settings.cors_origins?.value as string[];
       setCorsOrigins(origins ? origins.join(', ') : '');
 
-      // Load disable_local_auth setting
       setDisableLocalAuth(data.app_settings.disable_local_auth?.value === true);
 
       setError(null);
@@ -703,7 +702,6 @@ export default function Settings() {
         </div>
       )}
 
-      {/* Tab Navigation */}
       <div className="border-b border-gray-200 dark:border-gray-700 mb-6">
         <nav className="-mb-px flex space-x-8">
           {tabs.map((tab) => (
@@ -725,7 +723,6 @@ export default function Settings() {
         </nav>
       </div>
 
-      {/* Tab Content */}
       {activeTab === 'servers' && (
         <div>
           <div className="flex justify-between items-center mb-4">
@@ -1166,7 +1163,6 @@ export default function Settings() {
             Supports Pi-hole (Teleporter + config), AdGuard Home (rules, rewrites, filters, clients), and Technitium DNS (backup/restore).
           </p>
 
-          {/* Sync Interval Setting */}
           <div className="mb-6 pb-6 border-b border-gray-200 dark:border-gray-700">
             <h3 className="text-md font-medium text-gray-900 dark:text-white mb-3">Sync Schedule</h3>
             <div className="mb-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 text-yellow-800 dark:text-yellow-200 px-4 py-3 rounded text-sm">
@@ -1195,7 +1191,6 @@ export default function Settings() {
             </button>
           </div>
 
-          {/* Manual Sync */}
           <div className="mb-6 pb-6 border-b border-gray-200 dark:border-gray-700">
             <h3 className="text-md font-medium text-gray-900 dark:text-white mb-3">Manual Sync</h3>
             <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
@@ -1225,7 +1220,6 @@ export default function Settings() {
               </button>
             </div>
 
-            {/* Sync Preview */}
             {syncPreview && (
               <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-700 rounded-md">
                 <h4 className="font-medium text-gray-900 dark:text-white mb-2">Sync Preview</h4>
@@ -1280,7 +1274,6 @@ export default function Settings() {
             )}
           </div>
 
-          {/* Sync History */}
           <div>
             <h3 className="text-md font-medium text-gray-900 dark:text-white mb-3">Sync History</h3>
             {syncHistory.length === 0 ? (
@@ -1326,28 +1319,24 @@ export default function Settings() {
                           <tr>
                             <td colSpan={4} className="px-3 py-3 bg-gray-50 dark:bg-gray-700">
                               <div className="text-xs text-gray-600 dark:text-gray-400 space-y-2">
-                                {/* Duration */}
                                 {sync.completed_at && (
                                   <div>
                                     <span className="font-medium">Duration:</span>{' '}
                                     {Math.round((new Date(sync.completed_at).getTime() - new Date(sync.started_at).getTime()) / 1000)}s
                                   </div>
                                 )}
-                                {/* Teleporter size */}
                                 {(sync.items_synced?._teleporter_size_bytes ?? 0) > 0 && (
                                   <div>
                                     <span className="font-medium">Teleporter backup:</span>{' '}
                                     {Math.round((sync.items_synced?._teleporter_size_bytes ?? 0) / 1024)} KB
                                   </div>
                                 )}
-                                {/* Config sections */}
                                 {(sync.items_synced?._config_sections?.length ?? 0) > 0 && (
                                   <div>
                                     <span className="font-medium">Config sections:</span>{' '}
                                     {sync.items_synced?._config_sections?.join(', ')}
                                   </div>
                                 )}
-                                {/* Items breakdown */}
                                 {sync.items_synced && (
                                   <div>
                                     <span className="font-medium">Items synced:</span>{' '}
@@ -1358,7 +1347,6 @@ export default function Settings() {
                                       .join(', ') || 'None'}
                                   </div>
                                 )}
-                                {/* Errors */}
                                 {sync.errors && sync.errors.length > 0 && (
                                   <div className="text-red-600 dark:text-red-400">
                                     <span className="font-medium">Errors:</span>
@@ -1402,7 +1390,6 @@ export default function Settings() {
             )}
           </div>
 
-          {/* Disable Local Authentication Toggle */}
           {!showOidcForm && !editingOidc && (
             <div className="mb-6 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
               <div className="flex items-center justify-between">
@@ -1483,7 +1470,6 @@ export default function Settings() {
                   />
                 </div>
 
-                {/* Callback URL - shown when provider name is entered */}
                 {oidcFormData.name && (
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -1589,7 +1575,6 @@ export default function Settings() {
                 </div>
               </div>
 
-              {/* Claim Mappings */}
               <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-600">
                 <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-3">Claim Mappings</h4>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1634,7 +1619,6 @@ export default function Settings() {
                 </div>
               </div>
 
-              {/* Group-based Admin */}
               <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-600">
                 <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-3">Group-based Admin Assignment (Optional)</h4>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
@@ -1805,7 +1789,6 @@ export default function Settings() {
 
       {activeTab === 'api-keys' && <ApiKeys />}
 
-      {/* Restart Modal */}
       {showRestartModal && !restarting && (
         <div className="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6 max-w-md">
@@ -1834,7 +1817,6 @@ export default function Settings() {
         </div>
       )}
 
-      {/* Restarting Overlay */}
       {restarting && (
         <div className="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50">
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-8 text-center">

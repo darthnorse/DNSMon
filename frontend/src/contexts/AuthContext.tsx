@@ -38,7 +38,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, []);
 
-  // Check authentication status on mount
   useEffect(() => {
     const initAuth = async () => {
       try {

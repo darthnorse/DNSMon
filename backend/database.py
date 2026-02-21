@@ -79,12 +79,10 @@ async def cleanup_old_queries(days: int = 60):
     cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
 
     async with async_session_maker() as session:
-        # Clean raw queries
         stmt = delete(Query).where(Query.timestamp < cutoff_date)
         result = await session.execute(stmt)
         raw_deleted = result.rowcount
 
-        # Clean aggregated tables
         await session.execute(delete(QueryStatsHourly).where(QueryStatsHourly.hour < cutoff_date))
         await session.execute(delete(ClientStatsHourly).where(ClientStatsHourly.hour < cutoff_date))
         await session.execute(delete(DomainStatsHourly).where(DomainStatsHourly.hour < cutoff_date))

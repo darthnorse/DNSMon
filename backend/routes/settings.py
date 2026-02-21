@@ -199,7 +199,6 @@ async def update_server(
 
     update_data = server_data.model_dump(exclude_unset=True)
 
-    # Don't update password if empty or masked
     if 'password' in update_data and (not update_data['password'] or update_data['password'] == '********'):
         del update_data['password']
 

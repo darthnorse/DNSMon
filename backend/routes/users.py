@@ -92,7 +92,6 @@ async def update_user(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Prevent admin from demoting themselves
     if user.id == admin.id and data.is_admin is False:
         raise HTTPException(status_code=400, detail="Cannot remove your own admin privileges")
 

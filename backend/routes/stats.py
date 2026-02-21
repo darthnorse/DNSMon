@@ -35,17 +35,14 @@ async def get_stats(
     last_24h = now - timedelta(hours=24)
     last_7d = now - timedelta(days=7)
 
-    # Total queries
     total_stmt = select(func.count(Query.id))
     total_result = await db.execute(total_stmt)
     total_queries = total_result.scalar()
 
-    # Queries last 24h
     last_24h_stmt = select(func.count(Query.id)).where(Query.timestamp >= last_24h)
     last_24h_result = await db.execute(last_24h_stmt)
     queries_last_24h = last_24h_result.scalar()
 
-    # Blocked queries last 24h
     blocks_24h_stmt = select(func.count(Query.id)).where(
         and_(
             Query.timestamp >= last_24h,
@@ -55,12 +52,10 @@ async def get_stats(
     blocks_24h_result = await db.execute(blocks_24h_stmt)
     blocks_last_24h = blocks_24h_result.scalar()
 
-    # Queries last 7d
     last_7d_stmt = select(func.count(Query.id)).where(Query.timestamp >= last_7d)
     last_7d_result = await db.execute(last_7d_stmt)
     queries_last_7d = last_7d_result.scalar()
 
-    # Top domains (last 7 days)
     top_domains_stmt = (
         select(Query.domain, func.count(Query.id).label('count'))
         .where(Query.timestamp >= last_7d)
@@ -71,7 +66,6 @@ async def get_stats(
     top_domains_result = await db.execute(top_domains_stmt)
     top_domains = [{"domain": row[0], "count": row[1]} for row in top_domains_result]
 
-    # Top clients (last 7 days)
     top_clients_stmt = (
         select(Query.client_ip, Query.client_hostname, func.count(Query.id).label('count'))
         .where(Query.timestamp >= last_7d)
@@ -85,7 +79,6 @@ async def get_stats(
         for row in top_clients_result
     ]
 
-    # Queries by server (last 7 days)
     by_server_stmt = (
         select(Query.server, func.count(Query.id).label('count'))
         .where(Query.timestamp >= last_7d)
