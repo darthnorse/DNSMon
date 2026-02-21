@@ -1,6 +1,7 @@
 """
 Shared utility functions for DNSMon.
 """
+import asyncio
 import ipaddress
 import logging
 import socket
@@ -23,11 +24,10 @@ _BLOCKED_NETWORKS = [
 
 
 def validate_url_safety(url: str) -> Optional[str]:
-    """Check that a URL does not resolve to a blocked address range.
+    """Sync version — check that a URL does not resolve to a blocked address range.
 
-    Returns an error message string if the URL is unsafe, or None if OK.
-    Blocks loopback and link-local (cloud metadata) addresses.
-    Allows RFC 1918 private ranges since DNSMon typically runs on a LAN.
+    Use this in synchronous contexts (e.g., Pydantic validators, validate_config).
+    For async contexts (send methods, OIDC flows), use async_validate_url_safety.
     """
     parsed = urlparse(url)
     hostname = parsed.hostname
@@ -46,6 +46,12 @@ def validate_url_safety(url: str) -> Optional[str]:
                 return "URL resolves to a blocked address (loopback or link-local)"
 
     return None
+
+
+async def async_validate_url_safety(url: str) -> Optional[str]:
+    """Async version — runs DNS resolution in a thread pool to avoid blocking the event loop."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, validate_url_safety, url)
 
 
 def ensure_utc(dt: Optional[datetime]) -> Optional[str]:

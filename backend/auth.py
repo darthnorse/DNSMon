@@ -19,7 +19,7 @@ from passlib.context import CryptContext
 
 from .database import get_db
 from .models import User, Session, OIDCProvider, ApiKey, utcnow
-from .utils import validate_url_safety
+from .utils import validate_url_safety, async_validate_url_safety
 
 logger = logging.getLogger(__name__)
 
@@ -418,7 +418,7 @@ async def get_oidc_provider(db: AsyncSession, name: str) -> Optional[OIDCProvide
 
 async def discover_oidc_config(issuer_url: str) -> Dict[str, Any]:
     """Fetch OIDC discovery document from issuer."""
-    safety_err = validate_url_safety(issuer_url)
+    safety_err = await async_validate_url_safety(issuer_url)
     if safety_err:
         raise ValueError(f"Blocked OIDC issuer URL: {safety_err}")
     discovery_url = f"{issuer_url.rstrip('/')}/.well-known/openid-configuration"
@@ -454,6 +454,9 @@ async def create_oidc_authorization_url(
 
 async def _fetch_jwks(jwks_uri: str) -> Dict[str, Any]:
     """Fetch JSON Web Key Set from provider."""
+    safety_err = await async_validate_url_safety(jwks_uri)
+    if safety_err:
+        raise ValueError(f"Blocked jwks_uri: {safety_err}")
     async with httpx.AsyncClient() as client:
         response = await client.get(jwks_uri, timeout=10.0)
         response.raise_for_status()
@@ -489,11 +492,11 @@ async def _decode_id_token(
             logger.info(f"ID token verified for OIDC provider {provider.name}")
             return claims
         except (JWTError, JWKError) as e:
-            logger.error(f"ID token verification failed for {provider.name}: {e}")
-            return {}
+            logger.error(f"ID token signature rejected for {provider.name}: {e}")
+            raise ValueError(f"ID token verification failed") from e
         except Exception as e:
             logger.error(f"Failed to fetch JWKS for {provider.name}: {e}")
-            return {}
+            raise ValueError(f"Unable to verify ID token") from e
 
     # No jwks_uri — fall back to unverified decode with warning
     logger.warning(
@@ -525,6 +528,14 @@ async def exchange_oidc_code(
 
     token_endpoint = config['token_endpoint']
     userinfo_endpoint = config.get('userinfo_endpoint')
+
+    # Validate endpoints from discovery document against SSRF
+    for ep_name, ep_url in [('token_endpoint', token_endpoint), ('userinfo_endpoint', userinfo_endpoint)]:
+        if ep_url:
+            safety_err = await async_validate_url_safety(ep_url)
+            if safety_err:
+                logger.error(f"OIDC {ep_name} blocked for {provider.name}: {safety_err}")
+                raise HTTPException(status_code=502, detail=f"OIDC provider returned unsafe {ep_name}")
 
     # Exchange code for tokens
     async with httpx.AsyncClient() as client:

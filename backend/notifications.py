@@ -6,7 +6,7 @@ from typing import Optional, List, Dict, Any, Tuple
 import httpx
 
 from .models import Query, AlertRule
-from .utils import validate_url_safety
+from .utils import validate_url_safety, async_validate_url_safety
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +161,7 @@ class NtfySender(NotificationSender):
         if not topic:
             return False, "Missing topic"
 
-        safety_err = validate_url_safety(server_url)
+        safety_err = await async_validate_url_safety(server_url)
         if safety_err:
             return False, safety_err
 
@@ -252,7 +252,7 @@ class WebhookSender(NotificationSender):
         if not url:
             return False, "Missing url"
 
-        safety_err = validate_url_safety(url)
+        safety_err = await async_validate_url_safety(url)
         if safety_err:
             return False, safety_err
 
