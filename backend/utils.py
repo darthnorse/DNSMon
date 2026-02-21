@@ -23,5 +23,6 @@ def create_client_from_server(server):
         password=server.password,
         server_name=server.name,
         username=server.username,
-        skip_ssl_verify=server.skip_ssl_verify or False
+        skip_ssl_verify=server.skip_ssl_verify or False,
+        extra_config=server.extra_config or {}
     )

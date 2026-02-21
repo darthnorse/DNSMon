@@ -270,6 +270,35 @@ class AppSettingUpdate(BaseModel):
     value: str
 
 
+VALID_SERVER_TYPES = {'pihole', 'adguard', 'technitium'}
+VALID_EXTRA_CONFIG_KEYS = {'log_app_name', 'log_app_class_path'}
+
+
+def _check_server_type(v: Optional[str]) -> Optional[str]:
+    if v is not None and v not in VALID_SERVER_TYPES:
+        raise ValueError(f"server_type must be one of: {', '.join(sorted(VALID_SERVER_TYPES))}")
+    return v
+
+
+def _check_extra_config(v: Optional[dict]) -> Optional[dict]:
+    if v is not None:
+        unknown = set(v.keys()) - VALID_EXTRA_CONFIG_KEYS
+        if unknown:
+            raise ValueError(f"Unknown extra_config keys: {unknown}")
+        for key, val in v.items():
+            if not isinstance(val, str):
+                raise ValueError(f"extra_config values must be strings, got {type(val).__name__} for '{key}'")
+    return v
+
+
+def _check_url(v: Optional[str]) -> Optional[str]:
+    if v is not None:
+        if not v.startswith('http://') and not v.startswith('https://'):
+            raise ValueError("URL must start with http:// or https://")
+        v = v.rstrip('/')
+    return v
+
+
 class PiholeServerCreate(BaseModel):
     name: str = PydanticField(max_length=100)
     url: str = PydanticField(max_length=255)
@@ -277,6 +306,7 @@ class PiholeServerCreate(BaseModel):
     username: Optional[str] = PydanticField(default=None, max_length=100)
     server_type: str = 'pihole'
     skip_ssl_verify: bool = False
+    extra_config: Optional[dict] = None
     enabled: bool = True
     is_source: bool = False
     sync_enabled: bool = False
@@ -288,6 +318,9 @@ class PiholeServerCreate(BaseModel):
             raise ValueError("URL must start with http:// or https://")
         return v.rstrip('/')
 
+    validate_server_type = field_validator('server_type')(_check_server_type)
+    validate_extra_config = field_validator('extra_config')(_check_extra_config)
+
 
 class PiholeServerUpdate(BaseModel):
     name: Optional[str] = PydanticField(default=None, max_length=100)
@@ -296,10 +329,15 @@ class PiholeServerUpdate(BaseModel):
     username: Optional[str] = None
     server_type: Optional[str] = None
     skip_ssl_verify: Optional[bool] = None
+    extra_config: Optional[dict] = None
     enabled: Optional[bool] = None
     display_order: Optional[int] = None
     is_source: Optional[bool] = None
     sync_enabled: Optional[bool] = None
+
+    validate_url = field_validator('url')(_check_url)
+    validate_server_type = field_validator('server_type')(_check_server_type)
+    validate_extra_config = field_validator('extra_config')(_check_extra_config)
 
 
 class SettingsResponse(BaseModel):

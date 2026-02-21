@@ -56,7 +56,7 @@ export interface QuerySearchParams {
   offset?: number;
 }
 
-export type ServerType = 'pihole' | 'adguard';
+export type ServerType = 'pihole' | 'adguard' | 'technitium';
 
 export interface PiholeServer {
   id: number;
@@ -66,6 +66,7 @@ export interface PiholeServer {
   username: string | null;
   server_type: ServerType;
   skip_ssl_verify: boolean;
+  extra_config: Record<string, string> | null;
   enabled: boolean;
   display_order: number;
   is_source: boolean;
@@ -82,6 +83,7 @@ export interface PiholeServerCreate {
   username?: string;
   server_type?: ServerType;
   skip_ssl_verify?: boolean;
+  extra_config?: Record<string, string>;
   enabled?: boolean;
   is_source?: boolean;
   sync_enabled?: boolean;
@@ -102,7 +104,7 @@ export interface SettingsResponse {
 }
 
 export interface DomainEntry {
-  id: number;
+  id?: number;
   domain: string;
   enabled: boolean;
   date_added?: string;
@@ -395,7 +397,7 @@ export interface ApiKeyCreateResponse extends ApiKey {
 // ============================================================================
 
 export interface SyncPreviewSource {
-  source: { name: string; server_type?: string } | null;
+  source: { name: string; server_type?: string };
   targets: { name: string }[];
   teleporter?: {
     backup_size_bytes: number;
@@ -403,8 +405,9 @@ export interface SyncPreviewSource {
   };
   config?: {
     keys?: Record<string, string[]>;
-    summary?: Record<string, number>;
+    summary?: Record<string, number | boolean>;
   };
+  error?: string;
 }
 
 export interface SyncPreview {

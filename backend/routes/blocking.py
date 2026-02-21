@@ -61,13 +61,13 @@ async def get_blocking_status(
                         "error": "Authentication failed"
                     })
         except Exception as e:
-            logger.error(f"Error getting blocking status from {server.name}: {e}")
+            logger.error(f"Error getting blocking status from {server.name}: {e}", exc_info=True)
             statuses.append({
                 "id": server.id,
                 "name": server.name,
                 "blocking": None,
                 "auto_enable_at": None,
-                "error": str(e)
+                "error": f"Failed to get blocking status from {server.name}"
             })
 
     return {"servers": statuses}
@@ -142,12 +142,12 @@ async def set_blocking_for_all(
                 })
 
         except Exception as e:
-            logger.error(f"Error setting blocking for {server.name}: {e}")
+            logger.error(f"Error setting blocking for {server.name}: {e}", exc_info=True)
             results.append({
                 "server_id": server.id,
                 "name": server.name,
                 "success": False,
-                "error": str(e)
+                "error": f"Failed to set blocking on {server.name}"
             })
 
     await db.commit()
@@ -236,4 +236,4 @@ async def set_blocking_for_server(
         raise
     except Exception as e:
         logger.error(f"Error setting blocking for {server.name}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to set blocking on server {server.name}")

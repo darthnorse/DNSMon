@@ -1,14 +1,16 @@
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from .models import Base
+import logging
 import os
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy import text
+from .models import Base
+
+logger = logging.getLogger(__name__)
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://dnsmon:changeme@localhost:5432/dnsmon")
 
-# Convert to async URL if needed
 if DATABASE_URL.startswith("postgresql://"):
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
 
-# Create async engine with proper connection pooling
 engine = create_async_engine(
     DATABASE_URL,
     echo=False,
@@ -19,7 +21,6 @@ engine = create_async_engine(
     pool_timeout=30,  # Timeout waiting for connection from pool (prevents indefinite hangs)
 )
 
-# Create async session factory
 async_session_maker = async_sessionmaker(
     engine,
     class_=AsyncSession,
@@ -36,10 +37,37 @@ async def get_db():
             await session.close()
 
 
+async def _run_migrations(conn):
+    """Add missing columns to existing tables.
+
+    SQLAlchemy's create_all only creates new tables; it won't alter existing
+    ones.  This function bridges that gap for schema changes so that existing
+    installs upgrade automatically on restart.
+    """
+    # SECURITY: table, column, col_type, and default MUST be hardcoded string
+    # literals. NEVER source these values from user input or configuration.
+    migrations = [
+        # (table, column, SQL type, default)
+        ('servers', 'extra_config', 'JSON', None),
+    ]
+    for table, column, col_type, default in migrations:
+        result = await conn.execute(text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = :table AND column_name = :column"
+        ), {'table': table, 'column': column})
+        if not result.scalar():
+            default_clause = f" DEFAULT {default}" if default is not None else ""
+            await conn.execute(text(
+                f'ALTER TABLE {table} ADD COLUMN {column} {col_type}{default_clause}'
+            ))
+            logger.info(f"Migration: added {table}.{column} ({col_type})")
+
+
 async def init_db():
-    """Initialize database tables"""
+    """Initialize database tables and run migrations"""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await _run_migrations(conn)
 
 
 async def cleanup_old_queries(days: int = 60):

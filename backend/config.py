@@ -1,9 +1,8 @@
 from pydantic import BaseModel, Field, field_validator
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import os
-import json
 import logging
 import asyncio
 import threading
@@ -18,8 +17,9 @@ class PiholeServer(BaseModel):
     url: str
     password: str
     username: Optional[str] = None  # For AdGuard Home (default: 'admin')
-    server_type: str = 'pihole'  # 'pihole' or 'adguard'
+    server_type: str = 'pihole'  # 'pihole', 'adguard', or 'technitium'
     skip_ssl_verify: bool = False  # Skip SSL certificate verification for self-signed certs
+    extra_config: Optional[Dict[str, Any]] = None
     enabled: bool = True
     display_order: int = 0
 
@@ -180,6 +180,7 @@ async def load_settings_from_db(db: AsyncSession) -> Settings:
             username=server.username,
             server_type=server.server_type or 'pihole',
             skip_ssl_verify=server.skip_ssl_verify or False,
+            extra_config=server.extra_config or {},
             enabled=server.enabled,
             display_order=server.display_order
         )

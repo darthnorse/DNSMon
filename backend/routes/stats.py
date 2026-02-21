@@ -17,9 +17,10 @@ from ..config import get_settings_sync
 
 BLOCKED_STATUSES = ['GRAVITY', 'GRAVITY_CNAME', 'REGEX', 'REGEX_CNAME',
                     'BLACKLIST', 'BLACKLIST_CNAME', 'REGEX_BLACKLIST',
-                    'EXTERNAL_BLOCKED_IP', 'EXTERNAL_BLOCKED_NULL', 'EXTERNAL_BLOCKED_NXRA']
+                    'EXTERNAL_BLOCKED_IP', 'EXTERNAL_BLOCKED_NULL', 'EXTERNAL_BLOCKED_NXRA',
+                    'BLOCKED']
 
-CACHE_STATUSES = ['CACHE', 'CACHE_STALE']
+CACHE_STATUSES = ['CACHE', 'CACHE_STALE', 'CACHED']
 
 router = APIRouter(prefix="/api", tags=["stats"])
 

@@ -90,7 +90,7 @@ export default function Lists() {
 
   const handleDelete = async (domain: DomainEntry) => {
     try {
-      setDeletingId(domain.id);
+      setDeletingId(domain.id ?? domain.domain);
       setError(null);
 
       switch (activeTab) {
@@ -228,7 +228,7 @@ export default function Lists() {
                 </thead>
                 <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                   {filteredDomains.map((domain) => (
-                    <tr key={domain.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
+                    <tr key={domain.id ?? domain.domain} className="hover:bg-gray-50 dark:hover:bg-gray-700">
                       <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-300 break-all">
                         {domain.domain}
                       </td>
@@ -251,10 +251,10 @@ export default function Lists() {
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-right">
                         <button
                           onClick={() => handleDelete(domain)}
-                          disabled={deletingId === domain.id}
+                          disabled={deletingId === (domain.id ?? domain.domain)}
                           className="text-red-600 dark:text-red-400 hover:text-red-900 dark:hover:text-red-300 disabled:opacity-50"
                         >
-                          {deletingId === domain.id ? (
+                          {deletingId === (domain.id ?? domain.domain) ? (
                             <svg className="animate-spin h-5 w-5 inline" fill="none" viewBox="0 0 24 24">
                               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />

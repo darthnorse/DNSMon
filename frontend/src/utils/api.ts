@@ -120,8 +120,8 @@ export const settingsApi = {
     return response.data;
   },
 
-  updateSetting: async (key: string, value: string): Promise<{ message: string; setting: any; requires_restart: boolean }> => {
-    const response = await api.put<{ message: string; setting: any; requires_restart: boolean }>(`/settings/${key}`, { value });
+  updateSetting: async (key: string, value: string): Promise<{ message: string; setting: unknown; requires_restart: boolean }> => {
+    const response = await api.put<{ message: string; setting: unknown; requires_restart: boolean }>(`/settings/${key}`, { value });
     return response.data;
   },
 

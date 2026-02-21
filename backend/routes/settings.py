@@ -22,6 +22,8 @@ from ..config import get_settings
 
 logger = logging.getLogger(__name__)
 
+SERVER_TYPE_DISPLAY = {'pihole': 'Pi-hole', 'adguard': 'AdGuard Home', 'technitium': 'Technitium DNS'}
+
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 # Rate limiting for restart endpoint
@@ -156,6 +158,7 @@ async def create_server(
         username=server_data.username,
         server_type=server_data.server_type,
         skip_ssl_verify=server_data.skip_ssl_verify,
+        extra_config=server_data.extra_config,
         enabled=server_data.enabled,
         is_source=server_data.is_source,
         sync_enabled=server_data.sync_enabled,
@@ -275,21 +278,13 @@ async def test_pihole_connection(
     server_data: PiholeServerCreate,
     _: User = Depends(require_admin)
 ):
-    """Test connection to a DNS ad-blocker server (Pi-hole or AdGuard Home)"""
-    from ..dns_client_factory import create_dns_client
+    """Test connection to a DNS ad-blocker server (Pi-hole, AdGuard Home, or Technitium)"""
+    from ..utils import create_client_from_server
 
-    server_type = server_data.server_type or 'pihole'
-    server_type_display = "AdGuard Home" if server_type == 'adguard' else "Pi-hole"
+    server_type_display = SERVER_TYPE_DISPLAY[server_data.server_type or 'pihole']
 
     try:
-        client = create_dns_client(
-            server_type=server_type,
-            url=server_data.url,
-            password=server_data.password,
-            server_name=server_data.name,
-            username=server_data.username,
-            skip_ssl_verify=server_data.skip_ssl_verify
-        )
+        client = create_client_from_server(server_data)
         async with client:
             auth_success = await client.authenticate()
             if auth_success:

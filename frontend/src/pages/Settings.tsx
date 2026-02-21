@@ -10,6 +10,18 @@ import type { PiholeServer, PiholeServerCreate, ServerType, OIDCProvider, OIDCPr
 
 type TabType = 'servers' | 'notifications' | 'polling' | 'sync' | 'oidc' | 'advanced' | 'users' | 'api-keys';
 
+const SERVER_TYPE_LABELS: Record<ServerType, string> = {
+  pihole: 'Pi-hole',
+  adguard: 'AdGuard',
+  technitium: 'Technitium',
+};
+
+const SERVER_TYPE_BADGE_COLORS: Record<ServerType, string> = {
+  pihole: 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300',
+  adguard: 'bg-teal-100 dark:bg-teal-900/30 text-teal-800 dark:text-teal-300',
+  technitium: 'bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-300',
+};
+
 export default function Settings() {
   const [activeTab, setActiveTab] = useState<TabType>('servers');
   const [loading, setLoading] = useState(true);
@@ -27,6 +39,7 @@ export default function Settings() {
     username: '',
     server_type: 'pihole',
     skip_ssl_verify: false,
+    extra_config: {},
     enabled: true,
     is_source: false,
     sync_enabled: false
@@ -156,7 +169,7 @@ export default function Settings() {
     }
 
     if (!isEditing && (!data.password || data.password.trim().length === 0)) {
-      errors.push('Password is required');
+      errors.push(data.server_type === 'technitium' ? 'API Token is required' : 'Password is required');
     }
 
     return errors;
@@ -183,7 +196,7 @@ export default function Settings() {
 
       await loadServers();
       handleCancelServerForm();
-      setSuccessMessage('Pi-hole server saved successfully');
+      setSuccessMessage('Server saved successfully');
     } catch (err: unknown) {
       setError(getErrorMessage(err, 'Failed to save server'));
     } finally {
@@ -200,6 +213,7 @@ export default function Settings() {
       username: server.username || '',
       server_type: server.server_type || 'pihole',
       skip_ssl_verify: server.skip_ssl_verify || false,
+      extra_config: server.extra_config || {},
       enabled: server.enabled,
       is_source: server.is_source,
       sync_enabled: server.sync_enabled
@@ -235,6 +249,7 @@ export default function Settings() {
       username: '',
       server_type: 'pihole',
       skip_ssl_verify: false,
+      extra_config: {},
       enabled: true,
       is_source: false,
       sync_enabled: false
@@ -244,9 +259,15 @@ export default function Settings() {
   };
 
   const handleTestConnection = async () => {
-    const errors = validateServer(serverFormData);
+    const errors = validateServer(serverFormData, !!editingServer);
     if (errors.length > 0) {
       setError(errors.join('. '));
+      return;
+    }
+
+    if (editingServer && !serverFormData.password) {
+      const credLabel = serverFormData.server_type === 'technitium' ? 'API Token' : 'Password';
+      setError(`Please re-enter the ${credLabel} to test the connection.`);
       return;
     }
 
@@ -303,8 +324,11 @@ export default function Settings() {
       const result2 = await settingsApi.updateSetting('query_lookback_seconds', String(pollingData.query_lookback_seconds));
       if (result2.requires_restart) needsRestart = true;
 
-      await settingsApi.updateSetting('retention_days', String(pollingData.retention_days));
-      await settingsApi.updateSetting('max_catchup_seconds', String(pollingData.max_catchup_seconds));
+      const result3 = await settingsApi.updateSetting('retention_days', String(pollingData.retention_days));
+      if (result3.requires_restart) needsRestart = true;
+
+      const result4 = await settingsApi.updateSetting('max_catchup_seconds', String(pollingData.max_catchup_seconds));
+      if (result4.requires_restart) needsRestart = true;
 
       if (needsRestart) {
         setShowRestartModal(true);
@@ -743,7 +767,7 @@ export default function Settings() {
                     id="server_url"
                     value={serverFormData.url}
                     onChange={(e) => setServerFormData({ ...serverFormData, url: e.target.value })}
-                    placeholder="http://192.168.1.2"
+                    placeholder={serverFormData.server_type === 'technitium' ? 'http://192.168.1.2:5380' : 'http://192.168.1.2'}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                   />
                 </div>
@@ -759,14 +783,15 @@ export default function Settings() {
                       setServerFormData({
                         ...serverFormData,
                         server_type: newType,
-                        // Clear username when switching to Pi-hole (Pi-hole doesn't use username)
-                        username: newType === 'pihole' ? '' : serverFormData.username
+                        username: newType === 'adguard' ? serverFormData.username : '',
+                        extra_config: newType === 'technitium' ? (serverFormData.extra_config || {}) : {},
                       });
                     }}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                   >
                     <option value="pihole">Pi-hole</option>
                     <option value="adguard">AdGuard Home</option>
+                    <option value="technitium">Technitium DNS</option>
                   </select>
                 </div>
                 {serverFormData.server_type === 'adguard' && (
@@ -789,17 +814,63 @@ export default function Settings() {
                 )}
                 <div>
                   <label htmlFor="server_password" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Password {editingServer && <span className="text-blue-600 dark:text-blue-400 text-xs">(optional)</span>}
+                    {serverFormData.server_type === 'technitium' ? 'API Token' : 'Password'} {editingServer && <span className="text-blue-600 dark:text-blue-400 text-xs">(optional)</span>}
                   </label>
                   <input
                     type="password"
                     id="server_password"
                     value={serverFormData.password}
                     onChange={(e) => setServerFormData({ ...serverFormData, password: e.target.value })}
-                    placeholder={editingServer ? "Leave empty to keep existing password" : "Enter password"}
+                    placeholder={
+                      serverFormData.server_type === 'technitium'
+                        ? (editingServer ? 'Leave empty to keep existing token' : 'Paste API token from Technitium UI')
+                        : (editingServer ? 'Leave empty to keep existing password' : 'Enter password')
+                    }
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                   />
                 </div>
+                {serverFormData.server_type === 'technitium' && (
+                  <>
+                    <div>
+                      <label htmlFor="log_app_name" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Query Log App Name
+                      </label>
+                      <input
+                        type="text"
+                        id="log_app_name"
+                        value={String(serverFormData.extra_config?.log_app_name ?? '')}
+                        onChange={(e) => setServerFormData({
+                          ...serverFormData,
+                          extra_config: { ...serverFormData.extra_config, log_app_name: e.target.value }
+                        })}
+                        placeholder="QueryLogsSqlite"
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      />
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                        Name of the DNS App providing query logs (default: QueryLogsSqlite)
+                      </p>
+                    </div>
+                    <div>
+                      <label htmlFor="log_app_class_path" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Query Log App Class Path
+                      </label>
+                      <input
+                        type="text"
+                        id="log_app_class_path"
+                        value={String(serverFormData.extra_config?.log_app_class_path ?? '')}
+                        onChange={(e) => setServerFormData({
+                          ...serverFormData,
+                          extra_config: { ...serverFormData.extra_config, log_app_class_path: e.target.value }
+                        })}
+                        placeholder="QueryLogsSqlite.App"
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      />
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                        Class path of the Query Log app (default: QueryLogsSqlite.App)
+                      </p>
+                    </div>
+                  </>
+                )}
                 <div className="flex items-center">
                   <input
                     type="checkbox"
@@ -898,7 +969,7 @@ export default function Settings() {
                         </label>
                       </div>
                       <p className="text-xs text-gray-500 dark:text-gray-400">
-                        Note: Sync only works between servers of the same type ({serverFormData.server_type === 'pihole' ? 'Pi-hole' : 'AdGuard'} to {serverFormData.server_type === 'pihole' ? 'Pi-hole' : 'AdGuard'})
+                        Note: Sync only works between servers of the same type ({SERVER_TYPE_LABELS[serverFormData.server_type || 'pihole']} to {SERVER_TYPE_LABELS[serverFormData.server_type || 'pihole']})
                       </p>
                     </>
                   );
@@ -955,12 +1026,8 @@ export default function Settings() {
                     <div>
                       <div className="flex items-center gap-2">
                         <h3 className="text-lg font-medium text-gray-900 dark:text-white">{server.name}</h3>
-                        <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${
-                          server.server_type === 'adguard'
-                            ? 'bg-teal-100 dark:bg-teal-900/30 text-teal-800 dark:text-teal-300'
-                            : 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300'
-                        }`}>
-                          {server.server_type === 'adguard' ? 'AdGuard' : 'Pi-hole'}
+                        <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${SERVER_TYPE_BADGE_COLORS[server.server_type]}`}>
+                          {SERVER_TYPE_LABELS[server.server_type]}
                         </span>
                         {server.is_source && (
                           <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300">
@@ -1093,10 +1160,10 @@ export default function Settings() {
 
       {activeTab === 'sync' && (
         <div className="max-w-2xl">
-          <h2 className="text-lg font-medium text-gray-900 dark:text-white mb-4">Pi-hole Configuration Sync</h2>
+          <h2 className="text-lg font-medium text-gray-900 dark:text-white mb-4">Configuration Sync</h2>
           <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
-            Sync configuration (adlists, whitelist, blacklist, groups, DNS settings) from a source Pi-hole to target Pi-holes.
-            Each Pi-hole will download and compile gravity independently.
+            Sync configuration from a source server to target servers of the same type.
+            Supports Pi-hole (Teleporter + config), AdGuard Home (rules, rewrites, filters, clients), and Technitium DNS (backup/restore).
           </p>
 
           {/* Sync Interval Setting */}
@@ -1132,7 +1199,7 @@ export default function Settings() {
           <div className="mb-6 pb-6 border-b border-gray-200 dark:border-gray-700">
             <h3 className="text-md font-medium text-gray-900 dark:text-white mb-3">Manual Sync</h3>
             <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-              Trigger an immediate sync from source to all enabled targets. Configure source and targets in the Pi-hole Servers tab.
+              Trigger an immediate sync from source to all enabled targets. Configure source and targets in the DNS Servers tab.
             </p>
             <div className="flex gap-3">
               <button
@@ -1162,9 +1229,16 @@ export default function Settings() {
             {syncPreview && (
               <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-700 rounded-md">
                 <h4 className="font-medium text-gray-900 dark:text-white mb-2">Sync Preview</h4>
-                {(syncPreview.sources || [syncPreview as SyncPreviewSource]).map((preview, idx) => (
+                {syncPreview.error && !syncPreview.sources && (
+                  <p className="text-sm text-red-600 dark:text-red-400">{syncPreview.error}</p>
+                )}
+                {(syncPreview.sources || (!syncPreview.error ? [syncPreview as SyncPreviewSource] : [])).map((preview, idx) => (
                   <div key={idx} className={`text-sm text-gray-700 dark:text-gray-300 ${idx > 0 ? 'mt-4 pt-4 border-t border-gray-200 dark:border-gray-600' : ''}`}>
                     <p><strong>Source:</strong> {preview.source?.name} ({preview.source?.server_type || 'pihole'})</p>
+                    {preview.error ? (
+                      <p className="text-red-600 dark:text-red-400 mt-1">{preview.error}</p>
+                    ) : (
+                    <>
                     <p><strong>Targets:</strong> {preview.targets?.length > 0 ? preview.targets.map((t) => t.name).join(', ') : 'None'}</p>
                     {preview.teleporter && preview.teleporter.backup_size_bytes > 0 && (
                       <div className="mt-2">
@@ -1190,13 +1264,15 @@ export default function Settings() {
                         {preview.config.summary && (
                           <div className="mt-1 ml-4 text-xs text-gray-500 dark:text-gray-400">
                             {Object.entries(preview.config.summary as Record<string, unknown>)
-                              .filter(([, value]) => typeof value === 'number' && (value as number) > 0)
+                              .filter(([, value]) => (typeof value === 'number' && (value as number) > 0) || typeof value === 'boolean')
                               .map(([key, value], i, arr) => (
-                                <span key={key}>{key.replace(/^dns_/, '').replace(/_/g, ' ')}: {value as number}{i < arr.length - 1 ? ' | ' : ''}</span>
+                                <span key={key}>{key.replace(/^dns_/, '').replace(/_/g, ' ')}: {typeof value === 'boolean' ? (value ? 'yes' : 'no') : value as number}{i < arr.length - 1 ? ' | ' : ''}</span>
                               ))}
                           </div>
                         )}
                       </div>
+                    )}
+                    </>
                     )}
                   </div>
                 ))}

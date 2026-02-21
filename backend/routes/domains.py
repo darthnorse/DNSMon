@@ -76,7 +76,8 @@ async def add_to_whitelist(
                 else:
                     results.append({"server": server.name, "success": False, "error": "Auth failed"})
         except Exception as e:
-            results.append({"server": server.name, "success": False, "error": str(e)})
+            logger.error(f"Error adding to whitelist on {server.name}: {e}", exc_info=True)
+            results.append({"server": server.name, "success": False, "error": f"Failed on {server.name}"})
 
     successful = sum(1 for r in results if r.get('success'))
     if successful == 0:
@@ -103,7 +104,8 @@ async def remove_from_whitelist(
                 else:
                     results.append({"server": server.name, "success": False, "error": "Auth failed"})
         except Exception as e:
-            results.append({"server": server.name, "success": False, "error": str(e)})
+            logger.error(f"Error removing from whitelist on {server.name}: {e}", exc_info=True)
+            results.append({"server": server.name, "success": False, "error": f"Failed on {server.name}"})
 
     successful = sum(1 for r in results if r.get('success'))
     if successful == 0:
@@ -141,7 +143,8 @@ async def add_to_blacklist(
                 else:
                     results.append({"server": server.name, "success": False, "error": "Auth failed"})
         except Exception as e:
-            results.append({"server": server.name, "success": False, "error": str(e)})
+            logger.error(f"Error adding to blacklist on {server.name}: {e}", exc_info=True)
+            results.append({"server": server.name, "success": False, "error": f"Failed on {server.name}"})
 
     successful = sum(1 for r in results if r.get('success'))
     if successful == 0:
@@ -168,7 +171,8 @@ async def remove_from_blacklist(
                 else:
                     results.append({"server": server.name, "success": False, "error": "Auth failed"})
         except Exception as e:
-            results.append({"server": server.name, "success": False, "error": str(e)})
+            logger.error(f"Error removing from blacklist on {server.name}: {e}", exc_info=True)
+            results.append({"server": server.name, "success": False, "error": f"Failed on {server.name}"})
 
     successful = sum(1 for r in results if r.get('success'))
     if successful == 0:
@@ -213,7 +217,8 @@ async def add_to_regex_whitelist(
                 success = await client.add_to_regex_whitelist(request.domain)
                 results.append({"server": server.name, "success": success})
         except Exception as e:
-            results.append({"server": server.name, "success": False, "error": str(e)})
+            logger.error(f"Error adding regex whitelist on {server.name}: {e}", exc_info=True)
+            results.append({"server": server.name, "success": False, "error": f"Failed on {server.name}"})
 
     successful = sum(1 for r in results if r.get("success"))
     if successful == 0:
@@ -245,7 +250,8 @@ async def remove_from_regex_whitelist(
                 success = await client.remove_from_regex_whitelist(pattern)
                 results.append({"server": server.name, "success": success})
         except Exception as e:
-            results.append({"server": server.name, "success": False, "error": str(e)})
+            logger.error(f"Error removing regex whitelist on {server.name}: {e}", exc_info=True)
+            results.append({"server": server.name, "success": False, "error": f"Failed on {server.name}"})
 
     successful = sum(1 for r in results if r.get("success"))
     if successful == 0:
@@ -290,7 +296,8 @@ async def add_to_regex_blacklist(
                 success = await client.add_to_regex_blacklist(request.domain)
                 results.append({"server": server.name, "success": success})
         except Exception as e:
-            results.append({"server": server.name, "success": False, "error": str(e)})
+            logger.error(f"Error adding regex blacklist on {server.name}: {e}", exc_info=True)
+            results.append({"server": server.name, "success": False, "error": f"Failed on {server.name}"})
 
     successful = sum(1 for r in results if r.get("success"))
     if successful == 0:
@@ -322,7 +329,8 @@ async def remove_from_regex_blacklist(
                 success = await client.remove_from_regex_blacklist(pattern)
                 results.append({"server": server.name, "success": success})
         except Exception as e:
-            results.append({"server": server.name, "success": False, "error": str(e)})
+            logger.error(f"Error removing regex blacklist on {server.name}: {e}", exc_info=True)
+            results.append({"server": server.name, "success": False, "error": f"Failed on {server.name}"})
 
     successful = sum(1 for r in results if r.get("success"))
     if successful == 0:

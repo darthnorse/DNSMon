@@ -1,15 +1,17 @@
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from typing import List, Tuple
 from dataclasses import dataclass
 from collections import defaultdict
-from sqlalchemy import select, func, text
+
+from sqlalchemy import select, func, text, BigInteger
 from sqlalchemy.dialects.postgresql import insert
+
 from .models import Query, QueryStatsHourly, ClientStatsHourly, DomainStatsHourly
 from .database import async_session_maker, cleanup_old_queries
-from .dns_client_factory import create_dns_client
+from .utils import create_client_from_server
 from .config import get_settings_sync, PiholeServer
-import time
 
 logger = logging.getLogger(__name__)
 
@@ -44,10 +46,6 @@ class QueryIngestionService:
         min_allowed_timestamp = now - max_lookback
 
         async with async_session_maker() as session:
-            # Use SQLAlchemy ORM instead of raw SQL for better type safety
-            from sqlalchemy import func, select, cast, BigInteger
-            from .models import Query
-
             stmt = (
                 select(func.extract('epoch', func.max(Query.timestamp)).cast(BigInteger))
                 .where(Query.server == server_name)
@@ -78,7 +76,6 @@ class QueryIngestionService:
             return 0, []
 
         try:
-            # Calculate time range using database state
             now = int(time.time())
             last_poll = await self._get_last_query_timestamp(server.name)
             from_timestamp = last_poll
@@ -86,22 +83,12 @@ class QueryIngestionService:
 
             logger.info(f"Ingesting queries from {server.name} (from {from_timestamp} to {until_timestamp})")
 
-            # Connect to DNS server (Pi-hole or AdGuard)
-            client = create_dns_client(
-                server_type=server.server_type,
-                url=server.url,
-                password=server.password,
-                server_name=server.name,
-                username=server.username,
-                skip_ssl_verify=server.skip_ssl_verify
-            )
+            client = create_client_from_server(server)
             async with client:
-                # Authenticate
                 if not await client.authenticate():
                     logger.error(f"Failed to authenticate with {server.name}")
                     return 0, []
 
-                # Get queries
                 queries = await client.get_queries(from_timestamp, until_timestamp)
 
                 if queries is None:
@@ -112,7 +99,6 @@ class QueryIngestionService:
                     logger.info(f"No new queries from {server.name}")
                     return 0, []
 
-                # Process and store queries
                 query_count, ingested = await self._store_queries(queries, server.name)
 
                 logger.info(f"Ingested {query_count} queries from {server.name}")
@@ -148,7 +134,6 @@ class QueryIngestionService:
                         client_ip = str(client_data)
                         client_hostname = None
 
-                    # Parse timestamp
                     # Pi-hole provides Unix timestamps which are UTC by definition
                     timestamp = query_data.get("timestamp")
                     if timestamp:
@@ -245,8 +230,9 @@ class QueryIngestionService:
 
         blocked_statuses = {'GRAVITY', 'GRAVITY_CNAME', 'REGEX', 'REGEX_CNAME',
                             'BLACKLIST', 'BLACKLIST_CNAME', 'REGEX_BLACKLIST',
-                            'EXTERNAL_BLOCKED_IP', 'EXTERNAL_BLOCKED_NULL', 'EXTERNAL_BLOCKED_NXRA'}
-        cache_statuses = {'CACHE', 'CACHE_STALE'}
+                            'EXTERNAL_BLOCKED_IP', 'EXTERNAL_BLOCKED_NULL', 'EXTERNAL_BLOCKED_NXRA',
+                            'BLOCKED'}
+        cache_statuses = {'CACHE', 'CACHE_STALE', 'CACHED'}
 
         # Aggregate in memory
         # Key: (hour, server)
@@ -355,8 +341,8 @@ class QueryIngestionService:
                     SELECT date_trunc('hour', timestamp) AS hour,
                            server,
                            COUNT(*) AS total,
-                           COUNT(*) FILTER (WHERE status IN ('GRAVITY','GRAVITY_CNAME','REGEX','REGEX_CNAME','BLACKLIST','BLACKLIST_CNAME','REGEX_BLACKLIST','EXTERNAL_BLOCKED_IP','EXTERNAL_BLOCKED_NULL','EXTERNAL_BLOCKED_NXRA')) AS blocked,
-                           COUNT(*) FILTER (WHERE status IN ('CACHE','CACHE_STALE')) AS cached
+                           COUNT(*) FILTER (WHERE status IN ('GRAVITY','GRAVITY_CNAME','REGEX','REGEX_CNAME','BLACKLIST','BLACKLIST_CNAME','REGEX_BLACKLIST','EXTERNAL_BLOCKED_IP','EXTERNAL_BLOCKED_NULL','EXTERNAL_BLOCKED_NXRA','BLOCKED')) AS blocked,
+                           COUNT(*) FILTER (WHERE status IN ('CACHE','CACHE_STALE','CACHED')) AS cached
                     FROM queries
                     GROUP BY hour, server
                     ON CONFLICT (hour, server) DO NOTHING
@@ -370,7 +356,7 @@ class QueryIngestionService:
                            client_ip,
                            MAX(client_hostname) AS client_hostname,
                            COUNT(*) AS total,
-                           COUNT(*) FILTER (WHERE status IN ('GRAVITY','GRAVITY_CNAME','REGEX','REGEX_CNAME','BLACKLIST','BLACKLIST_CNAME','REGEX_BLACKLIST','EXTERNAL_BLOCKED_IP','EXTERNAL_BLOCKED_NULL','EXTERNAL_BLOCKED_NXRA')) AS blocked
+                           COUNT(*) FILTER (WHERE status IN ('GRAVITY','GRAVITY_CNAME','REGEX','REGEX_CNAME','BLACKLIST','BLACKLIST_CNAME','REGEX_BLACKLIST','EXTERNAL_BLOCKED_IP','EXTERNAL_BLOCKED_NULL','EXTERNAL_BLOCKED_NXRA','BLOCKED')) AS blocked
                     FROM queries
                     GROUP BY hour, server, client_ip
                     ON CONFLICT (hour, server, client_ip) DO NOTHING
@@ -383,7 +369,7 @@ class QueryIngestionService:
                            server,
                            domain,
                            COUNT(*) AS total,
-                           COUNT(*) FILTER (WHERE status IN ('GRAVITY','GRAVITY_CNAME','REGEX','REGEX_CNAME','BLACKLIST','BLACKLIST_CNAME','REGEX_BLACKLIST','EXTERNAL_BLOCKED_IP','EXTERNAL_BLOCKED_NULL','EXTERNAL_BLOCKED_NXRA')) AS blocked
+                           COUNT(*) FILTER (WHERE status IN ('GRAVITY','GRAVITY_CNAME','REGEX','REGEX_CNAME','BLACKLIST','BLACKLIST_CNAME','REGEX_BLACKLIST','EXTERNAL_BLOCKED_IP','EXTERNAL_BLOCKED_NULL','EXTERNAL_BLOCKED_NXRA','BLOCKED')) AS blocked
                     FROM queries
                     GROUP BY hour, server, domain
                     ON CONFLICT (hour, server, domain) DO NOTHING

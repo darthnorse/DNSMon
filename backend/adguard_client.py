@@ -91,6 +91,12 @@ class AdGuardHomeClient(DNSBlockerClient):
                 data = response.json()
                 queries = data.get("data", [])
 
+                if len(queries) >= 5000:
+                    logger.warning(
+                        f"Retrieved maximum number of queries (5000) from {self.server_name}. "
+                        f"Some queries in the time window may be missed."
+                    )
+
                 # Filter by timestamp range and transform to common format
                 filtered = []
                 for q in queries:
@@ -104,7 +110,9 @@ class AdGuardHomeClient(DNSBlockerClient):
 
                             # Filter by time range
                             if from_timestamp <= query_timestamp <= until_timestamp:
-                                filtered.append(self._transform_query(q))
+                                transformed = self._transform_query(q)
+                                if transformed is not None:
+                                    filtered.append(transformed)
                         except (ValueError, TypeError) as e:
                             logger.warning(f"Failed to parse timestamp {ts}: {e}")
                             continue
@@ -119,7 +127,7 @@ class AdGuardHomeClient(DNSBlockerClient):
             logger.error(f"Error getting queries from {self.server_name}: {e}")
             return None
 
-    def _transform_query(self, raw_query: Dict[str, Any]) -> Dict[str, Any]:
+    def _transform_query(self, raw_query: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
         Transform AdGuard query format to Pi-hole-compatible format.
 
@@ -135,7 +143,8 @@ class AdGuardHomeClient(DNSBlockerClient):
         try:
             timestamp = int(datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp())
         except (ValueError, TypeError):
-            timestamp = 0
+            logger.warning(f"Unparseable timestamp {ts!r} from {self.server_name}, skipping entry")
+            return None
 
         # Extract question data
         question = raw_query.get("question", {})

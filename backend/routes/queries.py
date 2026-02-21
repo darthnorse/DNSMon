@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query as QueryParam
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 
 from ..database import get_db
 from ..models import Query, User
@@ -76,6 +76,8 @@ async def search_queries(
     if from_date:
         try:
             from_dt = datetime.fromisoformat(from_date.replace('Z', '+00:00'))
+            if from_dt.tzinfo is None:
+                from_dt = from_dt.replace(tzinfo=timezone.utc)
             conditions.append(Query.timestamp >= from_dt)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid from_date format")
@@ -83,6 +85,8 @@ async def search_queries(
     if to_date:
         try:
             to_dt = datetime.fromisoformat(to_date.replace('Z', '+00:00'))
+            if to_dt.tzinfo is None:
+                to_dt = to_dt.replace(tzinfo=timezone.utc)
             conditions.append(Query.timestamp <= to_dt)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid to_date format")
@@ -144,6 +148,8 @@ async def count_queries(
     if from_date:
         try:
             from_dt = datetime.fromisoformat(from_date.replace('Z', '+00:00'))
+            if from_dt.tzinfo is None:
+                from_dt = from_dt.replace(tzinfo=timezone.utc)
             conditions.append(Query.timestamp >= from_dt)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid from_date format")
@@ -151,6 +157,8 @@ async def count_queries(
     if to_date:
         try:
             to_dt = datetime.fromisoformat(to_date.replace('Z', '+00:00'))
+            if to_dt.tzinfo is None:
+                to_dt = to_dt.replace(tzinfo=timezone.utc)
             conditions.append(Query.timestamp <= to_dt)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid to_date format")

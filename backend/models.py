@@ -233,8 +233,9 @@ class PiholeServerModel(Base):
     url = Column(String(255), nullable=False)
     password = Column(Text, nullable=False)
     username = Column(String(100), nullable=True)  # For AdGuard Home (default: 'admin')
-    server_type = Column(String(20), default='pihole')  # 'pihole' or 'adguard'
+    server_type = Column(String(20), default='pihole')  # 'pihole', 'adguard', or 'technitium'
     skip_ssl_verify = Column(Boolean, default=False)  # Skip SSL certificate verification for self-signed certs
+    extra_config = Column(JSON, nullable=True)  # Type-specific fields (e.g., Technitium log app name/class)
     enabled = Column(Boolean, default=True)
     display_order = Column(Integer, default=0)
 
@@ -268,6 +269,7 @@ class PiholeServerModel(Base):
             'username': self.username,
             'server_type': self.server_type or 'pihole',
             'skip_ssl_verify': self.skip_ssl_verify or False,
+            'extra_config': self.extra_config or {},
             'enabled': self.enabled,
             'display_order': self.display_order,
             'is_source': self.is_source,

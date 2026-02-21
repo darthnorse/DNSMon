@@ -165,9 +165,15 @@ export default function Dashboard() {
     : queries;
 
   const totalPages = Math.max(1, Math.ceil(filteredQueries.length / pageSize));
-  const clampedPage = Math.min(currentPage, totalPages);
-  if (clampedPage !== currentPage) setCurrentPage(clampedPage);
-  const paginatedQueries = filteredQueries.slice((clampedPage - 1) * pageSize, clampedPage * pageSize);
+  const safePage = Math.min(currentPage, totalPages);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [filteredQueries.length, pageSize, currentPage, totalPages]);
+
+  const paginatedQueries = filteredQueries.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   return (
     <div className="space-y-6">
@@ -455,7 +461,7 @@ export default function Dashboard() {
           {totalPages > 1 && (
             <div className="mt-4 flex items-center justify-between">
               <p className="text-sm text-gray-500 dark:text-gray-400">
-                Page {clampedPage} of {totalPages} ({filteredQueries.length} results)
+                Page {safePage} of {totalPages} ({filteredQueries.length} results)
               </p>
               <div className="flex items-center gap-2">
                 <button

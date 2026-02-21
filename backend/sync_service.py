@@ -1,25 +1,15 @@
+import json
 import logging
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
+
 from sqlalchemy import select
+
 from .models import SyncHistory, PiholeServerModel
 from .database import async_session_maker
-from .dns_client_factory import create_dns_client
-import json
+from .utils import create_client_from_server as _create_client_from_server
 
 logger = logging.getLogger(__name__)
-
-
-def _create_client_from_server(server: PiholeServerModel):
-    """Create a DNS client from a server model"""
-    return create_dns_client(
-        server_type=server.server_type or 'pihole',
-        url=server.url,
-        password=server.password,
-        server_name=server.name,
-        username=server.username,
-        skip_ssl_verify=server.skip_ssl_verify or False
-    )
 
 
 # Config keys to sync per section (only sync specific safe keys, not entire sections)
@@ -29,6 +19,31 @@ SYNC_CONFIG_KEYS = {
     # Add more sections/keys as needed:
     # 'dhcp': ['...'],
 }
+
+
+async def _get_sources_and_targets(session) -> tuple:
+    """Fetch enabled source servers and sync-target servers, grouped by type."""
+    stmt = select(PiholeServerModel).where(
+        PiholeServerModel.is_source == True,
+        PiholeServerModel.enabled == True
+    )
+    result = await session.execute(stmt)
+    sources = result.scalars().all()
+
+    stmt = select(PiholeServerModel).where(
+        PiholeServerModel.sync_enabled == True,
+        PiholeServerModel.enabled == True,
+        PiholeServerModel.is_source == False
+    )
+    result = await session.execute(stmt)
+    all_targets = result.scalars().all()
+
+    targets_by_type: Dict[str, List[PiholeServerModel]] = {}
+    for target in all_targets:
+        target_type = target.server_type or 'pihole'
+        targets_by_type.setdefault(target_type, []).append(target)
+
+    return sources, targets_by_type
 
 
 class PiholeSyncService:
@@ -63,7 +78,6 @@ class PiholeSyncService:
         summary = {}
 
         if server_type == 'adguard':
-            # AdGuard config summary — count list-type sections uniformly
             for key in ('user_rules', 'rewrites', 'filters', 'whitelist_filters', 'clients'):
                 if key in config:
                     summary[key] = len(config[key]) if config[key] else 0
@@ -71,6 +85,12 @@ class PiholeSyncService:
                 dns = config['dns']
                 if 'upstream_dns' in dns and dns['upstream_dns']:
                     summary['upstream_dns'] = len(dns['upstream_dns'])
+        elif server_type == 'technitium':
+            if config.get('blockListUrls'):
+                summary['block_lists'] = len(config['blockListUrls'])
+            if config.get('forwarders'):
+                summary['forwarders'] = len(config['forwarders']) if isinstance(config['forwarders'], list) else 1
+            summary['blocking_enabled'] = config.get('enableBlocking', False)
         else:
             # Pi-hole config summary
             for section, keys in SYNC_CONFIG_KEYS.items():
@@ -122,17 +142,17 @@ class PiholeSyncService:
             }
         }
 
-        # Add teleporter info for Pi-hole
-        if source_type == 'pihole':
+        if source_type in ('pihole', 'technitium'):
             preview['teleporter'] = {
                 'backup_size_bytes': teleporter_size,
-                'includes': [
+                'includes': ['full_backup'] if source_type == 'technitium' else [
                     'groups', 'adlists', 'adlist_by_group',
                     'domainlist', 'domainlist_by_group',
                     'clients', 'client_by_group'
                 ]
             }
-            preview['config']['keys'] = SYNC_CONFIG_KEYS
+            if source_type == 'pihole':
+                preview['config']['keys'] = SYNC_CONFIG_KEYS
 
         return preview
 
@@ -144,34 +164,11 @@ class PiholeSyncService:
         """
         try:
             async with async_session_maker() as session:
-                # Get ALL source servers (can be one per server type)
-                stmt = select(PiholeServerModel).where(
-                    PiholeServerModel.is_source == True,
-                    PiholeServerModel.enabled == True
-                )
-                result = await session.execute(stmt)
-                sources = result.scalars().all()
+                sources, targets_by_type = await _get_sources_and_targets(session)
 
                 if not sources:
                     logger.warning("No source server configured")
                     return {'error': 'No source server configured. Mark a server as "Source" in Settings.'}
-
-                # Get all sync-enabled servers for target matching
-                stmt = select(PiholeServerModel).where(
-                    PiholeServerModel.sync_enabled == True,
-                    PiholeServerModel.enabled == True,
-                    PiholeServerModel.is_source == False
-                )
-                result = await session.execute(stmt)
-                all_targets = result.scalars().all()
-
-                # Group targets by server type
-                targets_by_type: Dict[str, List[PiholeServerModel]] = {}
-                for target in all_targets:
-                    target_type = target.server_type or 'pihole'
-                    if target_type not in targets_by_type:
-                        targets_by_type[target_type] = []
-                    targets_by_type[target_type].append(target)
 
                 # Build preview for each source
                 previews = []
@@ -232,24 +229,29 @@ class PiholeSyncService:
 
             source_config = await client.get_config()
             if not source_config:
-                logger.error(f"Failed to get config from {source.name}")
-                all_errors.append("Failed to get config from source")
+                if source_type == 'technitium':
+                    logger.warning(f"Could not fetch config summary from {source.name} (non-fatal, sync uses backup/restore)")
+                else:
+                    logger.error(f"Failed to get config from {source.name}")
+                    all_errors.append("Failed to get config from source")
 
-        # For Pi-hole, we need either teleporter or config. For AdGuard, just config.
-        if source_type == 'pihole' and not teleporter_data and not source_config:
-            logger.error("Failed to get any data from Pi-hole source")
+        if source_type in ('pihole', 'technitium') and not teleporter_data:
+            logger.error(f"Failed to get teleporter backup from {source_type} source")
             return None
         elif source_type == 'adguard' and not source_config:
             logger.error("Failed to get config from AdGuard source")
             return None
 
-        # Filter config to syncable sections (Pi-hole only, AdGuard sends full config)
+        # Filter config to syncable sections
         if source_type == 'pihole':
             sync_config = self._filter_config_for_sync(source_config) if source_config else {}
+        elif source_type == 'technitium':
+            sync_config = {}  # Technitium uses backup/restore only, no config patching
         else:
             sync_config = source_config
 
         successful_syncs = 0
+        gravity_errors: List[str] = []
         target_server_ids = [t.id for t in targets]
 
         for target in targets:
@@ -280,14 +282,11 @@ class PiholeSyncService:
                                 all_errors.append(error_msg)
                             target_success = False
 
-                    # Run gravity update
                     if run_gravity:
                         if not await client.run_gravity():
                             error_msg = f"{target.name}: Failed to run gravity"
                             logger.warning(error_msg)
-                            if len(all_errors) < max_errors:
-                                all_errors.append(error_msg)
-                            # Don't fail the whole sync for gravity failure
+                            gravity_errors.append(error_msg)
 
                     if target_success:
                         logger.info(f"Successfully synced to {target.name}")
@@ -306,6 +305,8 @@ class PiholeSyncService:
             status = 'partial'
         else:
             status = 'failed'
+
+        all_errors.extend(gravity_errors)
 
         items_synced = {}
         if source_config:
@@ -352,34 +353,11 @@ class PiholeSyncService:
         """
         try:
             async with async_session_maker() as session:
-                # Get ALL source servers (can be one per server type)
-                stmt = select(PiholeServerModel).where(
-                    PiholeServerModel.is_source == True,
-                    PiholeServerModel.enabled == True
-                )
-                result = await session.execute(stmt)
-                sources = result.scalars().all()
+                sources, targets_by_type = await _get_sources_and_targets(session)
 
                 if not sources:
                     logger.error("No source server configured")
                     return None
-
-                # Get all sync-enabled target servers
-                stmt = select(PiholeServerModel).where(
-                    PiholeServerModel.sync_enabled == True,
-                    PiholeServerModel.enabled == True,
-                    PiholeServerModel.is_source == False
-                )
-                result = await session.execute(stmt)
-                all_targets = result.scalars().all()
-
-                # Group targets by server type
-                targets_by_type: Dict[str, List[PiholeServerModel]] = {}
-                for target in all_targets:
-                    target_type = target.server_type or 'pihole'
-                    if target_type not in targets_by_type:
-                        targets_by_type[target_type] = []
-                    targets_by_type[target_type].append(target)
 
                 # Execute sync for each source
                 sync_history_ids = []
