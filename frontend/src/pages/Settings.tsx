@@ -22,6 +22,40 @@ const SERVER_TYPE_BADGE_COLORS: Record<ServerType, string> = {
   technitium: 'bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-300',
 };
 
+const INITIAL_SERVER_FORM: PiholeServerCreate = {
+  name: '',
+  url: '',
+  password: '',
+  username: '',
+  server_type: 'pihole',
+  skip_ssl_verify: false,
+  extra_config: {},
+  enabled: true,
+  is_source: false,
+  sync_enabled: false,
+};
+
+const INITIAL_OIDC_FORM: OIDCProviderCreate = {
+  name: '',
+  display_name: '',
+  issuer_url: '',
+  client_id: '',
+  client_secret: '',
+  scopes: 'openid profile email',
+  username_claim: 'preferred_username',
+  email_claim: 'email',
+  display_name_claim: 'name',
+  groups_claim: '',
+  admin_group: '',
+  enabled: true,
+};
+
+const SYNC_STATUS_COLORS: Record<string, string> = {
+  success: 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200',
+  partial: 'bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200',
+};
+const SYNC_STATUS_DEFAULT_COLOR = 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200';
+
 export default function Settings() {
   const [activeTab, setActiveTab] = useState<TabType>('servers');
   const [loading, setLoading] = useState(true);
@@ -32,18 +66,7 @@ export default function Settings() {
   const [servers, setServers] = useState<PiholeServer[]>([]);
   const [showServerForm, setShowServerForm] = useState(false);
   const [editingServer, setEditingServer] = useState<PiholeServer | null>(null);
-  const [serverFormData, setServerFormData] = useState<PiholeServerCreate>({
-    name: '',
-    url: '',
-    password: '',
-    username: '',
-    server_type: 'pihole',
-    skip_ssl_verify: false,
-    extra_config: {},
-    enabled: true,
-    is_source: false,
-    sync_enabled: false
-  });
+  const [serverFormData, setServerFormData] = useState<PiholeServerCreate>({ ...INITIAL_SERVER_FORM });
 
   const [pollingData, setPollingData] = useState({
     poll_interval_seconds: 60,
@@ -67,20 +90,7 @@ export default function Settings() {
   const [disableLocalAuth, setDisableLocalAuth] = useState(false);
   const [showOidcForm, setShowOidcForm] = useState(false);
   const [editingOidc, setEditingOidc] = useState<OIDCProvider | null>(null);
-  const [oidcFormData, setOidcFormData] = useState<OIDCProviderCreate>({
-    name: '',
-    display_name: '',
-    issuer_url: '',
-    client_id: '',
-    client_secret: '',
-    scopes: 'openid profile email',
-    username_claim: 'preferred_username',
-    email_claim: 'email',
-    display_name_claim: 'name',
-    groups_claim: '',
-    admin_group: '',
-    enabled: true,
-  });
+  const [oidcFormData, setOidcFormData] = useState<OIDCProviderCreate>({ ...INITIAL_OIDC_FORM });
   const [testingOidc, setTestingOidc] = useState(false);
   const [oidcTestResult, setOidcTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
@@ -241,18 +251,7 @@ export default function Settings() {
   const handleCancelServerForm = () => {
     setShowServerForm(false);
     setEditingServer(null);
-    setServerFormData({
-      name: '',
-      url: '',
-      password: '',
-      username: '',
-      server_type: 'pihole',
-      skip_ssl_verify: false,
-      extra_config: {},
-      enabled: true,
-      is_source: false,
-      sync_enabled: false
-    });
+    setServerFormData({ ...INITIAL_SERVER_FORM });
     setError(null);
     setTestResult(null);
   };
@@ -316,18 +315,10 @@ export default function Settings() {
       setError(null);
 
       let needsRestart = false;
-
-      const result1 = await settingsApi.updateSetting('poll_interval_seconds', String(pollingData.poll_interval_seconds));
-      if (result1.requires_restart) needsRestart = true;
-
-      const result2 = await settingsApi.updateSetting('query_lookback_seconds', String(pollingData.query_lookback_seconds));
-      if (result2.requires_restart) needsRestart = true;
-
-      const result3 = await settingsApi.updateSetting('retention_days', String(pollingData.retention_days));
-      if (result3.requires_restart) needsRestart = true;
-
-      const result4 = await settingsApi.updateSetting('max_catchup_seconds', String(pollingData.max_catchup_seconds));
-      if (result4.requires_restart) needsRestart = true;
+      for (const [key, value] of Object.entries(pollingData)) {
+        const result = await settingsApi.updateSetting(key, String(value));
+        if (result.requires_restart) needsRestart = true;
+      }
 
       if (needsRestart) {
         setShowRestartModal(true);
@@ -574,20 +565,7 @@ export default function Settings() {
   const handleCancelOidcForm = () => {
     setShowOidcForm(false);
     setEditingOidc(null);
-    setOidcFormData({
-      name: '',
-      display_name: '',
-      issuer_url: '',
-      client_id: '',
-      client_secret: '',
-      scopes: 'openid profile email',
-      username_claim: 'preferred_username',
-      email_claim: 'email',
-      display_name_claim: 'name',
-      groups_claim: '',
-      admin_group: '',
-      enabled: true,
-    });
+    setOidcFormData({ ...INITIAL_OIDC_FORM });
     setError(null);
     setOidcTestResult(null);
   };
@@ -641,7 +619,8 @@ export default function Settings() {
             if (response.ok) {
               return true;
             }
-          } catch (e) {
+          } catch {
+            // Expected — server is restarting
           }
         }
         return false;
@@ -685,6 +664,14 @@ export default function Settings() {
       </div>
     );
   }
+
+  const anotherServerIsSource = servers.some(s =>
+    s.is_source &&
+    s.server_type === serverFormData.server_type &&
+    (!editingServer || s.id !== editingServer.id)
+  );
+  const sourceDisabled = serverFormData.sync_enabled || anotherServerIsSource;
+  const targetDisabled = serverFormData.is_source;
 
   return (
     <div className="p-6">
@@ -835,7 +822,7 @@ export default function Settings() {
                       <input
                         type="text"
                         id="log_app_name"
-                        value={String(serverFormData.extra_config?.log_app_name ?? '')}
+                        value={serverFormData.extra_config?.log_app_name ?? ''}
                         onChange={(e) => setServerFormData({
                           ...serverFormData,
                           extra_config: { ...serverFormData.extra_config, log_app_name: e.target.value }
@@ -854,7 +841,7 @@ export default function Settings() {
                       <input
                         type="text"
                         id="log_app_class_path"
-                        value={String(serverFormData.extra_config?.log_app_class_path ?? '')}
+                        value={serverFormData.extra_config?.log_app_class_path ?? ''}
                         onChange={(e) => setServerFormData({
                           ...serverFormData,
                           extra_config: { ...serverFormData.extra_config, log_app_class_path: e.target.value }
@@ -892,85 +879,62 @@ export default function Settings() {
                     Skip SSL verification (for self-signed certificates)
                   </label>
                 </div>
-                {/* Sync options - sync only works within the same server type */}
-                {(() => {
-                  const anotherServerIsSource = servers.some(s =>
-                    s.is_source &&
-                    s.server_type === serverFormData.server_type &&
-                    (!editingServer || s.id !== editingServer.id)
-                  );
-                  const sourceDisabled = serverFormData.sync_enabled || anotherServerIsSource;
-                  const targetDisabled = serverFormData.is_source;
-
-                  return (
-                    <>
-                      <div className="flex items-center">
-                        <input
-                          type="checkbox"
-                          id="server_is_source"
-                          checked={serverFormData.is_source}
-                          onChange={(e) => setServerFormData({
-                            ...serverFormData,
-                            is_source: e.target.checked,
-                            sync_enabled: e.target.checked ? false : serverFormData.sync_enabled
-                          })}
-                          disabled={sourceDisabled}
-                          className={`h-4 w-4 border-gray-300 rounded ${
-                            sourceDisabled
-                              ? 'text-gray-400 cursor-not-allowed'
-                              : 'text-blue-600'
-                          }`}
-                        />
-                        <label
-                          htmlFor="server_is_source"
-                          className={`ml-2 text-sm ${
-                            sourceDisabled
-                              ? 'text-gray-400 dark:text-gray-500'
-                              : 'text-gray-700 dark:text-gray-300'
-                          }`}
-                        >
-                          Source (sync from this server)
-                          {anotherServerIsSource && !serverFormData.sync_enabled && (
-                            <span className="text-xs text-gray-400 dark:text-gray-500 ml-1">
-                              - another {serverFormData.server_type} server is source
-                            </span>
-                          )}
-                        </label>
-                      </div>
-                      <div className="flex items-center">
-                        <input
-                          type="checkbox"
-                          id="server_sync_enabled"
-                          checked={serverFormData.sync_enabled}
-                          onChange={(e) => setServerFormData({
-                            ...serverFormData,
-                            sync_enabled: e.target.checked,
-                            is_source: e.target.checked ? false : serverFormData.is_source
-                          })}
-                          disabled={targetDisabled}
-                          className={`h-4 w-4 border-gray-300 rounded ${
-                            targetDisabled
-                              ? 'text-gray-400 cursor-not-allowed'
-                              : 'text-blue-600'
-                          }`}
-                        />
-                        <label
-                          htmlFor="server_sync_enabled"
-                          className={`ml-2 text-sm ${
-                            targetDisabled
-                              ? 'text-gray-400 dark:text-gray-500'
-                              : 'text-gray-700 dark:text-gray-300'
-                          }`}
-                        >
-                          Sync target (receive syncs from source)
-                        </label>
-                      </div>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
-                        Note: Sync only works between servers of the same type ({SERVER_TYPE_LABELS[serverFormData.server_type || 'pihole']} to {SERVER_TYPE_LABELS[serverFormData.server_type || 'pihole']})
-                      </p>
-                    </>
-                  );
-                })()}
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    id="server_is_source"
+                    checked={serverFormData.is_source}
+                    onChange={(e) => setServerFormData({
+                      ...serverFormData,
+                      is_source: e.target.checked,
+                      sync_enabled: e.target.checked ? false : serverFormData.sync_enabled
+                    })}
+                    disabled={sourceDisabled}
+                    className={`h-4 w-4 border-gray-300 rounded ${
+                      sourceDisabled ? 'text-gray-400 cursor-not-allowed' : 'text-blue-600'
+                    }`}
+                  />
+                  <label
+                    htmlFor="server_is_source"
+                    className={`ml-2 text-sm ${
+                      sourceDisabled ? 'text-gray-400 dark:text-gray-500' : 'text-gray-700 dark:text-gray-300'
+                    }`}
+                  >
+                    Source (sync from this server)
+                    {anotherServerIsSource && !serverFormData.sync_enabled && (
+                      <span className="text-xs text-gray-400 dark:text-gray-500 ml-1">
+                        - another {serverFormData.server_type} server is source
+                      </span>
+                    )}
+                  </label>
+                </div>
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    id="server_sync_enabled"
+                    checked={serverFormData.sync_enabled}
+                    onChange={(e) => setServerFormData({
+                      ...serverFormData,
+                      sync_enabled: e.target.checked,
+                      is_source: e.target.checked ? false : serverFormData.is_source
+                    })}
+                    disabled={targetDisabled}
+                    className={`h-4 w-4 border-gray-300 rounded ${
+                      targetDisabled ? 'text-gray-400 cursor-not-allowed' : 'text-blue-600'
+                    }`}
+                  />
+                  <label
+                    htmlFor="server_sync_enabled"
+                    className={`ml-2 text-sm ${
+                      targetDisabled ? 'text-gray-400 dark:text-gray-500' : 'text-gray-700 dark:text-gray-300'
+                    }`}
+                  >
+                    Sync target (receive syncs from source)
+                  </label>
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Note: Sync only works between servers of the same type ({SERVER_TYPE_LABELS[serverFormData.server_type || 'pihole']} to {SERVER_TYPE_LABELS[serverFormData.server_type || 'pihole']})
+                </p>
               </div>
 
               {testResult && (
@@ -1285,6 +1249,8 @@ export default function Settings() {
                     <tr>
                       <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase w-8"></th>
                       <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Time</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Server Type</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Source → Target(s)</th>
                       <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Type</th>
                       <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Status</th>
                     </tr>
@@ -1304,12 +1270,30 @@ export default function Settings() {
                           <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-300 whitespace-nowrap">
                             {new Date(sync.started_at).toLocaleString()}
                           </td>
+                          <td className="px-3 py-2 text-sm">
+                            {sync.items_synced?._server_type ? (
+                              <span className={`px-2 py-0.5 rounded text-xs font-medium ${SERVER_TYPE_BADGE_COLORS[sync.items_synced._server_type as ServerType] || 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-300'}`}>
+                                {SERVER_TYPE_LABELS[sync.items_synced._server_type as ServerType] || sync.items_synced._server_type as string}
+                              </span>
+                            ) : (
+                              <span className="text-gray-400 dark:text-gray-500">—</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-300 whitespace-nowrap">
+                            {sync.items_synced?._source_server_name ? (
+                              <>
+                                {sync.items_synced._source_server_name}
+                                {' → '}
+                                {sync.items_synced._target_server_names?.join(', ') || '—'}
+                              </>
+                            ) : (
+                              <span className="text-gray-400 dark:text-gray-500">—</span>
+                            )}
+                          </td>
                           <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-300">{sync.sync_type}</td>
                           <td className="px-3 py-2 text-sm">
                             <span className={`px-2 py-1 rounded-full text-xs ${
-                              sync.status === 'success' ? 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200' :
-                              sync.status === 'partial' ? 'bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200' :
-                              'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200'
+                              SYNC_STATUS_COLORS[sync.status] || SYNC_STATUS_DEFAULT_COLOR
                             }`}>
                               {sync.status}
                             </span>
@@ -1317,7 +1301,7 @@ export default function Settings() {
                         </tr>
                         {expandedSyncId === sync.id && (
                           <tr>
-                            <td colSpan={4} className="px-3 py-3 bg-gray-50 dark:bg-gray-700">
+                            <td colSpan={6} className="px-3 py-3 bg-gray-50 dark:bg-gray-700">
                               <div className="text-xs text-gray-600 dark:text-gray-400 space-y-2">
                                 {sync.completed_at && (
                                   <div>
@@ -1340,9 +1324,9 @@ export default function Settings() {
                                 {sync.items_synced && (
                                   <div>
                                     <span className="font-medium">Items synced:</span>{' '}
-                                    {Object.entries(sync.items_synced as Record<string, unknown>)
+                                    {Object.entries(sync.items_synced)
                                       .filter(([key]) => !key.startsWith('_'))
-                                      .filter(([, value]) => typeof value === 'number' && (value as number) > 0)
+                                      .filter(([, value]) => typeof value === 'number' && value > 0)
                                       .map(([key, value]) => `${key.replace('dns_', '')}: ${value}`)
                                       .join(', ') || 'None'}
                                   </div>

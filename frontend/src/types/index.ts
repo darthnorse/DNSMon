@@ -53,6 +53,12 @@ export interface QuerySearchParams {
 
 export type ServerType = 'pihole' | 'adguard' | 'technitium';
 
+export interface ExtraConfig {
+  log_app_name?: string;
+  log_app_class_path?: string;
+  [key: string]: string | undefined;
+}
+
 export interface PiholeServer {
   id: number;
   name: string;
@@ -61,7 +67,7 @@ export interface PiholeServer {
   username: string | null;
   server_type: ServerType;
   skip_ssl_verify: boolean;
-  extra_config: Record<string, string> | null;
+  extra_config: ExtraConfig | null;
   enabled: boolean;
   display_order: number;
   is_source: boolean;
@@ -78,7 +84,7 @@ export interface PiholeServerCreate {
   username?: string;
   server_type?: ServerType;
   skip_ssl_verify?: boolean;
-  extra_config?: Record<string, string>;
+  extra_config?: ExtraConfig;
   enabled?: boolean;
   is_source?: boolean;
   sync_enabled?: boolean;
@@ -135,12 +141,7 @@ export interface StatisticsParams {
   to_date?: string;
 }
 
-export interface StatisticsClientsParams {
-  period?: string;
-  servers?: string;
-  from_date?: string;
-  to_date?: string;
-}
+export type StatisticsClientsParams = Omit<StatisticsParams, 'clients'>;
 
 export interface ClientInfo {
   client_ip: string;
@@ -410,6 +411,8 @@ export interface SyncItemsSynced {
   _teleporter_size_bytes?: number;
   _config_sections?: string[];
   _server_type?: string;
+  _source_server_name?: string;
+  _target_server_names?: string[];
   [key: string]: unknown;
 }
 

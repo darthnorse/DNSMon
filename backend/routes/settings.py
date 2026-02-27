@@ -278,7 +278,11 @@ async def test_pihole_connection(
     _: User = Depends(require_admin)
 ):
     """Test connection to a DNS ad-blocker server (Pi-hole, AdGuard Home, or Technitium)"""
-    from ..utils import create_client_from_server
+    from ..utils import create_client_from_server, async_validate_url_safety
+
+    safety_err = await async_validate_url_safety(server_data.url)
+    if safety_err:
+        return {"success": False, "message": f"Invalid URL: {safety_err}"}
 
     server_type_display = SERVER_TYPE_DISPLAY[server_data.server_type or 'pihole']
 

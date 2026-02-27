@@ -60,8 +60,6 @@ class TechnitiumClient(DNSBlockerClient):
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.client.aclose()
 
-    # ========== Internal Helpers ==========
-
     def _auth_params(self, extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Build query params with auth token."""
         params: Dict[str, Any] = {'token': self.password}
@@ -98,8 +96,6 @@ class TechnitiumClient(DNSBlockerClient):
             logger.error(f"POST {path} error for {self.server_name}: {e}")
         return False
 
-    # ========== Authentication ==========
-
     async def authenticate(self) -> bool:
         """Verify the API token by fetching dashboard stats."""
         data = await self._get('/api/dashboard/stats/get', {'type': 'LastHour'})
@@ -108,8 +104,6 @@ class TechnitiumClient(DNSBlockerClient):
             return True
         logger.error(f"Authentication failed for {self.server_name}")
         return False
-
-    # ========== Query Logs ==========
 
     def _map_status(self, response_type: str) -> str:
         if response_type in _BLOCKED_TYPES:
@@ -141,56 +135,49 @@ class TechnitiumClient(DNSBlockerClient):
 
     async def get_queries(self, from_timestamp: int, until_timestamp: int) -> Optional[List[Dict[str, Any]]]:
         """Fetch query logs from the Technitium Query Logs DNS App."""
-        try:
-            start_dt = datetime.fromtimestamp(from_timestamp, tz=timezone.utc)
-            end_dt = datetime.fromtimestamp(until_timestamp, tz=timezone.utc)
+        start_dt = datetime.fromtimestamp(from_timestamp, tz=timezone.utc)
+        end_dt = datetime.fromtimestamp(until_timestamp, tz=timezone.utc)
 
-            results: List[Dict[str, Any]] = []
-            page = 1
-            per_page = 5000
-            max_pages = 200
+        results: List[Dict[str, Any]] = []
+        page = 1
+        per_page = 5000
+        max_pages = 200
 
-            while page <= max_pages:
-                data = await self._get('/api/logs/query', {
-                    'name': self.log_app_name,
-                    'classPath': self.log_app_class_path,
-                    'pageNumber': page,
-                    'entriesPerPage': per_page,
-                    'start': start_dt.strftime('%Y-%m-%dT%H:%M:%S.000Z'),
-                    'end': end_dt.strftime('%Y-%m-%dT%H:%M:%S.000Z'),
-                })
+        while page <= max_pages:
+            data = await self._get('/api/logs/query', {
+                'name': self.log_app_name,
+                'classPath': self.log_app_class_path,
+                'pageNumber': page,
+                'entriesPerPage': per_page,
+                'start': start_dt.strftime('%Y-%m-%dT%H:%M:%S.000Z'),
+                'end': end_dt.strftime('%Y-%m-%dT%H:%M:%S.000Z'),
+            })
 
-                if not data:
-                    if page == 1:
-                        logger.error(f"Failed to fetch query logs from {self.server_name}")
-                        return None
-                    logger.warning(f"Failed to fetch page {page} from {self.server_name}, returning {len(results)} queries (results may be incomplete)")
-                    break
+            if not data:
+                if page == 1:
+                    logger.error(f"Failed to fetch query logs from {self.server_name}")
+                    return None
+                logger.warning(f"Failed to fetch page {page} from {self.server_name}, returning {len(results)} queries (results may be incomplete)")
+                break
 
-                entries = data.get('response', {}).get('entries', [])
-                if not entries:
-                    break
+            entries = data.get('response', {}).get('entries', [])
+            if not entries:
+                break
 
-                for entry in entries:
-                    transformed = self._transform_query(entry)
-                    if transformed is not None:
-                        results.append(transformed)
+            for entry in entries:
+                transformed = self._transform_query(entry)
+                if transformed is not None:
+                    results.append(transformed)
 
-                if len(entries) < per_page:
-                    break
-                page += 1
+            if len(entries) < per_page:
+                break
+            page += 1
 
-            if page > max_pages:
-                logger.warning(f"Hit max page limit ({max_pages}) for {self.server_name}, results truncated")
+        if page > max_pages:
+            logger.warning(f"Hit max page limit ({max_pages}) for {self.server_name}, results truncated")
 
-            logger.info(f"Retrieved {len(results)} queries from {self.server_name}")
-            return results
-
-        except Exception as e:
-            logger.error(f"Error fetching queries from {self.server_name}: {e}")
-            return None
-
-    # ========== Blocking Control ==========
+        logger.info(f"Retrieved {len(results)} queries from {self.server_name}")
+        return results
 
     async def get_blocking_status(self) -> Optional[bool]:
         data = await self._get('/api/settings/get')
@@ -199,81 +186,83 @@ class TechnitiumClient(DNSBlockerClient):
         return None
 
     async def set_blocking(self, enabled: bool, timer: Optional[int] = None) -> bool:
-        try:
-            if not enabled and timer is not None:
-                minutes = max(1, (timer + 59) // 60)
-                data = await self._get('/api/settings/temporaryDisableBlocking', {'minutes': minutes})
-                if data:
-                    logger.info(f"Blocking temporarily disabled for {minutes} min on {self.server_name}")
-                    return True
-                return False
-
-            data = await self._get('/api/settings/set', {'enableBlocking': str(enabled).lower()})
+        if not enabled and timer is not None:
+            minutes = max(1, (timer + 59) // 60)
+            data = await self._get('/api/settings/temporaryDisableBlocking', {'minutes': minutes})
             if data:
-                action = 'enabled' if enabled else 'disabled'
-                logger.info(f"Blocking {action} on {self.server_name}")
+                logger.info(f"Blocking temporarily disabled for {minutes} min on {self.server_name}")
                 return True
             return False
-        except Exception as e:
-            logger.error(f"Error setting blocking on {self.server_name}: {e}")
-            return False
 
-    # ========== Domain Lists (Blocked/Allowed Zones) ==========
+        data = await self._get('/api/settings/set', {'enableBlocking': str(enabled).lower()})
+        if data:
+            action = 'enabled' if enabled else 'disabled'
+            logger.info(f"Blocking {action} on {self.server_name}")
+            return True
+        return False
 
     async def get_whitelist(self) -> List[Dict[str, Any]]:
-        return await self._get_zone_list('/api/zones/allowed/list')
+        return await self._get_zone_list('/api/allowed/list')
 
     async def get_blacklist(self) -> List[Dict[str, Any]]:
-        return await self._get_zone_list('/api/zones/blocked/list')
+        return await self._get_zone_list('/api/blocked/list')
 
     async def _get_zone_list(self, endpoint: str) -> List[Dict[str, Any]]:
-        data = await self._get(endpoint)
+        """Traverse the Technitium zone tree to collect all leaf zones."""
+        results: List[Dict[str, Any]] = []
+        stack: List[Optional[str]] = [None]
+        while stack:
+            domain = stack.pop()
+            params = {'domain': domain} if domain else None
+            data = await self._get(endpoint, params)
+            if not data:
+                continue
+            response = data.get('response', {})
+            zones = response.get('zones', [])
+            if zones:
+                for z in zones:
+                    if isinstance(z, str) and z:
+                        stack.append(z)
+            elif response.get('domain'):
+                results.append({'domain': response['domain'], 'enabled': True})
+        return results
+
+    async def _zone_action(self, endpoint: str, domain: str, success_msg: str) -> bool:
+        data = await self._get(endpoint, {'domain': domain})
         if data:
-            zones = data.get('response', {}).get('zones', [])
-            return [
-                {'domain': z['name'], 'enabled': not z.get('disabled', False)}
-                for z in zones if z.get('name')
-            ]
-        return []
+            logger.info(f"{success_msg} on {self.server_name}")
+            return True
+        return False
 
     async def add_to_whitelist(self, domain: str) -> bool:
-        data = await self._get('/api/zones/allowed/add', {'zone': domain})
-        if data:
-            logger.info(f"Added {domain} to allowed zones on {self.server_name}")
-            return True
-        return False
+        return await self._zone_action('/api/allowed/add', domain, f"Added {domain} to allowed zones")
 
     async def add_to_blacklist(self, domain: str) -> bool:
-        data = await self._get('/api/zones/blocked/add', {'zone': domain})
-        if data:
-            logger.info(f"Added {domain} to blocked zones on {self.server_name}")
-            return True
-        return False
+        return await self._zone_action('/api/blocked/add', domain, f"Added {domain} to blocked zones")
 
     async def remove_from_whitelist(self, domain: str) -> bool:
-        data = await self._get('/api/zones/allowed/delete', {'zone': domain})
-        if data:
-            logger.info(f"Removed {domain} from allowed zones on {self.server_name}")
-            return True
-        return False
+        return await self._zone_action('/api/allowed/delete', domain, f"Removed {domain} from allowed zones")
 
     async def remove_from_blacklist(self, domain: str) -> bool:
-        data = await self._get('/api/zones/blocked/delete', {'zone': domain})
-        if data:
-            logger.info(f"Removed {domain} from blocked zones on {self.server_name}")
-            return True
-        return False
-
-    # ========== Backup / Restore (Sync) ==========
+        return await self._zone_action('/api/blocked/delete', domain, f"Removed {domain} from blocked zones")
 
     async def get_teleporter(self) -> Optional[bytes]:
         """Download full Technitium backup as a zip file."""
         try:
             response = await self.client.get(
                 f"{self.url}/api/settings/backup",
-                params=self._auth_params()
+                params=self._auth_params({
+                    'blockLists': 'true',
+                    'dnsSettings': 'true',
+                    'allowedZones': 'true',
+                    'blockedZones': 'true',
+                    'zones': 'true',
+                })
             )
             if response.status_code == 200:
+                if not response.content.startswith(b'PK\x03\x04'):
+                    logger.error(f"Backup from {self.server_name} is not a valid zip file")
+                    return None
                 logger.info(f"Downloaded backup from {self.server_name} ({len(response.content)} bytes)")
                 return response.content
             logger.error(f"Failed to get backup from {self.server_name}: HTTP {response.status_code} - {response.text[:200]}")
@@ -290,16 +279,10 @@ class TechnitiumClient(DNSBlockerClient):
                 params=self._auth_params(),
                 files={'file': ('backup.zip', backup_data, 'application/zip')}
             )
-            if response.status_code == 200 and response.json().get('status') == 'ok':
-                logger.info(f"Restored backup to {self.server_name}")
-                return True
-            logger.error(f"Failed to restore backup to {self.server_name}: HTTP {response.status_code}")
-            return False
+            return self._check_response(response, '/api/settings/restore', 'POST') is not None
         except Exception as e:
             logger.error(f"Error restoring backup to {self.server_name}: {e}")
             return False
-
-    # ========== Config (for sync summary) ==========
 
     async def get_config(self) -> Optional[Dict[str, Any]]:
         """Get Technitium settings for sync summary."""

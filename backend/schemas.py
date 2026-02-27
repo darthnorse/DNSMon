@@ -291,9 +291,13 @@ def _check_extra_config(v: Optional[dict]) -> Optional[dict]:
         unknown = set(v.keys()) - VALID_EXTRA_CONFIG_KEYS
         if unknown:
             raise ValueError(f"Unknown extra_config keys: {unknown}")
+        cleaned = {}
         for key, val in v.items():
             if not isinstance(val, str):
                 raise ValueError(f"extra_config values must be strings, got {type(val).__name__} for '{key}'")
+            if val.strip():
+                cleaned[key] = val.strip()
+        return cleaned or None
     return v
 
 

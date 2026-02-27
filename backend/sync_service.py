@@ -310,10 +310,11 @@ class PiholeSyncService:
         items_synced = {}
         if source_config:
             items_synced.update(self._get_config_summary(source_config, source_type))
-        # Add metadata separately (not counted in "items" total)
         items_synced['_teleporter_size_bytes'] = len(teleporter_data) if teleporter_data else 0
         items_synced['_config_sections'] = list(sync_config.keys()) if sync_config else []
         items_synced['_server_type'] = source_type
+        items_synced['_source_server_name'] = source.name
+        items_synced['_target_server_names'] = [t.name for t in targets]
 
         sync_history = SyncHistory(
             sync_type=sync_type,
@@ -398,7 +399,32 @@ class PiholeSyncService:
                 result = await session.execute(stmt)
                 history = result.scalars().all()
 
-                return [h.to_dict() for h in history]
+                entries = [h.to_dict() for h in history]
+
+                server_ids_needed: set = set()
+                for entry in entries:
+                    if not entry.get('items_synced', {}).get('_source_server_name'):
+                        server_ids_needed.add(entry['source_server_id'])
+                        for tid in entry.get('target_server_ids', []):
+                            server_ids_needed.add(tid)
+
+                if server_ids_needed:
+                    stmt = select(PiholeServerModel).where(PiholeServerModel.id.in_(server_ids_needed))
+                    result = await session.execute(stmt)
+                    name_map = {s.id: s.name for s in result.scalars()}
+
+                    for entry in entries:
+                        items = entry.get('items_synced', {})
+                        if not items.get('_source_server_name'):
+                            source_name = name_map.get(entry['source_server_id'])
+                            if source_name:
+                                items['_source_server_name'] = source_name
+                                items['_target_server_names'] = [
+                                    name_map[tid] for tid in entry.get('target_server_ids', [])
+                                    if tid in name_map
+                                ]
+
+                return entries
 
         except Exception as e:
             logger.error(f"Error fetching sync history: {e}", exc_info=True)
