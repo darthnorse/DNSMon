@@ -840,11 +840,11 @@ export default function Settings() {
                           ...serverFormData,
                           extra_config: { ...serverFormData.extra_config, log_app_name: e.target.value }
                         })}
-                        placeholder="QueryLogsSqlite"
+                        placeholder="Query Logs (Sqlite)"
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                       />
                       <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                        Name of the DNS App providing query logs (default: QueryLogsSqlite)
+                        Name of the DNS App providing query logs (default: Query Logs (Sqlite))
                       </p>
                     </div>
                     <div>

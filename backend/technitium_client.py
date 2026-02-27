@@ -33,7 +33,7 @@ class TechnitiumClient(DNSBlockerClient):
         password: str,
         server_name: str,
         skip_ssl_verify: bool = False,
-        log_app_name: str = 'QueryLogsSqlite',
+        log_app_name: str = 'Query Logs (Sqlite)',
         log_app_class_path: str = 'QueryLogsSqlite.App',
         **kwargs,
     ):

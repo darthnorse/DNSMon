@@ -50,7 +50,7 @@ def create_dns_client(
         return TechnitiumClient(
             url, password, server_name,
             skip_ssl_verify=skip_ssl_verify,
-            log_app_name=cfg.get('log_app_name') or 'QueryLogsSqlite',
+            log_app_name=cfg.get('log_app_name') or 'Query Logs (Sqlite)',
             log_app_class_path=cfg.get('log_app_class_path') or 'QueryLogsSqlite.App',
             **kwargs
         )
