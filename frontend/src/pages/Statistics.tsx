@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { statisticsApi, settingsApi } from '../utils/api';
+import { getErrorMessage } from '../utils/errors';
 import type { Statistics, PiholeServer, ClientInfo } from '../types';
 import { format } from 'date-fns';
 import {
@@ -19,6 +20,15 @@ import {
 } from 'recharts';
 
 type Period = '24h' | '7d' | '30d' | 'custom';
+
+const TOOLTIP_CONTENT_STYLE = {
+  backgroundColor: '#1F2937',
+  border: '1px solid #374151',
+  borderRadius: '0.375rem',
+  color: '#fff',
+};
+const TOOLTIP_LABEL_STYLE = { color: '#9CA3AF' };
+const TOOLTIP_ITEM_STYLE = { color: '#fff' };
 
 function toLocalDatetimeString(date: Date): string {
   const pad = (n: number) => n.toString().padStart(2, '0');
@@ -140,8 +150,9 @@ export default function StatisticsPage() {
       const allIps = clientList.map(c => c.client_ip);
       setSelectedClients(allIps);
       setPendingClients(allIps);
-    } catch (err) {
-      console.error('Failed to load clients:', err);
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, 'Failed to load statistics'));
+      setLoading(false);
     }
   };
 
@@ -164,9 +175,8 @@ export default function StatisticsPage() {
       const data = await statisticsApi.get(params);
       setStats(data);
       setError(null);
-    } catch (err) {
-      setError('Failed to load statistics');
-      console.error(err);
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, 'Failed to load statistics'));
     } finally {
       setLoading(false);
     }
@@ -181,7 +191,6 @@ export default function StatisticsPage() {
   };
 
   const selectAllServers = () => {
-    // Always clear selection to show all servers
     setSelectedServers([]);
   };
 
@@ -194,7 +203,6 @@ export default function StatisticsPage() {
   };
 
   const selectAllClients = () => {
-    // Toggle between all selected and none selected
     if (pendingClients.length === clients.length && clients.length > 0) {
       setPendingClients([]);
     } else {
@@ -273,7 +281,7 @@ export default function StatisticsPage() {
     );
   }
 
-  if (error && !stats) {
+  if (!stats && error) {
     return (
       <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800/50 text-red-700 dark:text-red-300 px-4 py-3 rounded">
         {error}
@@ -543,6 +551,12 @@ export default function StatisticsPage() {
         </div>
       )}
 
+      {error && (
+        <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800/50 text-red-700 dark:text-red-300 px-4 py-3 rounded">
+          {error}
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <StatCard label="24 Hours" value={formatNumber(stats.queries_today)} highlight={period === '24h'} />
         <StatCard label="7 Days" value={formatNumber(stats.queries_week)} highlight={period === '7d'} />
@@ -574,14 +588,9 @@ export default function StatisticsPage() {
                 </Pie>
                 <Tooltip
                   formatter={(value: number) => value.toLocaleString()}
-                  contentStyle={{
-                    backgroundColor: '#1F2937',
-                    border: '1px solid #374151',
-                    borderRadius: '0.375rem',
-                    color: '#fff',
-                  }}
-                  labelStyle={{ color: '#9CA3AF' }}
-                  itemStyle={{ color: '#fff' }}
+                  contentStyle={TOOLTIP_CONTENT_STYLE}
+                  labelStyle={TOOLTIP_LABEL_STYLE}
+                  itemStyle={TOOLTIP_ITEM_STYLE}
                 />
               </PieChart>
             </ResponsiveContainer>
@@ -616,14 +625,9 @@ export default function StatisticsPage() {
                 />
                 <Tooltip
                   formatter={(value: number) => value.toLocaleString()}
-                  contentStyle={{
-                    backgroundColor: '#1F2937',
-                    border: '1px solid #374151',
-                    borderRadius: '0.375rem',
-                    color: '#fff',
-                  }}
-                  labelStyle={{ color: '#9CA3AF' }}
-                  itemStyle={{ color: '#fff' }}
+                  contentStyle={TOOLTIP_CONTENT_STYLE}
+                  labelStyle={TOOLTIP_LABEL_STYLE}
+                  itemStyle={TOOLTIP_ITEM_STYLE}
                 />
                 <Legend />
                 <Line
@@ -718,18 +722,13 @@ export default function StatisticsPage() {
                 />
                 <Tooltip
                   formatter={(value: number) => value.toLocaleString()}
-                  contentStyle={{
-                    backgroundColor: '#1F2937',
-                    border: '1px solid #374151',
-                    borderRadius: '0.375rem',
-                    color: '#fff',
-                  }}
+                  contentStyle={TOOLTIP_CONTENT_STYLE}
                   wrapperStyle={{
                     backgroundColor: '#1F2937',
                     borderRadius: '0.375rem',
                   }}
-                  labelStyle={{ color: '#9CA3AF' }}
-                  itemStyle={{ color: '#fff' }}
+                  labelStyle={TOOLTIP_LABEL_STYLE}
+                  itemStyle={TOOLTIP_ITEM_STYLE}
                   cursor={{ fill: 'rgba(55, 65, 81, 0.3)' }}
                 />
                 <Legend />

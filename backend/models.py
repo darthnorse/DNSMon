@@ -16,24 +16,21 @@ class Query(Base):
     __tablename__ = "queries"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    timestamp = Column(DateTime(timezone=True), nullable=False, index=True)
+    timestamp = Column(DateTime(timezone=True), nullable=False)
     domain = Column(String(255), nullable=False, index=True)
     client_ip = Column(String(45), nullable=False, index=True)  # IPv6 can be up to 45 chars
     client_hostname = Column(String(255), nullable=True, index=True)
     query_type = Column(String(10), nullable=True)  # A, AAAA, PTR, etc.
     status = Column(String(50), nullable=True)  # blocked, allowed, etc.
-    server = Column(String(100), nullable=False, index=True)
+    server = Column(String(100), nullable=False)
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
     # Composite indexes for common query patterns
     __table_args__ = (
         Index('idx_queries_timestamp_domain', 'timestamp', 'domain'),
         Index('idx_queries_timestamp_client', 'timestamp', 'client_ip'),
-        Index('idx_queries_domain_client', 'domain', 'client_ip'),
         Index('idx_queries_pihole_timestamp', 'server', 'timestamp'),
-        Index('idx_queries_client_ip_timestamp', 'client_ip', 'timestamp'),  # For top clients stats query
-        Index('idx_queries_timestamp_status', 'timestamp', 'status'),  # For blocked query counts in statistics
-        # Unique constraint to prevent duplicates
+        Index('idx_queries_timestamp_status', 'timestamp', 'status'),
         Index('idx_queries_unique', 'timestamp', 'domain', 'client_ip', 'server', unique=True),
     )
 

@@ -1,13 +1,10 @@
-"""
-Statistics routes
-"""
 import asyncio
+from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
-from typing import Optional
-from datetime import datetime, timedelta, timezone
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db, async_session_maker
 from ..models import Query, User, QueryStatsHourly, ClientStatsHourly, DomainStatsHourly
@@ -30,72 +27,24 @@ async def get_stats(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user)
 ):
-    """Get dashboard statistics"""
-    now = datetime.now(timezone.utc)
-    last_24h = now - timedelta(hours=24)
-    last_7d = now - timedelta(days=7)
+    """Get dashboard statistics (24h counts only).
 
-    total_stmt = select(func.count(Query.id))
-    total_result = await db.execute(total_stmt)
-    total_queries = total_result.scalar()
+    Heavier analytics (top domains, clients, server breakdowns, time series)
+    live on /api/statistics which uses pre-aggregated hourly tables.
+    """
+    last_24h = datetime.now(timezone.utc) - timedelta(hours=24)
 
-    last_24h_stmt = select(func.count(Query.id)).where(Query.timestamp >= last_24h)
-    last_24h_result = await db.execute(last_24h_stmt)
-    queries_last_24h = last_24h_result.scalar()
-
-    blocks_24h_stmt = select(func.count(Query.id)).where(
-        and_(
-            Query.timestamp >= last_24h,
-            Query.status.in_(BLOCKED_STATUSES)
-        )
+    result = await db.execute(
+        select(
+            func.count(Query.id).label('total'),
+            func.count(Query.id).filter(Query.status.in_(BLOCKED_STATUSES)).label('blocked'),
+        ).where(Query.timestamp >= last_24h)
     )
-    blocks_24h_result = await db.execute(blocks_24h_stmt)
-    blocks_last_24h = blocks_24h_result.scalar()
-
-    last_7d_stmt = select(func.count(Query.id)).where(Query.timestamp >= last_7d)
-    last_7d_result = await db.execute(last_7d_stmt)
-    queries_last_7d = last_7d_result.scalar()
-
-    top_domains_stmt = (
-        select(Query.domain, func.count(Query.id).label('count'))
-        .where(Query.timestamp >= last_7d)
-        .group_by(Query.domain)
-        .order_by(func.count(Query.id).desc())
-        .limit(10)
-    )
-    top_domains_result = await db.execute(top_domains_stmt)
-    top_domains = [{"domain": row[0], "count": row[1]} for row in top_domains_result]
-
-    top_clients_stmt = (
-        select(Query.client_ip, Query.client_hostname, func.count(Query.id).label('count'))
-        .where(Query.timestamp >= last_7d)
-        .group_by(Query.client_ip, Query.client_hostname)
-        .order_by(func.count(Query.id).desc())
-        .limit(10)
-    )
-    top_clients_result = await db.execute(top_clients_stmt)
-    top_clients = [
-        {"client_ip": row[0], "client_hostname": row[1], "count": row[2]}
-        for row in top_clients_result
-    ]
-
-    by_server_stmt = (
-        select(Query.server, func.count(Query.id).label('count'))
-        .where(Query.timestamp >= last_7d)
-        .group_by(Query.server)
-        .order_by(func.count(Query.id).desc())
-    )
-    by_server_result = await db.execute(by_server_stmt)
-    queries_by_server = [{"server": row[0], "count": row[1]} for row in by_server_result]
+    row = result.one()
 
     return StatsResponse(
-        total_queries=total_queries or 0,
-        queries_last_24h=queries_last_24h or 0,
-        blocks_last_24h=blocks_last_24h or 0,
-        queries_last_7d=queries_last_7d or 0,
-        top_domains=top_domains,
-        top_clients=top_clients,
-        queries_by_server=queries_by_server
+        queries_last_24h=row.total or 0,
+        blocks_last_24h=row.blocked or 0,
     )
 
 
@@ -198,7 +147,7 @@ async def get_statistics_clients(
         .where(Query.timestamp >= period_start)
         .group_by(Query.client_ip, Query.client_hostname)
         .order_by(func.count(Query.id).desc())
-        .limit(500)  # Limit to top 500 clients
+        .limit(500)
     )
 
     if period_end:
@@ -226,7 +175,6 @@ async def get_statistics(
     clients: Optional[str] = None,
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
-    db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user)
 ):
     """Get comprehensive statistics using pre-aggregated hourly tables.
@@ -247,36 +195,21 @@ async def get_statistics(
     else:
         time_granularity = 'day'
 
-    server_list = None
-    if servers:
-        server_list = [s.strip() for s in servers.split(',') if s.strip()]
-        if not server_list:
-            server_list = None
-
-    client_list = None
-    if clients:
-        client_list = [c.strip() for c in clients.split(',') if c.strip()]
-        if not client_list:
-            client_list = None
+    server_list = [s.strip() for s in servers.split(',') if s.strip()] if servers else []
+    client_list = [c.strip() for c in clients.split(',') if c.strip()] if clients else []
 
     today_start = now - timedelta(hours=24)
     week_start = now - timedelta(days=7)
     month_start = now - timedelta(days=30)
 
-    has_client_filter = client_list is not None
+    has_client_filter = bool(client_list)
 
-    def add_server_filter(stmt, table):
-        if server_list:
+    def apply_filters(stmt, table, *, server=True, client=True, end=True):
+        if server and server_list:
             stmt = stmt.where(table.server.in_(server_list))
-        return stmt
-
-    def add_client_filter(stmt, table):
-        if client_list:
+        if client and client_list:
             stmt = stmt.where(table.client_ip.in_(client_list))
-        return stmt
-
-    def add_end_filter(stmt, table):
-        if period_end:
+        if end and period_end:
             stmt = stmt.where(table.hour <= period_end)
         return stmt
 
@@ -291,10 +224,8 @@ async def get_statistics(
         async with async_session_maker() as s:
             if has_client_filter:
                 T = ClientStatsHourly
-                base_filter = lambda stmt: add_client_filter(add_server_filter(stmt, T), T)
             else:
                 T = QueryStatsHourly
-                base_filter = lambda stmt: add_server_filter(stmt, T)
 
             def _time_window(start):
                 """Build a FILTER condition for a time window, respecting period_end."""
@@ -310,19 +241,13 @@ async def get_statistics(
                 func.sum(T.total).filter(_time_window(period_start)).label('period'),
                 func.sum(T.blocked).filter(_time_window(period_start)).label('blocked'),
             )
-            stmt = base_filter(stmt)
+            stmt = apply_filters(stmt, T, end=False)
             result = await s.execute(stmt)
             return result.one()
 
     async def run_time_series():
         async with async_session_maker() as s:
-            if has_client_filter:
-                T = ClientStatsHourly
-                base_filter = lambda stmt: add_end_filter(add_client_filter(add_server_filter(stmt, T), T), T)
-            else:
-                T = QueryStatsHourly
-                base_filter = lambda stmt: add_end_filter(add_server_filter(stmt, T), T)
-
+            T = ClientStatsHourly if has_client_filter else QueryStatsHourly
             hour_filter = T.hour >= period_start
 
             if time_granularity == 'hour':
@@ -348,13 +273,12 @@ async def get_statistics(
                     .group_by(day_col)
                     .order_by(day_col)
                 )
-            stmt = base_filter(stmt)
+            stmt = apply_filters(stmt, T)
             result = await s.execute(stmt)
             return list(result)
 
     async def run_top_domains():
         async with async_session_maker() as s:
-            # Domain stats table doesn't have client_ip, fall back to raw table
             if has_client_filter:
                 return await _run_top_domains_raw(s, period_start, server_list, client_list, period_end)
             T = DomainStatsHourly
@@ -365,7 +289,7 @@ async def get_statistics(
                 .order_by(func.sum(T.total).desc())
                 .limit(10)
             )
-            stmt = add_end_filter(add_server_filter(stmt, T), T)
+            stmt = apply_filters(stmt, T, client=False)
             result = await s.execute(stmt)
             return [{"domain": row[0], "count": row[1]} for row in result]
 
@@ -381,7 +305,7 @@ async def get_statistics(
                 .order_by(func.sum(T.blocked).desc())
                 .limit(10)
             )
-            stmt = add_end_filter(add_server_filter(stmt, T), T)
+            stmt = apply_filters(stmt, T, client=False)
             result = await s.execute(stmt)
             return [{"domain": row[0], "count": row[1]} for row in result]
 
@@ -396,9 +320,7 @@ async def get_statistics(
                 .order_by(func.sum(T.total).desc())
                 .limit(10)
             )
-            stmt = add_end_filter(add_server_filter(stmt, T), T)
-            if client_list:
-                stmt = add_client_filter(stmt, T)
+            stmt = apply_filters(stmt, T)
             result = await s.execute(stmt)
             return [
                 {"client_ip": row[0], "client_hostname": row[1], "count": row[2]}
@@ -419,9 +341,8 @@ async def get_statistics(
                     .group_by(T.server)
                     .order_by(func.sum(T.total).desc())
                 )
-                stmt = add_end_filter(add_client_filter(add_server_filter(stmt, T), T), T)
+                stmt = apply_filters(stmt, T)
                 result = await s.execute(stmt)
-                # ClientStatsHourly doesn't track cached, use 0
                 return [
                     {"server": row[0], "queries": row[1], "blocked": row[2], "cached": 0}
                     for row in result
@@ -439,7 +360,7 @@ async def get_statistics(
                     .group_by(T.server)
                     .order_by(func.sum(T.total).desc())
                 )
-                stmt = add_end_filter(add_server_filter(stmt, T), T)
+                stmt = apply_filters(stmt, T)
                 result = await s.execute(stmt)
                 return [
                     {"server": row[0], "queries": row[1], "blocked": row[2], "cached": row[3]}
@@ -450,9 +371,7 @@ async def get_statistics(
         async with async_session_maker() as s:
             T = ClientStatsHourly
             stmt = select(func.count(func.distinct(T.client_ip))).where(T.hour >= period_start)
-            stmt = add_end_filter(add_server_filter(stmt, T), T)
-            if client_list:
-                stmt = add_client_filter(stmt, T)
+            stmt = apply_filters(stmt, T)
             result = await s.execute(stmt)
             return result.scalar() or 0
 
@@ -461,13 +380,9 @@ async def get_statistics(
             T = ClientStatsHourly
             lookback = period_start - timedelta(days=30)
             in_period = select(func.distinct(T.client_ip)).where(T.hour >= period_start)
-            in_period = add_end_filter(add_server_filter(in_period, T), T)
-            if client_list:
-                in_period = add_client_filter(in_period, T)
+            in_period = apply_filters(in_period, T)
             before = select(func.distinct(T.client_ip)).where(and_(T.hour >= lookback, T.hour < period_start))
-            before = add_server_filter(before, T)
-            if client_list:
-                before = add_client_filter(before, T)
+            before = apply_filters(before, T, end=False)
             stmt = select(func.count()).select_from(
                 in_period.except_(before).subquery()
             )

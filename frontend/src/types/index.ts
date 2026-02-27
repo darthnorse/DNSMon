@@ -35,13 +35,8 @@ export interface AlertRuleCreate {
 }
 
 export interface Stats {
-  total_queries: number;
   queries_last_24h: number;
   blocks_last_24h: number;
-  queries_last_7d: number;
-  top_domains: Array<{ domain: string; count: number }>;
-  top_clients: Array<{ client_ip: string; client_hostname: string | null; count: number }>;
-  queries_by_server: Array<{ server: string; count: number }>;
 }
 
 export interface QuerySearchParams {

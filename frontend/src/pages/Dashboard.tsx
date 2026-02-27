@@ -4,6 +4,20 @@ import { getErrorMessage } from '../utils/errors';
 import type { Stats, Query } from '../types';
 import { format } from 'date-fns';
 
+function isBlocked(query: Query): boolean {
+  const status = query.status?.toUpperCase() ?? '';
+  return status.includes('GRAVITY') || status.includes('BLACKLIST');
+}
+
+function Spinner({ className }: { className: string }) {
+  return (
+    <svg className={`animate-spin ${className}`} fill="none" viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+    </svg>
+  );
+}
+
 export default function Dashboard() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [queries, setQueries] = useState<Query[]>([]);
@@ -89,16 +103,16 @@ export default function Dashboard() {
 
   const handleSearch = async () => {
     try {
-      // Default to last 7 days for dashboard search
-      const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      const oneDayAgo = new Date();
+      oneDayAgo.setDate(oneDayAgo.getDate() - 1);
 
       const searchResults = await queryApi.search({
         search: searchTerm || undefined,
-        from_date: sevenDaysAgo.toISOString(),
+        from_date: oneDayAgo.toISOString(),
         limit: 1000
       });
       setQueries(searchResults);
+      setError(null);
     } catch (err) {
       setError('Search failed');
       console.error('Search failed:', err);
@@ -141,7 +155,7 @@ export default function Dashboard() {
   if (loading && !stats) {
     return (
       <div className="flex justify-center items-center h-64">
-        <div className="text-gray-500">Loading...</div>
+        <div className="text-gray-500 dark:text-gray-400">Loading...</div>
       </div>
     );
   }
@@ -156,7 +170,6 @@ export default function Dashboard() {
 
   if (!stats) return null;
 
-  // Filter out system/network discovery queries if enabled
   const filteredQueries = hideSystemQueries
     ? queries.filter(q => {
         const domain = q.domain.toLowerCase();
@@ -249,7 +262,7 @@ export default function Dashboard() {
                 />
                 <span>Hide system queries (PTR, DNS-SD, mDNS)</span>
               </label>
-              <p className="text-xs text-gray-500 dark:text-gray-400">Last 7 days</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">{searchTerm ? 'Last 24 hours' : 'Latest queries'}</p>
             </div>
           </div>
 
@@ -260,13 +273,12 @@ export default function Dashboard() {
               </div>
             ) : (
               paginatedQueries.map((query) => {
-                const isBlocked = query.status?.toUpperCase().includes('GRAVITY') ||
-                                  query.status?.toUpperCase().includes('BLACKLIST');
+                const blocked = isBlocked(query);
                 return (
                 <div
                   key={query.id}
                   className={`rounded-lg p-4 space-y-2 ${
-                    isBlocked
+                    blocked
                       ? 'bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800/50'
                       : 'bg-gray-50 dark:bg-gray-700'
                   }`}
@@ -282,7 +294,7 @@ export default function Dashboard() {
                     </div>
                     <span
                       className={`ml-2 px-2 py-1 rounded-full text-xs whitespace-nowrap ${
-                        isBlocked
+                        blocked
                           ? 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200'
                           : 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200'
                       }`}
@@ -308,10 +320,7 @@ export default function Dashboard() {
                         className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-800/50 disabled:opacity-50 transition-colors"
                       >
                         {actionLoading === `whitelist-${query.domain}` ? (
-                          <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                          </svg>
+                          <Spinner className="h-4 w-4" />
                         ) : (
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -325,10 +334,7 @@ export default function Dashboard() {
                         className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-800/50 disabled:opacity-50 transition-colors"
                       >
                         {actionLoading === `blacklist-${query.domain}` ? (
-                          <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                          </svg>
+                          <Spinner className="h-4 w-4" />
                         ) : (
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -376,13 +382,12 @@ export default function Dashboard() {
                   </tr>
                 ) : (
                   paginatedQueries.map((query) => {
-                    const isBlocked = query.status?.toUpperCase().includes('GRAVITY') ||
-                                      query.status?.toUpperCase().includes('BLACKLIST');
+                    const blocked = isBlocked(query);
                     return (
                       <tr
                         key={query.id}
                         className={`${
-                          isBlocked
+                          blocked
                             ? 'bg-red-50 dark:bg-red-900/30 hover:bg-red-100 dark:hover:bg-red-900/40'
                             : 'hover:bg-gray-50 dark:hover:bg-gray-700'
                         }`}
@@ -402,7 +407,7 @@ export default function Dashboard() {
                         <td className="px-6 py-4 whitespace-nowrap text-sm">
                           <span
                             className={`px-2 py-1 rounded-full text-xs ${
-                              isBlocked
+                              blocked
                                 ? 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200'
                                 : 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200'
                             }`}
@@ -422,10 +427,7 @@ export default function Dashboard() {
                               className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-800/50 disabled:opacity-50 transition-colors"
                             >
                               {actionLoading === `whitelist-${query.domain}` ? (
-                                <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
-                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                                </svg>
+                                <Spinner className="h-3 w-3" />
                               ) : (
                                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -439,10 +441,7 @@ export default function Dashboard() {
                               className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-800/50 disabled:opacity-50 transition-colors"
                             >
                               {actionLoading === `blacklist-${query.domain}` ? (
-                                <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
-                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                                </svg>
+                                <Spinner className="h-3 w-3" />
                               ) : (
                                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

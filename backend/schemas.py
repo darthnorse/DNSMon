@@ -87,13 +87,8 @@ class AlertRuleResponse(BaseModel):
 # ============================================================================
 
 class StatsResponse(BaseModel):
-    total_queries: int
     queries_last_24h: int
     blocks_last_24h: int
-    queries_last_7d: int
-    top_domains: List[dict]
-    top_clients: List[dict]
-    queries_by_server: List[dict]
 
 
 class StatisticsResponse(BaseModel):

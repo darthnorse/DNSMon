@@ -62,6 +62,17 @@ async def _run_migrations(conn):
             ))
             logger.info(f"Migration: added {table}.{column} ({col_type})")
 
+    # Drop redundant indexes that are covered by composite indexes
+    redundant_indexes = [
+        'idx_queries_client_ip_timestamp',  # covered by idx_queries_timestamp_client
+        'idx_queries_domain_client',        # no query uses this combination
+        'ix_queries_timestamp',             # covered by 4 composites starting with timestamp
+        'ix_queries_pihole_server',         # covered by idx_queries_pihole_timestamp
+    ]
+    for index_name in redundant_indexes:
+        await conn.execute(text(f'DROP INDEX IF EXISTS "{index_name}"'))
+        # No log on every startup; DROP IF EXISTS is a no-op when already gone
+
 
 async def init_db():
     """Initialize database tables and run migrations"""

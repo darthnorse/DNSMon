@@ -3,6 +3,7 @@ Authentication service for DNSMon.
 Handles password hashing, session management, OIDC, and auth dependencies.
 """
 
+import asyncio
 import os
 import re
 import secrets
@@ -12,14 +13,17 @@ from typing import Optional, Dict, Any
 from urllib.parse import urlencode
 
 import httpx
+import jwt as pyjwt
+from jwt import PyJWKClient
+from jwt.exceptions import InvalidTokenError, PyJWKClientError
 from fastapi import Request, Response, HTTPException, Depends
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from passlib.context import CryptContext
 
 from .database import get_db
 from .models import User, Session, OIDCProvider, ApiKey, utcnow
-from .utils import validate_url_safety, async_validate_url_safety
+from .utils import async_validate_url_safety
 
 logger = logging.getLogger(__name__)
 
@@ -100,12 +104,15 @@ async def get_session_user(db: AsyncSession, session_id: str) -> Optional[User]:
     if not session:
         return None
 
-    session.last_activity_at = utcnow()
-    await db.commit()
-
     stmt = select(User).where(User.id == session.user_id, User.is_active == True)
     result = await db.execute(stmt)
-    return result.scalar_one_or_none()
+    user = result.scalar_one_or_none()
+
+    if user:
+        session.last_activity_at = utcnow()
+        await db.commit()
+
+    return user
 
 
 async def delete_session(db: AsyncSession, session_id: str) -> bool:
@@ -181,7 +188,6 @@ def get_client_ip(request: Request) -> str:
 
 async def get_user_count(db: AsyncSession) -> int:
     """Get total number of users."""
-    from sqlalchemy import func
     stmt = select(func.count()).select_from(User)
     result = await db.execute(stmt)
     return result.scalar() or 0
@@ -448,17 +454,6 @@ async def create_oidc_authorization_url(
     return f"{auth_endpoint}?{urlencode(params)}"
 
 
-async def _fetch_jwks(jwks_uri: str) -> Dict[str, Any]:
-    """Fetch JSON Web Key Set from provider."""
-    safety_err = await async_validate_url_safety(jwks_uri)
-    if safety_err:
-        raise ValueError(f"Blocked jwks_uri: {safety_err}")
-    async with httpx.AsyncClient() as client:
-        response = await client.get(jwks_uri, timeout=10.0)
-        response.raise_for_status()
-        return response.json()
-
-
 async def _decode_id_token(
     id_token: str,
     oidc_config: Dict[str, Any],
@@ -471,43 +466,37 @@ async def _decode_id_token(
     """
     jwks_uri = oidc_config.get('jwks_uri')
 
-    # Try verified decode first
     if jwks_uri:
+        safety_err = await async_validate_url_safety(jwks_uri)
+        if safety_err:
+            raise ValueError(f"Blocked jwks_uri: {safety_err}")
         try:
-            from jose import jwt as jose_jwt, JWTError
-            from jose.exceptions import JWKError
-
-            jwks = await _fetch_jwks(jwks_uri)
-            claims = jose_jwt.decode(
+            jwk_client = PyJWKClient(jwks_uri)
+            loop = asyncio.get_running_loop()
+            signing_key = await loop.run_in_executor(
+                None, jwk_client.get_signing_key_from_jwt, id_token
+            )
+            claims = pyjwt.decode(
                 id_token,
-                jwks,
+                signing_key.key,
                 algorithms=['RS256', 'RS384', 'RS512', 'ES256', 'ES384', 'ES512'],
                 audience=provider.client_id,
                 issuer=provider.issuer_url,
             )
             logger.info(f"ID token verified for OIDC provider {provider.name}")
             return claims
-        except (JWTError, JWKError) as e:
+        except (InvalidTokenError, PyJWKClientError) as e:
             logger.error(f"ID token signature rejected for {provider.name}: {e}")
-            raise ValueError(f"ID token verification failed") from e
+            raise ValueError("ID token verification failed") from e
         except Exception as e:
             logger.error(f"Failed to fetch JWKS for {provider.name}: {e}")
-            raise ValueError(f"Unable to verify ID token") from e
+            raise ValueError("Unable to verify ID token") from e
 
-    # No jwks_uri — fall back to unverified decode with warning
-    logger.warning(
+    logger.error(
         f"OIDC provider {provider.name} has no jwks_uri in discovery document; "
-        f"ID token claims cannot be verified"
+        f"refusing to accept unverified ID token"
     )
-    try:
-        import base64
-        import json
-        payload = id_token.split('.')[1]
-        payload += '=' * (4 - len(payload) % 4)
-        return json.loads(base64.urlsafe_b64decode(payload))
-    except Exception as e:
-        logger.error(f"Failed to decode id_token for {provider.name}: {e}")
-        raise ValueError(f"ID token decode failed") from e
+    raise ValueError("OIDC provider has no jwks_uri; cannot verify ID token")
 
 
 async def exchange_oidc_code(
@@ -525,7 +514,6 @@ async def exchange_oidc_code(
     token_endpoint = config['token_endpoint']
     userinfo_endpoint = config.get('userinfo_endpoint')
 
-    # Validate endpoints from discovery document against SSRF
     for ep_name, ep_url in [('token_endpoint', token_endpoint), ('userinfo_endpoint', userinfo_endpoint)]:
         if ep_url:
             safety_err = await async_validate_url_safety(ep_url)
@@ -533,7 +521,6 @@ async def exchange_oidc_code(
                 logger.error(f"OIDC {ep_name} blocked for {provider.name}: {safety_err}")
                 raise HTTPException(status_code=502, detail=f"OIDC provider returned unsafe {ep_name}")
 
-    # Exchange code for tokens
     async with httpx.AsyncClient() as client:
         token_response = await client.post(
             token_endpoint,
@@ -552,8 +539,13 @@ async def exchange_oidc_code(
 
         tokens = token_response.json()
 
-        # Get user info (prefer userinfo endpoint, fall back to ID token claims)
+        # Verify ID token first (signature-checked), then supplement with userinfo
         user_info = {}
+        if 'id_token' in tokens:
+            user_info = await _decode_id_token(
+                tokens['id_token'], config, provider
+            )
+
         if userinfo_endpoint and 'access_token' in tokens:
             try:
                 userinfo_response = await client.get(
@@ -562,15 +554,10 @@ async def exchange_oidc_code(
                     timeout=10.0
                 )
                 if userinfo_response.status_code == 200:
-                    user_info = userinfo_response.json()
+                    supplemental = userinfo_response.json()
+                    user_info = {**supplemental, **user_info}
             except Exception as e:
                 logger.warning(f"Failed to fetch userinfo: {e}")
-
-        # If no userinfo, decode ID token with signature verification
-        if not user_info and 'id_token' in tokens:
-            user_info = await _decode_id_token(
-                tokens['id_token'], config, provider
-            )
 
         return {
             'tokens': tokens,
@@ -585,7 +572,6 @@ def extract_oidc_claims(provider: OIDCProvider, user_info: Dict[str, Any]) -> Di
     display_name = user_info.get(provider.display_name_claim)
     groups = user_info.get(provider.groups_claim, []) if provider.groups_claim else []
 
-    # Determine if user should be admin based on group membership
     is_admin = False
     if provider.admin_group and groups:
         if isinstance(groups, list):
@@ -613,7 +599,6 @@ async def find_or_create_oidc_user(
     if not sub:
         raise HTTPException(status_code=400, detail="Missing 'sub' claim from identity provider")
 
-    # First, try to find user by OIDC subject
     stmt = select(User).where(
         User.oidc_provider == provider.name,
         User.oidc_subject == sub
@@ -627,10 +612,10 @@ async def find_or_create_oidc_user(
             user_to_link.oidc_provider = provider.name
             user_to_link.oidc_subject = sub
         if claims.get('email'):
-            if not user_to_link.email or not link_oidc:
+            if not user_to_link.email or link_oidc:
                 user_to_link.email = claims['email'].lower()
         if claims.get('display_name'):
-            if not user_to_link.display_name or not link_oidc:
+            if not user_to_link.display_name or link_oidc:
                 user_to_link.display_name = claims['display_name']
         if provider.admin_group:
             user_to_link.is_admin = claims.get('is_admin', False)
