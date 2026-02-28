@@ -59,7 +59,7 @@ class AdGuardHomeClient(DNSBlockerClient):
                 headers=self._get_auth_header()
             )
             if response.status_code == 200:
-                logger.info(f"Authentication successful for {self.server_name}")
+                logger.debug(f"Authentication successful for {self.server_name}")
                 return True
             logger.error(f"Authentication failed for {self.server_name}: {response.status_code}")
             return False

@@ -7,6 +7,8 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 # Configure dedicated memory logger to file (with fallback if permissions fail)
@@ -31,8 +33,14 @@ except (PermissionError, OSError) as e:
     memory_logger.propagate = True  # Send to root logger instead
 
 
+class _HealthCheckFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "/api/health" not in record.getMessage()
+
+
 def main():
     logger.info("Starting DNSMon...")
+    logging.getLogger("uvicorn.access").addFilter(_HealthCheckFilter())
     uvicorn.run(
         "backend.api:app",
         host="0.0.0.0",

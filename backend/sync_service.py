@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -10,6 +11,8 @@ from .database import async_session_maker
 from .utils import create_client_from_server as _create_client_from_server
 
 logger = logging.getLogger(__name__)
+
+_sync_lock = asyncio.Lock()
 
 
 # Config keys to sync per section (only sync specific safe keys, not entire sections)
@@ -191,7 +194,7 @@ class PiholeSyncService:
 
         except Exception as e:
             logger.error(f"Error previewing sync: {e}", exc_info=True)
-            return {'error': str(e)}
+            return {'error': 'Failed to generate sync preview'}
 
     async def _execute_sync_for_source(
         self,
@@ -266,7 +269,7 @@ class PiholeSyncService:
                         continue
 
                     if teleporter_data and client.supports_teleporter:
-                        if not await client.post_teleporter(teleporter_data):
+                        if not await client.post_teleporter(teleporter_data, import_options={'deleteExistingFiles': True}):
                             error_msg = f"{target.name}: Failed to upload teleporter backup"
                             logger.error(error_msg)
                             if len(all_errors) < max_errors:
@@ -351,41 +354,45 @@ class PiholeSyncService:
 
         Returns list of sync_history_ids if any successful, None if all failed.
         """
-        try:
-            async with async_session_maker() as session:
-                sources, targets_by_type = await _get_sources_and_targets(session)
-
-                if not sources:
-                    logger.error("No source server configured")
-                    return None
-
-                sync_history_ids = []
-                for source in sources:
-                    source_type = source.server_type or 'pihole'
-                    matching_targets = targets_by_type.get(source_type, [])
-
-                    if not matching_targets:
-                        logger.info(f"No {source_type} target servers to sync to from {source.name}")
-                        continue
-
-                    history_id = await self._execute_sync_for_source(
-                        session, source, matching_targets, sync_type, run_gravity
-                    )
-                    if history_id:
-                        sync_history_ids.append(history_id)
-
-                await session.commit()
-
-                if sync_history_ids:
-                    logger.info(f"Completed {len(sync_history_ids)} sync operation(s)")
-                    return sync_history_ids
-                else:
-                    logger.warning("No sync operations completed successfully")
-                    return None
-
-        except Exception as e:
-            logger.error(f"Error executing sync: {e}", exc_info=True)
+        if _sync_lock.locked():
+            logger.warning("Sync already in progress, skipping")
             return None
+        async with _sync_lock:
+            try:
+                async with async_session_maker() as session:
+                    sources, targets_by_type = await _get_sources_and_targets(session)
+
+                    if not sources:
+                        logger.error("No source server configured")
+                        return None
+
+                    sync_history_ids = []
+                    for source in sources:
+                        source_type = source.server_type or 'pihole'
+                        matching_targets = targets_by_type.get(source_type, [])
+
+                        if not matching_targets:
+                            logger.info(f"No {source_type} target servers to sync to from {source.name}")
+                            continue
+
+                        history_id = await self._execute_sync_for_source(
+                            session, source, matching_targets, sync_type, run_gravity
+                        )
+                        if history_id:
+                            sync_history_ids.append(history_id)
+
+                    await session.commit()
+
+                    if sync_history_ids:
+                        logger.info(f"Completed {len(sync_history_ids)} sync operation(s)")
+                        return sync_history_ids
+                    else:
+                        logger.warning("No sync operations completed successfully")
+                        return None
+
+            except Exception as e:
+                logger.error(f"Error executing sync: {e}", exc_info=True)
+                return None
 
     async def get_sync_history(self, limit: int = 20) -> List[Dict[str, Any]]:
         """Get recent sync history"""

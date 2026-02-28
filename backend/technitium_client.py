@@ -27,6 +27,15 @@ _ALLOWED_TYPES = {'Authoritative', 'Recursive', 'Forwarder', 'Resolved'}
 class TechnitiumClient(DNSBlockerClient):
     """Client for interacting with Technitium DNS Server API."""
 
+    _BACKUP_PARAMS = {
+        'blockLists': 'true',
+        'dnsSettings': 'true',
+        'logSettings': 'true',
+        'allowedZones': 'true',
+        'blockedZones': 'true',
+        'zones': 'true',
+    }
+
     def __init__(
         self,
         url: str,
@@ -100,7 +109,7 @@ class TechnitiumClient(DNSBlockerClient):
         """Verify the API token by fetching dashboard stats."""
         data = await self._get('/api/dashboard/stats/get', {'type': 'LastHour'})
         if data:
-            logger.info(f"Authentication successful for {self.server_name}")
+            logger.debug(f"Authentication successful for {self.server_name}")
             return True
         logger.error(f"Authentication failed for {self.server_name}")
         return False
@@ -251,14 +260,7 @@ class TechnitiumClient(DNSBlockerClient):
         try:
             response = await self.client.get(
                 f"{self.url}/api/settings/backup",
-                params=self._auth_params({
-                    'blockLists': 'true',
-                    'dnsSettings': 'true',
-                    'logSettings': 'true',
-                    'allowedZones': 'true',
-                    'blockedZones': 'true',
-                    'zones': 'true',
-                })
+                params=self._auth_params(self._BACKUP_PARAMS)
             )
             if response.status_code == 200:
                 if not response.content.startswith(b'PK\x03\x04'):
@@ -275,17 +277,9 @@ class TechnitiumClient(DNSBlockerClient):
     async def post_teleporter(self, backup_data: bytes, import_options: Optional[Dict[str, Any]] = None) -> bool:
         """Restore a Technitium backup zip."""
         try:
-            restore_params = {
-                'blockLists': 'true',
-                'dnsSettings': 'true',
-                'logSettings': 'true',
-                'allowedZones': 'true',
-                'blockedZones': 'true',
-                'zones': 'true',
-                'deleteExistingFiles': 'true',
-            }
+            restore_params = dict(self._BACKUP_PARAMS)
             if import_options:
-                restore_params.update(import_options)
+                restore_params.update({k: str(v).lower() for k, v in import_options.items()})
             response = await self.client.post(
                 f"{self.url}/api/settings/restore",
                 params=self._auth_params(restore_params),
