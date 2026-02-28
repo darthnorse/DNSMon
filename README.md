@@ -274,8 +274,8 @@ All configuration is done through the web UI - no config files needed!
 └────────┬────────┘
          │
          ▼
-┌─────────────────────────────────────┐
-│            DNS Ad-Blockers                    │
+┌───────────────────────────────────────────────┐
+│              DNS Ad-Blockers                  │
 │  ┌─────────┐  ┌─────────┐  ┌────────────┐    │
 │  │ Pi-hole │  │ AdGuard │  │ Technitium │    │
 │  │   v6    │  │  Home   │  │    DNS     │    │
