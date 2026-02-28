@@ -1,6 +1,6 @@
 # DNSMon - DNS Ad-Blocker Monitor
 
-A comprehensive web-based dashboard for monitoring and managing multiple Pi-hole v6 and AdGuard Home servers with real-time alerts, configuration sync, and multi-channel notifications.
+A comprehensive web-based dashboard for monitoring and managing multiple Pi-hole v6, AdGuard Home, and Technitium DNS servers with real-time alerts, configuration sync, and multi-channel notifications.
 
 ![Dashboard](https://img.shields.io/badge/Dashboard-React-61DAFB?style=flat-square&logo=react)
 ![Backend](https://img.shields.io/badge/Backend-FastAPI-009688?style=flat-square&logo=fastapi)
@@ -35,6 +35,7 @@ A comprehensive web-based dashboard for monitoring and managing multiple Pi-hole
 ### Multi-Server Support
 - **Pi-hole v6** - Full REST API integration
 - **AdGuard Home** - Native API support
+- **Technitium DNS** - Full API integration with backup/restore sync
 - Monitor unlimited servers from a single dashboard
 - Per-server statistics and health monitoring
 
@@ -94,6 +95,14 @@ Designate a "source" server and sync its configuration to target servers automat
 - Blocklist and allowlist subscriptions
 - Persistent client settings
 
+**Technitium DNS syncs** (via backup/restore):
+- Block list URLs (subscriptions)
+- DNS settings and configuration
+- Log settings
+- Allowed zones (whitelist)
+- Blocked zones (blacklist)
+- Authoritative DNS zones
+
 Includes sync history with detailed logs and error tracking.
 
 ### Blocking Control
@@ -124,7 +133,7 @@ Includes sync history with detailed logs and error tracking.
 
 ### Requirements
 - Docker and Docker Compose
-- Pi-hole v6 and/or AdGuard Home server(s)
+- Pi-hole v6, AdGuard Home, and/or Technitium DNS server(s)
 
 ### Quick Start
 
@@ -210,9 +219,9 @@ All configuration is done through the web UI - no config files needed!
 2. Click **Add Server**
 3. Enter:
    - **Name**: Friendly name (e.g., "Primary Pi-hole")
-   - **Type**: Pi-hole or AdGuard Home
+   - **Type**: Pi-hole, AdGuard Home, or Technitium DNS
    - **URL**: Server URL (e.g., `http://192.168.1.100`)
-   - **Password/API Key**: Your server's password
+   - **Password/API Key**: Your server's password or API token
 4. Click **Test Connection** to verify
 5. Save and the server will start being monitored
 
@@ -266,12 +275,12 @@ All configuration is done through the web UI - no config files needed!
          │
          ▼
 ┌─────────────────────────────────────┐
-│         DNS Ad-Blockers             │
-│  ┌─────────┐  ┌─────────┐          │
-│  │ Pi-hole │  │ AdGuard │  • • •   │
-│  │   v6    │  │  Home   │          │
-│  └─────────┘  └─────────┘          │
-└─────────────────────────────────────┘
+│            DNS Ad-Blockers                    │
+│  ┌─────────┐  ┌─────────┐  ┌────────────┐    │
+│  │ Pi-hole │  │ AdGuard │  │ Technitium │    │
+│  │   v6    │  │  Home   │  │    DNS     │    │
+│  └─────────┘  └─────────┘  └────────────┘    │
+└───────────────────────────────────────────────┘
 ```
 
 - **Backend**: Python FastAPI with async SQLAlchemy

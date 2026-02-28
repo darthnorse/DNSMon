@@ -254,6 +254,7 @@ class TechnitiumClient(DNSBlockerClient):
                 params=self._auth_params({
                     'blockLists': 'true',
                     'dnsSettings': 'true',
+                    'logSettings': 'true',
                     'allowedZones': 'true',
                     'blockedZones': 'true',
                     'zones': 'true',
@@ -274,9 +275,20 @@ class TechnitiumClient(DNSBlockerClient):
     async def post_teleporter(self, backup_data: bytes, import_options: Optional[Dict[str, Any]] = None) -> bool:
         """Restore a Technitium backup zip."""
         try:
+            restore_params = {
+                'blockLists': 'true',
+                'dnsSettings': 'true',
+                'logSettings': 'true',
+                'allowedZones': 'true',
+                'blockedZones': 'true',
+                'zones': 'true',
+                'deleteExistingFiles': 'true',
+            }
+            if import_options:
+                restore_params.update(import_options)
             response = await self.client.post(
                 f"{self.url}/api/settings/restore",
-                params=self._auth_params(),
+                params=self._auth_params(restore_params),
                 files={'file': ('backup.zip', backup_data, 'application/zip')}
             )
             return self._check_response(response, '/api/settings/restore', 'POST') is not None
