@@ -196,7 +196,7 @@ docker compose up -d
 
 3. Open `http://localhost:8000` and create your admin account
 
-4. Go to **Settings** → **DNS Servers** to add your Pi-hole/AdGuard servers
+4. Go to **Settings** → **DNS Servers** to add your Pi-hole, AdGuard Home, or Technitium DNS servers
 
 That's it! DNSMon will start monitoring your DNS servers immediately.
 
