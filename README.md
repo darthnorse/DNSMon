@@ -213,6 +213,28 @@ All configuration is done through the web UI - no config files needed!
 | `DNSMON_SECRET_KEY` | Session signing key (recommended for production) | Auto-generated |
 | `DNSMON_COOKIE_SECURE` | Set to `true` if behind HTTPS | `false` |
 
+### Reverse Proxy
+
+DNSMon works behind reverse proxies (Nginx, Caddy, Traefik, etc.) with no extra configuration. Proxy headers (`X-Forwarded-Proto`, `X-Forwarded-For`) are trusted automatically so that OIDC redirects and client IP detection use the correct external URL.
+
+If your proxy terminates TLS, set the cookie secure flag:
+
+```yaml
+environment:
+  DNSMON_COOKIE_SECURE: "true"
+```
+
+Ensure your reverse proxy forwards the standard headers. Example for **Nginx**:
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:8000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+}
+```
+
 ### Adding DNS Servers
 
 1. Go to **Settings** → **DNS Servers**
