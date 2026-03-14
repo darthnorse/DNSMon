@@ -192,6 +192,7 @@ export interface User {
   is_active: boolean;
   is_admin: boolean;
   oidc_provider: string | null;
+  oidc_provider_display: string | null;
   has_local_password: boolean;
   created_at: string | null;
   last_login_at: string | null;

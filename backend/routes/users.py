@@ -7,7 +7,7 @@ from sqlalchemy import select, func
 import logging
 
 from ..database import get_db
-from ..models import User
+from ..models import User, OIDCProvider
 from ..schemas import UserCreate, UserUpdate, UserResponse
 from ..auth import hash_password, require_admin
 
@@ -37,7 +37,22 @@ async def list_users(
     stmt = select(User).order_by(User.created_at.desc())
     result = await db.execute(stmt)
     users = result.scalars().all()
-    return [UserResponse(**u.to_dict()) for u in users]
+
+    oidc_names = [u.oidc_provider for u in users if u.oidc_provider]
+    provider_display = {}
+    if oidc_names:
+        stmt = select(OIDCProvider.name, OIDCProvider.display_name).where(
+            OIDCProvider.name.in_(oidc_names)
+        )
+        result = await db.execute(stmt)
+        provider_display = dict(result.all())
+
+    response = []
+    for u in users:
+        data = u.to_dict()
+        data['oidc_provider_display'] = provider_display.get(u.oidc_provider) if u.oidc_provider else None
+        response.append(UserResponse(**data))
+    return response
 
 
 @router.post("")

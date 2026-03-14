@@ -471,23 +471,30 @@ async def _decode_id_token(
         if safety_err:
             raise ValueError(f"Blocked jwks_uri: {safety_err}")
         try:
-            jwk_client = PyJWKClient(jwks_uri)
+            jwk_client = PyJWKClient(jwks_uri, timeout=10)
             loop = asyncio.get_running_loop()
-            signing_key = await loop.run_in_executor(
-                None, jwk_client.get_signing_key_from_jwt, id_token
+            signing_key = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None, jwk_client.get_signing_key_from_jwt, id_token
+                ),
+                timeout=15,
             )
+            expected_issuer = oidc_config.get('issuer', provider.issuer_url)
             claims = pyjwt.decode(
                 id_token,
                 signing_key.key,
                 algorithms=['RS256', 'RS384', 'RS512', 'ES256', 'ES384', 'ES512'],
                 audience=provider.client_id,
-                issuer=provider.issuer_url,
+                issuer=expected_issuer,
             )
             logger.info(f"ID token verified for OIDC provider {provider.name}")
             return claims
         except (InvalidTokenError, PyJWKClientError) as e:
             logger.error(f"ID token signature rejected for {provider.name}: {e}")
             raise ValueError("ID token verification failed") from e
+        except asyncio.TimeoutError:
+            logger.error(f"JWKS fetch timed out for {provider.name}")
+            raise ValueError("JWKS fetch timed out")
         except Exception as e:
             logger.error(f"Failed to fetch JWKS for {provider.name}: {e}")
             raise ValueError("Unable to verify ID token") from e

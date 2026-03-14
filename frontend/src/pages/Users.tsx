@@ -334,6 +334,9 @@ export default function Users() {
                 Role
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                Auth
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                 Status
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
@@ -377,6 +380,17 @@ export default function Users() {
                   >
                     {user.is_admin ? 'Admin' : 'User'}
                   </span>
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap">
+                  {user.oidc_provider ? (
+                    <span className="inline-flex px-2 py-1 text-xs font-medium rounded bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200">
+                      SSO ({user.oidc_provider_display || user.oidc_provider})
+                    </span>
+                  ) : (
+                    <span className="inline-flex px-2 py-1 text-xs font-medium rounded bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-300">
+                      Local
+                    </span>
+                  )}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <span

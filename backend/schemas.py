@@ -159,6 +159,7 @@ class UserResponse(BaseModel):
     is_active: bool
     is_admin: bool
     oidc_provider: Optional[str]
+    oidc_provider_display: Optional[str] = None
     has_local_password: bool
     created_at: Optional[str]
     last_login_at: Optional[str]
