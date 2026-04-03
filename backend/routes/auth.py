@@ -184,11 +184,7 @@ async def oidc_authorize(
     if not provider:
         raise HTTPException(status_code=404, detail="OIDC provider not found")
 
-    logger.info(f"OIDC debug: base_url={request.base_url}, scheme={request.url.scheme}, "
-                f"x-forwarded-proto={request.headers.get('x-forwarded-proto', 'NOT SET')}, "
-                f"x-forwarded-host={request.headers.get('x-forwarded-host', 'NOT SET')}")
     callback_url = str(request.base_url).rstrip('/') + f"/api/auth/oidc/{provider_name}/callback"
-    logger.info(f"OIDC debug: callback_url={callback_url}")
 
     state = generate_oidc_state()
     store_oidc_state(state, provider_name, callback_url)
