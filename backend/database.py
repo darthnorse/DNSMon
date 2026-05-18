@@ -1,25 +1,46 @@
 import logging
 import os
+from typing import NamedTuple, Optional
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.pool import NullPool
 from sqlalchemy import text
 from .models import Base
 
 logger = logging.getLogger(__name__)
+
+
+class Migration(NamedTuple):
+    """A hardcoded ALTER TABLE ADD COLUMN migration.
+
+    On PostgreSQL 11+, `ADD COLUMN ... DEFAULT <constant> NOT NULL` is a
+    metadata-only change (no table rewrite) when the default is a non-volatile
+    constant. The project pins PG16 so this is always fast in production.
+    """
+    table: str
+    column: str
+    col_type: str
+    default: Optional[str]
+    nullable: bool
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://dnsmon:changeme@localhost:5432/dnsmon")
 
 if DATABASE_URL.startswith("postgresql://"):
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
 
-engine = create_async_engine(
-    DATABASE_URL,
-    echo=False,
-    pool_size=20,  # Max 20 connections in the pool (increased from 10)
-    max_overflow=30,  # Allow up to 30 additional connections when pool is exhausted (increased from 20)
-    pool_pre_ping=True,  # Verify connections before using them
-    pool_recycle=1800,  # Recycle connections after 30 minutes (reduced from 1 hour)
-    pool_timeout=30,  # Timeout waiting for connection from pool (prevents indefinite hangs)
-)
+if os.getenv("DNSMON_TEST"):
+    # Tests use NullPool so each session gets a fresh asyncpg connection.
+    # The default pool causes cross-event-loop hangs with FastAPI TestClient + pytest-asyncio.
+    _engine_kwargs = {"poolclass": NullPool}
+else:
+    _engine_kwargs = {
+        "pool_size": 20,
+        "max_overflow": 30,
+        "pool_pre_ping": True,
+        "pool_recycle": 1800,
+        "pool_timeout": 30,
+    }
+
+engine = create_async_engine(DATABASE_URL, echo=False, **_engine_kwargs)
 
 async_session_maker = async_sessionmaker(
     engine,
@@ -44,23 +65,26 @@ async def _run_migrations(conn):
     ones.  This function bridges that gap for schema changes so that existing
     installs upgrade automatically on restart.
     """
-    # SECURITY: table, column, col_type, and default MUST be hardcoded string
-    # literals. NEVER source these values from user input or configuration.
+    # SECURITY: every field on each Migration MUST be a hardcoded literal.
+    # NEVER source these values from user input or configuration.
     migrations = [
-        # (table, column, SQL type, default)
-        ('servers', 'extra_config', 'JSON', None),
+        Migration(table='servers', column='extra_config',
+                  col_type='JSON', default=None, nullable=True),
+        Migration(table='alert_rules', column='match_status',
+                  col_type='VARCHAR(20)', default="'any'", nullable=False),
     ]
-    for table, column, col_type, default in migrations:
+    for m in migrations:
         result = await conn.execute(text(
             "SELECT 1 FROM information_schema.columns "
             "WHERE table_name = :table AND column_name = :column"
-        ), {'table': table, 'column': column})
+        ), {'table': m.table, 'column': m.column})
         if not result.scalar():
-            default_clause = f" DEFAULT {default}" if default is not None else ""
+            default_clause = f" DEFAULT {m.default}" if m.default is not None else ""
+            null_clause = "" if m.nullable else " NOT NULL"
             await conn.execute(text(
-                f'ALTER TABLE {table} ADD COLUMN {column} {col_type}{default_clause}'
+                f'ALTER TABLE {m.table} ADD COLUMN {m.column} {m.col_type}{default_clause}{null_clause}'
             ))
-            logger.info(f"Migration: added {table}.{column} ({col_type})")
+            logger.info(f"Migration: added {m.table}.{m.column} ({m.col_type})")
 
     # Drop redundant indexes that are covered by composite indexes
     redundant_indexes = [

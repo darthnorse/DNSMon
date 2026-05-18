@@ -1,6 +1,32 @@
 import { useState, useEffect } from 'react';
+import { Select, type SelectOption } from '../components/Select';
 import { alertRuleApi } from '../utils/api';
-import type { AlertRule, AlertRuleCreate } from '../types';
+import type { AlertRule, AlertRuleCreate, MatchStatus } from '../types';
+
+const MATCH_STATUS_OPTIONS: SelectOption<MatchStatus>[] = [
+  { value: 'any', label: 'Any' },
+  { value: 'blocked', label: 'Blocked only' },
+  { value: 'allowed', label: 'Allowed only' },
+];
+
+const matchStatusLabel = (status: MatchStatus): string =>
+  MATCH_STATUS_OPTIONS.find((o) => o.value === status)?.label ?? status;
+
+const BADGE_COLORS = {
+  blue: 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300',
+  green: 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300',
+  purple: 'bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300',
+  red: 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300',
+  emerald: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-300',
+} as const;
+
+function Badge({ color, children }: { color: keyof typeof BADGE_COLORS; children: React.ReactNode }) {
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${BADGE_COLORS[color]}`}>
+      {children}
+    </span>
+  );
+}
 
 export default function AlertRules() {
   const [rules, setRules] = useState<AlertRule[]>([]);
@@ -17,6 +43,7 @@ export default function AlertRules() {
     client_hostname_pattern: '',
     exclude_domains: '',
     cooldown_minutes: 5,
+    match_status: 'any',
     enabled: true,
   });
 
@@ -107,6 +134,7 @@ export default function AlertRules() {
       client_hostname_pattern: rule.client_hostname_pattern || '',
       exclude_domains: rule.exclude_domains || '',
       cooldown_minutes: rule.cooldown_minutes,
+      match_status: rule.match_status,
       enabled: rule.enabled,
     });
     setShowForm(true);
@@ -135,6 +163,7 @@ export default function AlertRules() {
       client_hostname_pattern: '',
       exclude_domains: '',
       cooldown_minutes: 5,
+      match_status: 'any',
       enabled: true,
     });
   };
@@ -276,6 +305,14 @@ export default function AlertRules() {
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Select
+                label="Match Status"
+                hint="Restrict this rule to blocked or allowed queries"
+                value={formData.match_status}
+                onChange={(v) => setFormData({ ...formData, match_status: v })}
+                options={MATCH_STATUS_OPTIONS}
+              />
+
               <div>
                 <label htmlFor="cooldown_minutes" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Cooldown (minutes)
@@ -289,19 +326,19 @@ export default function AlertRules() {
                   className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm px-3 py-2 border"
                 />
               </div>
+            </div>
 
-              <div className="flex items-center pt-6">
-                <input
-                  type="checkbox"
-                  id="enabled"
-                  checked={formData.enabled}
-                  onChange={(e) => setFormData({ ...formData, enabled: e.target.checked })}
-                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                />
-                <label htmlFor="enabled" className="ml-2 block text-sm text-gray-900 dark:text-gray-300">
-                  Enabled
-                </label>
-              </div>
+            <div className="flex items-center">
+              <input
+                type="checkbox"
+                id="enabled"
+                checked={formData.enabled}
+                onChange={(e) => setFormData({ ...formData, enabled: e.target.checked })}
+                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+              />
+              <label htmlFor="enabled" className="ml-2 block text-sm text-gray-900 dark:text-gray-300">
+                Enabled
+              </label>
             </div>
 
             <div className="flex space-x-3 pt-4">
@@ -343,20 +380,13 @@ export default function AlertRules() {
                         <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">{rule.description}</p>
                       )}
                       <div className="mt-2 flex flex-wrap gap-2 text-sm text-gray-500 dark:text-gray-400">
-                        {rule.domain_pattern && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                            Domain: {rule.domain_pattern}
-                          </span>
-                        )}
-                        {rule.client_ip_pattern && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
-                            IP: {rule.client_ip_pattern}
-                          </span>
-                        )}
-                        {rule.client_hostname_pattern && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
-                            Hostname: {rule.client_hostname_pattern}
-                          </span>
+                        {rule.domain_pattern && <Badge color="blue">Domain: {rule.domain_pattern}</Badge>}
+                        {rule.client_ip_pattern && <Badge color="green">IP: {rule.client_ip_pattern}</Badge>}
+                        {rule.client_hostname_pattern && <Badge color="purple">Hostname: {rule.client_hostname_pattern}</Badge>}
+                        {rule.match_status !== 'any' && (
+                          <Badge color={rule.match_status === 'blocked' ? 'red' : 'emerald'}>
+                            {matchStatusLabel(rule.match_status)}
+                          </Badge>
                         )}
                       </div>
                       <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">

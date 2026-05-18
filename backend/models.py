@@ -1,7 +1,7 @@
 import hashlib
 from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Index, BigInteger, ForeignKey, JSON
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
 
@@ -109,6 +109,8 @@ class AlertRule(Base):
     # Alert throttling
     cooldown_minutes = Column(Integer, default=5)  # Min time between batch alerts for same rule
 
+    match_status = Column(String(20), nullable=False, default='any')
+
     enabled = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
@@ -123,6 +125,7 @@ class AlertRule(Base):
             'client_hostname_pattern': self.client_hostname_pattern,
             'exclude_domains': self.exclude_domains,
             'cooldown_minutes': self.cooldown_minutes,
+            'match_status': self.match_status,
             'enabled': self.enabled,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,

@@ -8,6 +8,7 @@ from typing import List, Optional, Dict
 from sqlalchemy import select, and_
 from .models import Query, AlertRule, AlertHistory
 from .database import async_session_maker
+from .constants import BLOCKED_STATUSES
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +184,13 @@ class AlertEngine:
         matching_rules = []
 
         for rule in rules:
+            # query.status values not in BLOCKED_STATUSES (including unknown
+            # server-specific codes) are treated as allowed.
+            if rule.match_status != 'any':
+                wants_blocked = rule.match_status == 'blocked'
+                if (query.status in BLOCKED_STATUSES) != wants_blocked:
+                    continue
+
             # Check exclusions first
             if self._should_exclude(query.domain, rule.exclude_domains):
                 continue

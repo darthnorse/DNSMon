@@ -1,0 +1,10 @@
+# Dev-only dependencies — NOT installed in the production image.
+# Install with: pip install -r requirements.txt -r requirements-dev.txt
+# Inside the docker-compose dev workflow these are installed in the test
+# image stage (see Dockerfile).
+
+-r requirements.txt
+
+# Testing
+pytest==8.3.4
+pytest-asyncio==0.26.0

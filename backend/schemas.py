@@ -5,9 +5,12 @@ Shared across all route modules.
 
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Optional, List
+from typing import ClassVar, Literal, Optional, List, Tuple, Union, get_args, get_origin
 
-from pydantic import BaseModel, Field as PydanticField, field_validator
+from pydantic import BaseModel, Field as PydanticField, field_validator, model_validator
+
+
+MatchStatus = Literal['any', 'blocked', 'allowed']
 
 
 # ============================================================================
@@ -51,6 +54,7 @@ class AlertRuleCreate(BaseModel):
     client_hostname_pattern: Optional[str] = PydanticField(default=None, max_length=500)
     exclude_domains: Optional[str] = PydanticField(default=None, max_length=5000)
     cooldown_minutes: int = PydanticField(default=5, ge=0, le=10080)  # 0 to 7 days
+    match_status: MatchStatus = 'any'
     enabled: bool = True
 
 
@@ -62,7 +66,22 @@ class AlertRuleUpdate(BaseModel):
     client_hostname_pattern: Optional[str] = PydanticField(default=None, max_length=500)
     exclude_domains: Optional[str] = PydanticField(default=None, max_length=5000)
     cooldown_minutes: Optional[int] = PydanticField(default=None, ge=0, le=10080)
+    match_status: Optional[MatchStatus] = None
     enabled: Optional[bool] = None
+
+    # Populated below from AlertRuleResponse.model_fields. Any field that the
+    # response declares as non-Optional cannot be set to JSON null on update
+    # without breaking serialization downstream.
+    _NOT_NULL_FIELDS: ClassVar[Tuple[str, ...]] = ()
+
+    @model_validator(mode='before')
+    @classmethod
+    def reject_explicit_null_for_required(cls, data):
+        if isinstance(data, dict):
+            for key in cls._NOT_NULL_FIELDS:
+                if key in data and data[key] is None:
+                    raise ValueError(f"{key} cannot be null; omit the field to leave it unchanged")
+        return data
 
 
 class AlertRuleResponse(BaseModel):
@@ -74,12 +93,42 @@ class AlertRuleResponse(BaseModel):
     client_hostname_pattern: Optional[str]
     exclude_domains: Optional[str]
     cooldown_minutes: int
+    match_status: MatchStatus
     enabled: bool
-    created_at: Optional[str]
-    updated_at: Optional[str]
+    created_at: datetime
+    updated_at: datetime
 
     class Config:
         from_attributes = True
+
+    @field_validator('created_at', 'updated_at', mode='after')
+    @classmethod
+    def coerce_to_utc(cls, v: datetime) -> datetime:
+        # DateTime(timezone=True) columns return tz-aware datetimes from PG; this
+        # guards against naive datetimes leaking in from other call sites.
+        if v.tzinfo is None:
+            return v.replace(tzinfo=timezone.utc)
+        return v
+
+
+def _response_required_field_names(response_cls: type) -> Tuple[str, ...]:
+    """Names of fields whose annotation does not accept None."""
+    out = []
+    for name, field in response_cls.model_fields.items():
+        ann = field.annotation
+        # Detect Optional[X] / Union[..., None] by checking the type args.
+        if get_origin(ann) is Union and type(None) in get_args(ann):
+            continue
+        out.append(name)
+    return tuple(out)
+
+
+# Auto-sync the null-rejection set with whatever AlertRuleResponse considers
+# required, intersected with what AlertRuleUpdate accepts. Adding a new
+# non-Optional field to the response automatically extends protection.
+_RESPONSE_REQUIRED = set(_response_required_field_names(AlertRuleResponse))
+_UPDATE_FIELDS = set(AlertRuleUpdate.model_fields.keys())
+AlertRuleUpdate._NOT_NULL_FIELDS = tuple(sorted(_RESPONSE_REQUIRED & _UPDATE_FIELDS))
 
 
 # ============================================================================

@@ -9,6 +9,8 @@ export interface Query {
   server: string;
 }
 
+export type MatchStatus = 'any' | 'blocked' | 'allowed';
+
 export interface AlertRule {
   id: number;
   name: string;
@@ -18,6 +20,7 @@ export interface AlertRule {
   client_hostname_pattern: string | null;
   exclude_domains: string | null;
   cooldown_minutes: number;
+  match_status: MatchStatus;
   enabled: boolean;
   created_at: string;
   updated_at: string;
@@ -31,6 +34,7 @@ export interface AlertRuleCreate {
   client_hostname_pattern?: string;
   exclude_domains?: string;
   cooldown_minutes?: number;
+  match_status: MatchStatus;
   enabled?: boolean;
 }
 

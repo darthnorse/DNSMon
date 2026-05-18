@@ -12,6 +12,7 @@ from .models import Query, QueryStatsHourly, ClientStatsHourly, DomainStatsHourl
 from .database import async_session_maker, cleanup_old_queries
 from .utils import create_client_from_server
 from .config import get_settings_sync, PiholeServer
+from .constants import BLOCKED_STATUSES, CACHE_STATUSES, BLOCKED_SQL_IN, CACHE_SQL_IN
 
 logger = logging.getLogger(__name__)
 
@@ -238,12 +239,6 @@ class QueryIngestionService:
         if not ingested_queries:
             return
 
-        blocked_statuses = {'GRAVITY', 'GRAVITY_CNAME', 'REGEX', 'REGEX_CNAME',
-                            'BLACKLIST', 'BLACKLIST_CNAME', 'REGEX_BLACKLIST',
-                            'EXTERNAL_BLOCKED_IP', 'EXTERNAL_BLOCKED_NULL', 'EXTERNAL_BLOCKED_NXRA',
-                            'BLOCKED'}
-        cache_statuses = {'CACHE', 'CACHE_STALE', 'CACHED'}
-
         server_agg: dict[tuple, dict] = defaultdict(lambda: {'total': 0, 'blocked': 0, 'cached': 0})
         # Key: (hour, server, client_ip)
         client_agg: dict[tuple, dict] = defaultdict(lambda: {'hostname': None, 'total': 0, 'blocked': 0})
@@ -252,8 +247,8 @@ class QueryIngestionService:
 
         for q in ingested_queries:
             hour = q.timestamp.replace(minute=0, second=0, microsecond=0)
-            is_blocked = q.status in blocked_statuses
-            is_cached = q.status in cache_statuses
+            is_blocked = q.status in BLOCKED_STATUSES
+            is_cached = q.status in CACHE_STATUSES
 
             sk = (hour, q.server)
             server_agg[sk]['total'] += 1
@@ -339,38 +334,38 @@ class QueryIngestionService:
                     logger.info("Hourly stats already populated, skipping backfill")
                     return
 
-                await session.execute(text("""
+                await session.execute(text(f"""
                     INSERT INTO query_stats_hourly (hour, server, total, blocked, cached)
                     SELECT date_trunc('hour', timestamp) AS hour,
                            server,
                            COUNT(*) AS total,
-                           COUNT(*) FILTER (WHERE status IN ('GRAVITY','GRAVITY_CNAME','REGEX','REGEX_CNAME','BLACKLIST','BLACKLIST_CNAME','REGEX_BLACKLIST','EXTERNAL_BLOCKED_IP','EXTERNAL_BLOCKED_NULL','EXTERNAL_BLOCKED_NXRA','BLOCKED')) AS blocked,
-                           COUNT(*) FILTER (WHERE status IN ('CACHE','CACHE_STALE','CACHED')) AS cached
+                           COUNT(*) FILTER (WHERE status IN ({BLOCKED_SQL_IN})) AS blocked,
+                           COUNT(*) FILTER (WHERE status IN ({CACHE_SQL_IN})) AS cached
                     FROM queries
                     GROUP BY hour, server
                     ON CONFLICT (hour, server) DO NOTHING
                 """))
 
-                await session.execute(text("""
+                await session.execute(text(f"""
                     INSERT INTO client_stats_hourly (hour, server, client_ip, client_hostname, total, blocked)
                     SELECT date_trunc('hour', timestamp) AS hour,
                            server,
                            client_ip,
                            MAX(client_hostname) AS client_hostname,
                            COUNT(*) AS total,
-                           COUNT(*) FILTER (WHERE status IN ('GRAVITY','GRAVITY_CNAME','REGEX','REGEX_CNAME','BLACKLIST','BLACKLIST_CNAME','REGEX_BLACKLIST','EXTERNAL_BLOCKED_IP','EXTERNAL_BLOCKED_NULL','EXTERNAL_BLOCKED_NXRA','BLOCKED')) AS blocked
+                           COUNT(*) FILTER (WHERE status IN ({BLOCKED_SQL_IN})) AS blocked
                     FROM queries
                     GROUP BY hour, server, client_ip
                     ON CONFLICT (hour, server, client_ip) DO NOTHING
                 """))
 
-                await session.execute(text("""
+                await session.execute(text(f"""
                     INSERT INTO domain_stats_hourly (hour, server, domain, total, blocked)
                     SELECT date_trunc('hour', timestamp) AS hour,
                            server,
                            domain,
                            COUNT(*) AS total,
-                           COUNT(*) FILTER (WHERE status IN ('GRAVITY','GRAVITY_CNAME','REGEX','REGEX_CNAME','BLACKLIST','BLACKLIST_CNAME','REGEX_BLACKLIST','EXTERNAL_BLOCKED_IP','EXTERNAL_BLOCKED_NULL','EXTERNAL_BLOCKED_NXRA','BLOCKED')) AS blocked
+                           COUNT(*) FILTER (WHERE status IN ({BLOCKED_SQL_IN})) AS blocked
                     FROM queries
                     GROUP BY hour, server, domain
                     ON CONFLICT (hour, server, domain) DO NOTHING
