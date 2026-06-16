@@ -1,0 +1,22 @@
+[
+  {"slug": "teamviewer", "name": "TeamViewer", "category": "Remote Access",
+   "domains": ["teamviewer.com"]},
+  {"slug": "anydesk", "name": "AnyDesk", "category": "Remote Access",
+   "domains": ["anydesk.com", "net.anydesk.com"]},
+  {"slug": "notion", "name": "Notion", "category": "Productivity",
+   "domains": ["notion.so", "notion.com", "notion-static.com"]},
+  {"slug": "github", "name": "GitHub", "category": "Development",
+   "domains": ["github.com", "githubusercontent.com", "githubassets.com", "github.io"]},
+  {"slug": "gitlab", "name": "GitLab", "category": "Development",
+   "domains": ["gitlab.com", "gitlab.io"]},
+  {"slug": "google-drive", "name": "Google Drive", "category": "Cloud Storage",
+   "domains": ["drive.google.com", "drive.usercontent.google.com"]},
+  {"slug": "onedrive", "name": "OneDrive", "category": "Cloud Storage",
+   "domains": ["onedrive.live.com", "1drv.com", "1drv.ms"]},
+  {"slug": "wetransfer", "name": "WeTransfer", "category": "File Transfer",
+   "domains": ["wetransfer.com", "wetransfer.net", "wetransfer.zendesk.com"]},
+  {"slug": "figma", "name": "Figma", "category": "Productivity",
+   "domains": ["figma.com", "figma-alpha-api.s3.us-west-2.amazonaws.com"]},
+  {"slug": "mega", "name": "MEGA", "category": "Cloud Storage",
+   "domains": ["mega.nz", "mega.io", "mega.co.nz"]}
+]
