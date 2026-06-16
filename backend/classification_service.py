@@ -169,6 +169,60 @@ class ClassificationService:
         logger.info(f"Refreshed AdGuard feed: {n} app definitions")
         return n
 
+    async def refresh_blocklists(self, db: AsyncSession) -> int:
+        """Fetch each enabled blocklist source and replace the 'blocklist' tier.
+
+        No enabled sources → clears the tier (returns 0). All fetches failing →
+        leaves existing data untouched (returns -1). Not lock-protected: callers
+        (run_full / refresh_and_reclassify_blocklists) hold the lock."""
+        from .models import BlocklistSource, utcnow
+        sources = (await db.execute(
+            select(BlocklistSource).where(BlocklistSource.enabled == True)
+        )).scalars().all()
+        if not sources:
+            n = await self._replace_source(db, 'blocklist', [])
+            logger.info("No enabled blocklist sources; cleared blocklist tier")
+            return n
+
+        # parse_blocklist_line is tolerant of hosts/plain/wildcard/adguard formats,
+        # so src.format is advisory metadata today (no per-format branching needed).
+        fetched: list[tuple[str, str]] = []
+        for src in sources:
+            unsafe = await async_validate_url_safety(src.url)
+            if unsafe:
+                logger.error(f"Refusing to fetch blocklist {src.name}: {unsafe}")
+                src.last_status = 'error'
+                continue
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    resp = await client.get(src.url)
+                    resp.raise_for_status()
+                    text = resp.text
+            except httpx.HTTPError as e:
+                logger.error(f"Failed to fetch blocklist {src.name}: {e}")
+                src.last_status = 'error'
+                continue
+            src.last_status = 'ok'
+            src.last_fetched_at = utcnow()
+            src.domain_count = len(parse_blocklist_text(text))
+            fetched.append((src.category, text))
+
+        await db.commit()  # persist last_* even when nothing is replaced
+        if not fetched:
+            logger.error("All blocklist fetches failed; keeping existing tier")
+            return -1
+        defs = build_blocklist_defs(fetched)
+        n = await self._replace_source(db, 'blocklist', defs)
+        logger.info(f"Loaded {n} blocklist category definitions")
+        return n
+
+    async def refresh_and_reclassify_blocklists(self) -> None:
+        """Locked wrapper for ad-hoc refresh (toggle / manual refresh endpoint)."""
+        async with self._lock:
+            async with async_session_maker() as db:
+                await self.refresh_blocklists(db)
+                await self._do_reclassify(db)
+
     async def build_matcher(self, db: AsyncSession) -> DomainMatcher:
         rows = await db.execute(
             select(AppDomain.domain, AppDefinition.id, AppDefinition.name,
@@ -244,4 +298,5 @@ class ClassificationService:
                     await self.load_supplement(db)
                 else:
                     await self._replace_source(db, 'supplement', [])
+                await self.refresh_blocklists(db)
                 await self._do_reclassify(db)

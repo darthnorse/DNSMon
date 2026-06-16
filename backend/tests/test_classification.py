@@ -1,8 +1,8 @@
 import pytest
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete
 from backend.classification import parse_adguard_rule, parse_blocklist_line, DomainMatcher, MatchResult
 from backend.classification_service import ClassificationService, _blocklist_slug, build_blocklist_defs, parse_blocklist_text
-from backend.models import AppDefinition, AppDomain
+from backend.models import AppDefinition, AppDomain, BlocklistSource
 from backend.constants import (
     CLASSIFICATION_FEED_URL,
     SOURCE_PRECEDENCE,
@@ -199,3 +199,20 @@ async def test_replace_source_blocklist_batches(db_session):
     cnt = await db_session.scalar(
         select(func.count()).select_from(AppDomain).where(AppDomain.app_id == ad_id))
     assert cnt == 10500
+
+
+async def test_refresh_blocklists_no_enabled_clears(db_session):
+    svc = ClassificationService()
+    await svc._replace_source(db_session, "blocklist", [{
+        "slug": "blocklist-ads-tracking", "name": "Ads & Tracking",
+        "category": "Ads & Tracking", "domains": [("x.com", False)],
+    }])
+    # Ensure no enabled BlocklistSource rows exist (seed may have run).
+    await db_session.execute(delete(BlocklistSource))
+    await db_session.commit()
+    # No enabled BlocklistSource rows exist → tier should be cleared.
+    n = await svc.refresh_blocklists(db_session)
+    assert n == 0
+    cnt = await db_session.scalar(
+        select(func.count()).select_from(AppDefinition).where(AppDefinition.source == "blocklist"))
+    assert cnt == 0
