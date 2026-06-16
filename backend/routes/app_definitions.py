@@ -14,6 +14,16 @@ from ..service import get_service
 
 router = APIRouter(prefix="/api/app-definitions", tags=["app-definitions"])
 
+# Hold strong references to background tasks so asyncio doesn't GC them mid-run.
+_background_tasks: set = set()
+
+
+def _run_in_background(coro):
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
+
 
 async def _domains_for(db: AsyncSession, app_id: int) -> List[str]:
     rows = await db.execute(select(AppDomain.domain).where(AppDomain.app_id == app_id))
@@ -69,7 +79,7 @@ async def create_definition(payload: AppDefinitionCreate,
                          [{'domain': d, 'app_id': ad.id, 'is_wildcard': '*' in d} for d in domains])
     await db.commit()
     await db.refresh(ad)
-    await _reclassify_async()
+    _run_in_background(_reclassify_async())
     return AppDefinitionResponse.model_validate({**ad.to_dict(domains=domains)})
 
 
@@ -101,7 +111,7 @@ async def update_definition(def_id: int, payload: AppDefinitionUpdate,
                              [{'domain': d, 'app_id': ad.id, 'is_wildcard': '*' in d} for d in domains])
     await db.commit()
     await db.refresh(ad)
-    await _reclassify_async()
+    _run_in_background(_reclassify_async())
     return AppDefinitionResponse.model_validate({**ad.to_dict(domains=await _domains_for(db, ad.id))})
 
 
@@ -115,7 +125,7 @@ async def delete_definition(def_id: int, db: AsyncSession = Depends(get_db),
         raise HTTPException(status_code=400, detail="Only manual app definitions can be deleted")
     await db.delete(ad)
     await db.commit()
-    await _reclassify_async()
+    _run_in_background(_reclassify_async())
     return {"message": "App definition deleted"}
 
 
@@ -139,7 +149,7 @@ async def refresh_feed(_: User = Depends(require_admin)):
     """Trigger a feed refresh + reclassify (admin)."""
     s = get_settings_sync()
     svc = get_service().classification_service
-    asyncio.create_task(svc.run_full(
+    _run_in_background(svc.run_full(
         feed_enabled=s.classification_feed_enabled,
         supplement_enabled=s.classification_supplement_enabled,
         url=s.classification_feed_url))
