@@ -50,6 +50,16 @@ async def test_toggle_unknown_id_404(async_admin_client: AsyncClient):
     assert r.status_code == 404
 
 
+async def test_app_definitions_update_rejects_blocklist(async_admin_client: AsyncClient, db_session):
+    ad = AppDefinition(slug="blocklist-ads-tracking", name="Ads & Tracking",
+                       category="Ads & Tracking", source="blocklist", enabled=True)
+    db_session.add(ad)
+    await db_session.commit()
+    await db_session.refresh(ad)
+    r = await async_admin_client.put(f"/api/app-definitions/{ad.id}", json={"enabled": False})
+    assert r.status_code == 404
+
+
 async def test_app_definitions_list_excludes_blocklist(async_admin_client: AsyncClient, db_session):
     db_session.add(AppDefinition(slug="blocklist-ads-tracking", name="Ads & Tracking",
                                  category="Ads & Tracking", source="blocklist", enabled=True))

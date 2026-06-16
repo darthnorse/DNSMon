@@ -101,7 +101,9 @@ async def update_definition(def_id: int, payload: AppDefinitionUpdate,
                             db: AsyncSession = Depends(get_db),
                             _: User = Depends(require_admin)):
     ad = await db.get(AppDefinition, def_id)
-    if not ad:
+    # blocklist pseudo-apps are managed via /api/blocklist-sources, not here —
+    # treat them as absent so this endpoint can't toggle them or serialize ~547k domains.
+    if not ad or ad.source == 'blocklist':
         raise HTTPException(status_code=404, detail="App definition not found")
 
     data = payload.model_dump(exclude_unset=True)
