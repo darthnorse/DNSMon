@@ -30,3 +30,36 @@ CACHE_SQL_IN = _sql_in(CACHE_STATUSES)
 _SQL_IN_SAFE = re.compile(r"^'[A-Z_][A-Z0-9_]*'(,'[A-Z_][A-Z0-9_]*')*$")
 assert _SQL_IN_SAFE.match(BLOCKED_SQL_IN), f"BLOCKED_SQL_IN not safe: {BLOCKED_SQL_IN}"
 assert _SQL_IN_SAFE.match(CACHE_SQL_IN), f"CACHE_SQL_IN not safe: {CACHE_SQL_IN}"
+
+# ---------------------------------------------------------------------------
+# Domain classification (apps / categories)
+# ---------------------------------------------------------------------------
+
+# AdGuard's blocked-services list (GPL-3.0). Fetched at runtime, never bundled.
+CLASSIFICATION_FEED_URL = (
+    "https://raw.githubusercontent.com/AdguardTeam/HostlistsRegistry"
+    "/main/assets/services.json"
+)
+
+# Higher number wins when more than one source claims a domain.
+SOURCE_PRECEDENCE = {'adguard': 1, 'supplement': 2, 'manual': 3}
+
+VALID_SOURCES = frozenset(SOURCE_PRECEDENCE.keys())
+
+# AdGuard's `group` values remapped to DNSMon's display taxonomy.
+ADGUARD_GROUP_TO_CATEGORY = {
+    'streaming': 'Streaming',
+    'social_network': 'Social',
+    'gaming': 'Gaming',
+    'messenger': 'Messaging',
+    'shopping': 'Shopping',
+    'ai': 'AI',
+    'hosting': 'Cloud / Hosting',
+    'gambling': 'Gambling',
+    'privacy': 'Privacy / VPN',
+    'dating': 'Dating',
+    'software': 'Software',
+    'cdn': 'CDN',
+}
+
+UNCATEGORIZED_LABEL = 'Uncategorized'
