@@ -459,3 +459,71 @@ class ApiKeyCreate(BaseModel):
             if v <= datetime.now(timezone.utc) + timedelta(minutes=1):
                 raise ValueError("Expiration date must be at least 1 minute in the future")
         return v
+
+
+# ============================================================================
+# Classification / Insights Schemas
+# ============================================================================
+
+class AppUsage(BaseModel):
+    app_name: str
+    category: Optional[str]
+    total: int
+    blocked: int
+
+
+class CategoryUsage(BaseModel):
+    category: str
+    total: int
+    blocked: int
+
+
+class DomainUsage(BaseModel):
+    domain: str
+    total: int
+    blocked: int
+
+
+class AppDefinitionCreate(BaseModel):
+    name: str = PydanticField(max_length=150)
+    category: Optional[str] = PydanticField(default=None, max_length=50)
+    domains: List[str] = PydanticField(min_length=1)
+    enabled: bool = True
+
+
+class AppDefinitionUpdate(BaseModel):
+    name: Optional[str] = PydanticField(default=None, max_length=150)
+    category: Optional[str] = PydanticField(default=None, max_length=50)
+    domains: Optional[List[str]] = None
+    enabled: Optional[bool] = None
+
+
+class AppDefinitionResponse(BaseModel):
+    id: int
+    slug: str
+    name: str
+    category: Optional[str]
+    source: str
+    icon_svg: Optional[str]
+    enabled: bool
+    domains: List[str]
+    created_at: datetime
+    updated_at: datetime
+
+    @field_validator('created_at', 'updated_at', mode='after')
+    @classmethod
+    def coerce_to_utc(cls, v: datetime) -> datetime:
+        if v.tzinfo is None:
+            return v.replace(tzinfo=timezone.utc)
+        return v
+
+
+class FeedStatusResponse(BaseModel):
+    feed_enabled: bool
+    feed_url: str
+    supplement_enabled: bool
+    adguard_app_count: int
+    supplement_app_count: int
+    manual_app_count: int
+    labeled_domain_count: int
+    last_refreshed_at: Optional[datetime]
