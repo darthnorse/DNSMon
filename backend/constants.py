@@ -42,9 +42,20 @@ CLASSIFICATION_FEED_URL = (
 )
 
 # Higher number wins when more than one source claims a domain.
-SOURCE_PRECEDENCE = {'adguard': 1, 'supplement': 2, 'manual': 3}
+SOURCE_PRECEDENCE = {'blocklist': 0, 'adguard': 1, 'supplement': 2, 'manual': 3}
 
-VALID_SOURCES = frozenset(SOURCE_PRECEDENCE.keys())
+# Sources a user/admin may set on a manual app definition. 'blocklist' is engine-only.
+VALID_SOURCES = frozenset({'adguard', 'supplement', 'manual'})
+
+DEFAULT_BLOCKLIST_SOURCES = [
+    {
+        'name': 'Hagezi Pro.Plus',
+        'url': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/pro.plus.txt',
+        'category': 'Ads & Tracking',
+        'format': 'domains',
+        'license': 'GPL-3.0',
+    },
+]
 
 # AdGuard's `group` values remapped to DNSMon's display taxonomy.
 ADGUARD_GROUP_TO_CATEGORY = {

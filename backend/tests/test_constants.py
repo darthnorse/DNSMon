@@ -5,6 +5,9 @@ from backend.constants import (
     BLOCKED_SQL_IN,
     CACHE_STATUSES,
     CACHE_SQL_IN,
+    DEFAULT_BLOCKLIST_SOURCES,
+    SOURCE_PRECEDENCE,
+    VALID_SOURCES,
 )
 
 
@@ -37,3 +40,23 @@ def test_sql_in_strings_are_quoted_sorted_csv():
     assert " " not in BLOCKED_SQL_IN
     assert BLOCKED_SQL_IN.startswith("'")
     assert BLOCKED_SQL_IN.endswith("'")
+
+
+def test_blocklist_precedence_is_lowest():
+    assert SOURCE_PRECEDENCE["blocklist"] == 0
+    assert SOURCE_PRECEDENCE["blocklist"] < SOURCE_PRECEDENCE["adguard"]
+    assert min(SOURCE_PRECEDENCE.values()) == SOURCE_PRECEDENCE["blocklist"]
+
+
+def test_valid_sources_excludes_blocklist():
+    assert "blocklist" not in VALID_SOURCES
+    assert VALID_SOURCES == frozenset({"adguard", "supplement", "manual"})
+
+
+def test_default_blocklist_seed_is_hagezi_pro_plus():
+    assert len(DEFAULT_BLOCKLIST_SOURCES) == 1
+    src = DEFAULT_BLOCKLIST_SOURCES[0]
+    assert src["category"] == "Ads & Tracking"
+    assert src["format"] == "domains"
+    assert src["license"] == "GPL-3.0"
+    assert src["url"].endswith("/domains/pro.plus.txt")
