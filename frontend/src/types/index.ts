@@ -385,6 +385,68 @@ export interface ApiKeyCreateResponse extends ApiKey {
 }
 
 // ============================================================================
+// DNS Classification / Insights Types
+// ============================================================================
+
+export interface AppUsage {
+  app_name: string;
+  category: string | null;
+  total: number;
+  blocked: number;
+}
+
+export interface CategoryUsage {
+  category: string;
+  total: number;
+  blocked: number;
+}
+
+export interface DomainUsage {
+  domain: string;
+  total: number;
+  blocked: number;
+}
+
+export interface InsightsParams {
+  period?: string;
+  servers?: string;
+  clients?: string;
+  from_date?: string;
+  to_date?: string;
+}
+
+export interface AppDefinition {
+  id: number;
+  slug: string;
+  name: string;
+  category: string | null;
+  source: 'adguard' | 'supplement' | 'manual';
+  icon_svg: string | null;
+  enabled: boolean;
+  domains: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AppDefinitionCreate {
+  name: string;
+  category?: string | null;
+  domains: string[];
+  enabled?: boolean;
+}
+
+export interface FeedStatus {
+  feed_enabled: boolean;
+  feed_url: string;
+  supplement_enabled: boolean;
+  adguard_app_count: number;
+  supplement_app_count: number;
+  manual_app_count: number;
+  labeled_domain_count: number;
+  last_refreshed_at: string | null;
+}
+
+// ============================================================================
 // Sync Types
 // ============================================================================
 

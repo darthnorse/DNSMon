@@ -36,6 +36,13 @@ import type {
   ApiKeyCreateResponse,
   SyncPreview,
   SyncHistoryEntry,
+  AppUsage,
+  CategoryUsage,
+  DomainUsage,
+  InsightsParams,
+  AppDefinition,
+  AppDefinitionCreate,
+  FeedStatus,
 } from '../types';
 
 const API_BASE_URL = '/api';
@@ -415,6 +422,40 @@ export const apiKeyApi = {
   revoke: async (id: number): Promise<void> => {
     await api.delete(`/api-keys/${id}`);
   },
+};
+
+// ============================================================================
+// Insights API
+// ============================================================================
+
+export const insightsApi = {
+  apps: async (params?: InsightsParams): Promise<AppUsage[]> => {
+    const response = await api.get<AppUsage[]>('/insights/apps', { params });
+    return response.data;
+  },
+  categories: async (params?: InsightsParams): Promise<CategoryUsage[]> => {
+    const response = await api.get<CategoryUsage[]>('/insights/categories', { params });
+    return response.data;
+  },
+  appDomains: async (app_name: string, params?: InsightsParams): Promise<DomainUsage[]> => {
+    const response = await api.get<DomainUsage[]>('/insights/apps/domains', { params: { ...params, app_name } });
+    return response.data;
+  },
+};
+
+// ============================================================================
+// App Definition API
+// ============================================================================
+
+export const appDefinitionApi = {
+  getAll: async (): Promise<AppDefinition[]> => (await api.get<AppDefinition[]>('/app-definitions')).data,
+  create: async (data: AppDefinitionCreate): Promise<AppDefinition> =>
+    (await api.post<AppDefinition>('/app-definitions', data)).data,
+  update: async (id: number, data: Partial<AppDefinitionCreate>): Promise<AppDefinition> =>
+    (await api.put<AppDefinition>(`/app-definitions/${id}`, data)).data,
+  delete: async (id: number): Promise<void> => { await api.delete(`/app-definitions/${id}`); },
+  feedStatus: async (): Promise<FeedStatus> => (await api.get<FeedStatus>('/app-definitions/feed-status')).data,
+  refresh: async (): Promise<void> => { await api.post('/app-definitions/refresh'); },
 };
 
 export default api;
