@@ -595,3 +595,76 @@ class NotificationChannel(Base):
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }
+
+
+class AppDefinition(Base):
+    """A known application/service (from the AdGuard feed, the bundled
+    supplement, or a manual user entry)."""
+    __tablename__ = "app_definitions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    slug = Column(String(100), nullable=False)
+    name = Column(String(150), nullable=False)
+    category = Column(String(50), nullable=True)
+    source = Column(String(20), nullable=False)  # adguard | supplement | manual
+    icon_svg = Column(Text, nullable=True)
+    enabled = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        Index('idx_app_def_source_slug', 'source', 'slug', unique=True),
+    )
+
+    def to_dict(self, domains=None):
+        return {
+            'id': self.id,
+            'slug': self.slug,
+            'name': self.name,
+            'category': self.category,
+            'source': self.source,
+            'icon_svg': self.icon_svg,
+            'enabled': self.enabled,
+            'domains': domains if domains is not None else [],
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class AppDomain(Base):
+    """A domain (suffix) belonging to an AppDefinition."""
+    __tablename__ = "app_domains"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    domain = Column(String(255), nullable=False, index=True)
+    app_id = Column(Integer, ForeignKey('app_definitions.id', ondelete='CASCADE'), nullable=False)
+    is_wildcard = Column(Boolean, default=False)
+
+    __table_args__ = (
+        Index('idx_app_domains_app', 'app_id'),
+    )
+
+
+class DomainLabel(Base):
+    """Resolved classification for a distinct domain observed in queries.
+
+    One row per distinct domain. app_id/app_name/category are null for
+    domains we have seen but could not match (honest 'uncategorized')."""
+    __tablename__ = "domain_labels"
+
+    domain = Column(String(255), primary_key=True)
+    app_id = Column(Integer, ForeignKey('app_definitions.id', ondelete='SET NULL'), nullable=True)
+    app_name = Column(String(150), nullable=True)
+    category = Column(String(50), nullable=True)
+    matched_source = Column(String(20), nullable=True)
+    classified_at = Column(DateTime(timezone=True), default=utcnow)
+
+    def to_dict(self):
+        return {
+            'domain': self.domain,
+            'app_id': self.app_id,
+            'app_name': self.app_name,
+            'category': self.category,
+            'matched_source': self.matched_source,
+            'classified_at': self.classified_at.isoformat() if self.classified_at else None,
+        }
