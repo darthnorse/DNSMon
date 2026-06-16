@@ -98,11 +98,33 @@ async def _run_migrations(conn):
         # No log on every startup; DROP IF EXISTS is a no-op when already gone
 
 
+async def seed_blocklist_sources() -> int:
+    """Insert default blocklist sources iff the table is empty. Returns rows added.
+
+    Owns its own session (matches cleanup_old_queries) so callers never have a
+    session committed out from under them."""
+    from sqlalchemy import select, func
+    from .models import BlocklistSource
+    from .constants import DEFAULT_BLOCKLIST_SOURCES
+
+    async with async_session_maker() as db:
+        count = await db.scalar(select(func.count()).select_from(BlocklistSource)) or 0
+        if count > 0:
+            logger.debug("Blocklist sources already seeded; skipping")
+            return 0
+        for src in DEFAULT_BLOCKLIST_SOURCES:
+            db.add(BlocklistSource(**src))
+        await db.commit()
+    logger.info(f"Seeded {len(DEFAULT_BLOCKLIST_SOURCES)} default blocklist source(s)")
+    return len(DEFAULT_BLOCKLIST_SOURCES)
+
+
 async def init_db():
     """Initialize database tables and run migrations"""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await _run_migrations(conn)
+    await seed_blocklist_sources()
 
 
 async def cleanup_old_queries(days: int = 60):

@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import (
@@ -106,3 +106,19 @@ async def test_blocklist_source_to_dict(db_session):
     assert d["last_fetched_at"] is None
     assert d["domain_count"] is None
     assert d["created_at"] is not None and d["updated_at"] is not None
+
+
+async def test_seed_blocklist_sources_idempotent(db_session):
+    from backend.database import seed_blocklist_sources
+    from backend.constants import DEFAULT_BLOCKLIST_SOURCES
+
+    expected = len(DEFAULT_BLOCKLIST_SOURCES)
+    n1 = await seed_blocklist_sources()
+    assert n1 == expected
+    n2 = await seed_blocklist_sources()
+    assert n2 == 0
+    cnt = await db_session.scalar(select(func.count()).select_from(BlocklistSource))
+    assert cnt == expected
+    row = (await db_session.execute(select(BlocklistSource))).scalar_one()
+    assert row.name == "Hagezi Pro.Plus"
+    assert row.category == "Ads & Tracking"
