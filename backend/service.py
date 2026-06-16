@@ -9,6 +9,7 @@ from .ingestion import QueryIngestionService
 from .alerts import AlertEngine
 from .notifications import NotificationService, AlertContext
 from .sync_service import PiholeSyncService
+from .classification_service import ClassificationService
 from .auth import cleanup_expired_sessions
 from .database import async_session_maker
 
@@ -26,6 +27,7 @@ class DNSMonService:
         self.alert_engine = AlertEngine()
         self.notification_service = NotificationService()
         self.sync_service = PiholeSyncService()
+        self.classification_service = ClassificationService()
         self._started = False
         self._initial_ingestion_task = None
 
@@ -117,6 +119,18 @@ class DNSMonService:
         except Exception as e:
             logger.error(f"Error in sync task: {e}", exc_info=True)
 
+    async def classification_task(self):
+        """Refresh the app/category feed and reclassify observed domains."""
+        try:
+            logger.info("Running domain classification refresh...")
+            await self.classification_service.run_full(
+                feed_enabled=self.settings.classification_feed_enabled,
+                supplement_enabled=self.settings.classification_supplement_enabled,
+                url=self.settings.classification_feed_url,
+            )
+        except Exception as e:
+            logger.error(f"Error in classification task: {e}", exc_info=True)
+
     async def session_cleanup_task(self):
         """Periodic cleanup of expired sessions"""
         try:
@@ -170,6 +184,16 @@ class DNSMonService:
             coalesce=True
         )
 
+        self.scheduler.add_job(
+            self.classification_task,
+            trigger=IntervalTrigger(hours=self.settings.classification_refresh_hours),
+            id='classification',
+            name='Refresh app/category classification',
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
         self.scheduler.start()
         logger.info(f"Scheduler started (poll: {self.settings.poll_interval_seconds}s, sync: {self.settings.sync_interval_seconds}s)")
 
@@ -178,6 +202,7 @@ class DNSMonService:
         try:
             await self.ingestion_service.backfill_hourly_stats()
             await self.ingest_and_alert()
+            await self.classification_task()
         except Exception as e:
             logger.error(f"Error in initial ingestion: {e}", exc_info=True)
 
