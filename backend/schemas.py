@@ -494,7 +494,7 @@ class AppDefinitionCreate(BaseModel):
 class AppDefinitionUpdate(BaseModel):
     name: Optional[str] = PydanticField(default=None, max_length=150)
     category: Optional[str] = PydanticField(default=None, max_length=50)
-    domains: Optional[List[str]] = None
+    domains: Optional[List[str]] = PydanticField(default=None, min_length=1)
     enabled: Optional[bool] = None
 
 

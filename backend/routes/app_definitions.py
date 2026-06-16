@@ -1,3 +1,4 @@
+import asyncio
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -136,7 +137,6 @@ async def feed_status(db: AsyncSession = Depends(get_db), _: User = Depends(get_
 @router.post("/refresh")
 async def refresh_feed(_: User = Depends(require_admin)):
     """Trigger a feed refresh + reclassify (admin)."""
-    import asyncio
     s = get_settings_sync()
     svc = get_service().classification_service
     asyncio.create_task(svc.run_full(
