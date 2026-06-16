@@ -57,7 +57,9 @@ async def list_definitions(source: Optional[str] = None,
                            _: User = Depends(get_current_user)):
     if source and source not in VALID_SOURCES:
         raise HTTPException(status_code=400, detail=f"Invalid source. Must be one of: {sorted(VALID_SOURCES)}")
-    stmt = select(AppDefinition).order_by(AppDefinition.name)
+    # 'blocklist' is engine-only (absent from VALID_SOURCES, so ?source=blocklist is
+    # rejected above) and its pseudo-app carries ~546k domains — keep it out of this list.
+    stmt = select(AppDefinition).where(AppDefinition.source != 'blocklist').order_by(AppDefinition.name)
     if source:
         stmt = stmt.where(AppDefinition.source == source)
     defs = (await db.execute(stmt)).scalars().all()

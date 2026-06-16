@@ -560,3 +560,32 @@ class FeedStatusResponse(BaseModel):
     manual_app_count: int
     labeled_domain_count: int
     last_refreshed_at: Optional[datetime]
+
+
+class BlocklistSourceResponse(BaseModel):
+    id: int
+    name: str
+    url: str
+    category: str
+    format: str
+    license: Optional[str]
+    enabled: bool
+    last_fetched_at: Optional[datetime]
+    last_status: Optional[str]
+    domain_count: Optional[int]
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+    @field_validator('last_fetched_at', 'created_at', 'updated_at', mode='after')
+    @classmethod
+    def coerce_to_utc(cls, v: Optional[datetime]) -> Optional[datetime]:
+        if v is not None and v.tzinfo is None:
+            return v.replace(tzinfo=timezone.utc)
+        return v
+
+
+class BlocklistSourceUpdate(BaseModel):
+    enabled: bool
