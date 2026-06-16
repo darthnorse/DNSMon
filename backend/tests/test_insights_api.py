@@ -44,3 +44,14 @@ async def test_app_domains_drilldown(async_admin_client: AsyncClient, db_session
 async def test_insights_requires_auth(async_client: AsyncClient):
     r = await async_client.get("/api/insights/apps")
     assert r.status_code == 401
+
+
+async def test_categories_counts_domains_without_label_row(async_admin_client: AsyncClient, db_session):
+    hour = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    # A rollup row whose domain has NO matching domain_labels entry at all.
+    db_session.add(DomainStatsHourly(hour=hour, server='s1', domain='never-classified.test', total=7, blocked=0))
+    await db_session.commit()
+    r = await async_admin_client.get("/api/insights/categories?period=24h")
+    assert r.status_code == 200, r.text
+    cats = {c['category']: c['total'] for c in r.json()}
+    assert cats.get('Uncategorized', 0) >= 7

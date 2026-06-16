@@ -78,7 +78,7 @@ async def get_category_usage(
         stmt = (
             select(cat, func.count(Query.id).label('total'),
                    func.count(Query.id).filter(Query.status.in_(BLOCKED_STATUSES)).label('blocked'))
-            .join(DomainLabel, DomainLabel.domain == Query.domain)
+            .join(DomainLabel, DomainLabel.domain == Query.domain, isouter=True)
             .where(Query.timestamp >= start)
             .group_by(cat).order_by(func.count(Query.id).desc())
         )
@@ -91,7 +91,7 @@ async def get_category_usage(
         T = DomainStatsHourly
         stmt = (
             select(cat, func.sum(T.total).label('total'), func.sum(T.blocked).label('blocked'))
-            .join(DomainLabel, DomainLabel.domain == T.domain)
+            .join(DomainLabel, DomainLabel.domain == T.domain, isouter=True)
             .where(T.hour >= start)
             .group_by(cat).order_by(func.sum(T.total).desc())
         )
