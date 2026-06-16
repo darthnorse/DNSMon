@@ -10,7 +10,7 @@ from backend.database import (
     cleanup_old_queries,
     engine as production_engine,
 )
-from backend.models import Query
+from backend.models import BlocklistSource, Query
 
 
 async def test_run_migrations_is_idempotent():
@@ -88,3 +88,21 @@ async def test_cleanup_old_queries_zero_when_all_recent(db_session: AsyncSession
 
 async def test_cleanup_old_queries_empty_table():
     assert await cleanup_old_queries(days=60) == 0
+
+
+async def test_blocklist_source_to_dict(db_session):
+    src = BlocklistSource(
+        name="L", url="https://e.com/l.txt", category="Ads & Tracking",
+        format="domains", license="GPL-3.0", enabled=True,
+    )
+    db_session.add(src)
+    await db_session.commit()
+    await db_session.refresh(src)
+    d = src.to_dict()
+    assert d["name"] == "L"
+    assert d["category"] == "Ads & Tracking"
+    assert d["format"] == "domains"
+    assert d["enabled"] is True
+    assert d["last_fetched_at"] is None
+    assert d["domain_count"] is None
+    assert d["created_at"] is not None and d["updated_at"] is not None

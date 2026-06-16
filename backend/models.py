@@ -668,3 +668,41 @@ class DomainLabel(Base):
             'matched_source': self.matched_source,
             'classified_at': self.classified_at.isoformat() if self.classified_at else None,
         }
+
+
+class BlocklistSource(Base):
+    """A themed blocklist fetched at runtime to provide a category-only tier."""
+    __tablename__ = "blocklist_sources"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False)
+    url = Column(String(2048), nullable=False)  # bounded so the unique index is btree-safe
+    category = Column(String(50), nullable=False)
+    format = Column(String(20), nullable=False, default='domains')  # domains|hosts|adguard
+    license = Column(String(50), nullable=True)
+    enabled = Column(Boolean, default=True)
+    last_fetched_at = Column(DateTime(timezone=True), nullable=True)
+    last_status = Column(String(20), nullable=True)  # ok|error
+    domain_count = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        Index('idx_blocklist_sources_url', 'url', unique=True),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'url': self.url,
+            'category': self.category,
+            'format': self.format,
+            'license': self.license,
+            'enabled': self.enabled,
+            'last_fetched_at': self.last_fetched_at.isoformat() if self.last_fetched_at else None,
+            'last_status': self.last_status,
+            'domain_count': self.domain_count,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
