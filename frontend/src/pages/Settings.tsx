@@ -5,11 +5,12 @@ import { getErrorMessage } from '../utils/errors';
 import { copyToClipboard } from '../utils/clipboard';
 import NotificationsSettings from '../components/NotificationsSettings';
 import AppDefinitionsSettings from '../components/AppDefinitionsSettings';
+import BlocklistSourcesSettings from '../components/BlocklistSourcesSettings';
 import Users from './Users';
 import ApiKeys from './ApiKeys';
 import type { PiholeServer, PiholeServerCreate, ServerType, OIDCProvider, OIDCProviderCreate, SyncPreview, SyncPreviewSource, SyncHistoryEntry } from '../types';
 
-type TabType = 'servers' | 'notifications' | 'polling' | 'sync' | 'oidc' | 'advanced' | 'users' | 'api-keys' | 'app-definitions';
+type TabType = 'servers' | 'notifications' | 'polling' | 'sync' | 'oidc' | 'advanced' | 'users' | 'api-keys' | 'app-definitions' | 'blocklist-sources';
 
 const SERVER_TYPE_LABELS: Record<ServerType, string> = {
   pihole: 'Pi-hole',
@@ -647,6 +648,7 @@ export default function Settings() {
     { id: 'servers', label: 'DNS Servers' },
     { id: 'notifications', label: 'Notifications' },
     { id: 'app-definitions', label: 'App Definitions' },
+    { id: 'blocklist-sources', label: 'Blocklist Sources' },
     { id: 'polling', label: 'Polling & Retention' },
     { id: 'sync', label: 'Sync' },
     ...(user?.is_admin ? [
@@ -1041,6 +1043,13 @@ export default function Settings() {
 
       {activeTab === 'app-definitions' && (
         <AppDefinitionsSettings
+          onError={setError}
+          onSuccess={setSuccessMessage}
+        />
+      )}
+
+      {activeTab === 'blocklist-sources' && (
+        <BlocklistSourcesSettings
           onError={setError}
           onSuccess={setSuccessMessage}
         />

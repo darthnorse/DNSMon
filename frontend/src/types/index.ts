@@ -494,3 +494,18 @@ export interface SyncHistoryEntry {
   items_synced: SyncItemsSynced | null;
   errors: string[];
 }
+
+export interface BlocklistSource {
+  id: number;
+  name: string;
+  url: string;
+  category: string;
+  format: string;
+  license: string | null;
+  enabled: boolean;
+  last_fetched_at: string | null;
+  last_status: 'ok' | 'error' | null;
+  domain_count: number | null;
+  created_at: string;
+  updated_at: string;
+}

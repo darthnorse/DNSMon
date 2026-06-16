@@ -43,6 +43,7 @@ import type {
   AppDefinition,
   AppDefinitionCreate,
   FeedStatus,
+  BlocklistSource,
 } from '../types';
 
 const API_BASE_URL = '/api';
@@ -456,6 +457,18 @@ export const appDefinitionApi = {
   delete: async (id: number): Promise<void> => { await api.delete(`/app-definitions/${id}`); },
   feedStatus: async (): Promise<FeedStatus> => (await api.get<FeedStatus>('/app-definitions/feed-status')).data,
   refresh: async (): Promise<void> => { await api.post('/app-definitions/refresh'); },
+};
+
+// ============================================================================
+// Blocklist Sources API
+// ============================================================================
+
+export const blocklistSourceApi = {
+  getAll: async (): Promise<BlocklistSource[]> =>
+    (await api.get<BlocklistSource[]>('/blocklist-sources')).data,
+  toggle: async (id: number, enabled: boolean): Promise<BlocklistSource> =>
+    (await api.patch<BlocklistSource>(`/blocklist-sources/${id}`, { enabled })).data,
+  refresh: async (): Promise<void> => { await api.post('/blocklist-sources/refresh'); },
 };
 
 export default api;
