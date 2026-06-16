@@ -1,5 +1,6 @@
 import pytest
 from backend.classification import parse_adguard_rule, parse_blocklist_line, DomainMatcher, MatchResult
+from backend.classification_service import _blocklist_slug, build_blocklist_defs, parse_blocklist_text
 from backend.constants import (
     CLASSIFICATION_FEED_URL,
     SOURCE_PRECEDENCE,
@@ -109,3 +110,38 @@ def test_more_specific_wins_within_same_source():
 ])
 def test_parse_blocklist_line(line, expected):
     assert parse_blocklist_line(line) == expected
+
+
+def test_parse_blocklist_text_dedups():
+    s = parse_blocklist_text("0.0.0.0 a.com\nb.com\na.com\n# c\n")
+    assert s == {"a.com", "b.com"}
+
+
+def test_build_blocklist_defs_groups_and_sorts():
+    defs = build_blocklist_defs([
+        ("Ads & Tracking", "0.0.0.0 a.com\nb.com\na.com\n"),
+        ("Ads & Tracking", "c.com\n"),
+    ])
+    assert len(defs) == 1
+    d = defs[0]
+    assert d["slug"] == "blocklist-ads-tracking"
+    assert d["name"] == "Ads & Tracking"
+    assert d["category"] == "Ads & Tracking"
+    assert [dom for dom, _ in d["domains"]] == ["a.com", "b.com", "c.com"]
+    assert all(wild is False for _, wild in d["domains"])
+
+
+def test_build_blocklist_defs_skips_empty_category():
+    defs = build_blocklist_defs([("Empty", "# only comments\n")])
+    assert defs == []
+
+
+@pytest.mark.parametrize("category,expected", [
+    ("Ads & Tracking", "blocklist-ads-tracking"),
+    ("Malware", "blocklist-malware"),
+    ("", "blocklist-misc"),
+    ("---", "blocklist-misc"),
+    ("!!!", "blocklist-misc"),
+])
+def test_blocklist_slug(category, expected):
+    assert _blocklist_slug(category) == expected

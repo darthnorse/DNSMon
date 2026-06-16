@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -8,7 +9,7 @@ import httpx
 from sqlalchemy import select, delete, insert, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .classification import parse_adguard_rule, DomainMatcher
+from .classification import parse_adguard_rule, parse_blocklist_line, DomainMatcher
 from .constants import (
     CLASSIFICATION_FEED_URL,
     ADGUARD_GROUP_TO_CATEGORY,
@@ -20,6 +21,42 @@ from .utils import async_validate_url_safety
 logger = logging.getLogger(__name__)
 
 _SUPPLEMENT_PATH = Path(__file__).parent / 'data' / 'shadow_it_supplement.json'
+
+
+def parse_blocklist_text(text: str) -> set[str]:
+    """Parse raw blocklist text to a set of bare domains."""
+    domains = set()
+    for line in text.splitlines():
+        dom = parse_blocklist_line(line)
+        if dom:
+            domains.add(dom)
+    return domains
+
+
+def _blocklist_slug(category: str) -> str:
+    base = re.sub(r'-+', '-', ''.join(c if c.isalnum() else '-' for c in category.lower())).strip('-')
+    return f"blocklist-{base or 'misc'}"
+
+
+def build_blocklist_defs(fetched: list[tuple[str, str]]) -> list[dict]:
+    """Turn [(category, raw_text), ...] into _replace_source-shaped defs.
+
+    Merges + dedups domains per category; one category-only def per category
+    (sorted domains, all non-wildcard). Categories with no parseable domains
+    are dropped.
+    """
+    by_cat: dict[str, set[str]] = {}
+    for category, text in fetched:
+        by_cat.setdefault(category, set()).update(parse_blocklist_text(text))
+    return [
+        {
+            'slug': _blocklist_slug(category),
+            'name': category,
+            'category': category,
+            'domains': [(d, False) for d in sorted(domains)],
+        }
+        for category, domains in by_cat.items() if domains
+    ]
 
 
 class ClassificationService:
