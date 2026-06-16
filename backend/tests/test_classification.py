@@ -1,4 +1,5 @@
-from backend.classification import parse_adguard_rule, DomainMatcher, MatchResult
+import pytest
+from backend.classification import parse_adguard_rule, parse_blocklist_line, DomainMatcher, MatchResult
 from backend.constants import (
     CLASSIFICATION_FEED_URL,
     SOURCE_PRECEDENCE,
@@ -86,3 +87,25 @@ def test_more_specific_wins_within_same_source():
     m.add('vendor.com', app_id=1, app_name='Vendor', category='Software', source='adguard')
     m.add('mail.vendor.com', app_id=2, app_name='VendorMail', category='Software', source='adguard')
     assert m.match('mail.vendor.com').app_name == 'VendorMail'
+
+
+@pytest.mark.parametrize("line,expected", [
+    ("0.0.0.0 ads.example.com", "ads.example.com"),
+    ("0.0.0.0 ads.example.com # blocked", "ads.example.com"),
+    ("127.0.0.1 track.example.com", "track.example.com"),
+    ("plain.example.com", "plain.example.com"),
+    ("*.wild.example.com", "wild.example.com"),
+    ("||adguard.example.com^", "adguard.example.com"),
+    ("UPPER.Example.COM", "upper.example.com"),
+    ("  spaced.example.com  ", "spaced.example.com"),
+    ("# a comment", None),
+    ("! adblock comment", None),
+    ("", None),
+    ("   ", None),
+    ("0.0.0.0 localhost", None),
+    ("0.0.0.0", None),
+    ("notadomain", None),
+    ("bad_*_glob.com", None),
+])
+def test_parse_blocklist_line(line, expected):
+    assert parse_blocklist_line(line) == expected

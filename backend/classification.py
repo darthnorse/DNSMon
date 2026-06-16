@@ -34,6 +34,42 @@ def parse_adguard_rule(rule: str) -> Optional[Tuple[str, bool]]:
     return s, ('*' in s)
 
 
+_BLOCKLIST_NOISE = frozenset({
+    'localhost', 'localhost.localdomain', 'local', 'broadcasthost',
+    'ip6-localhost', 'ip6-loopback', 'ip6-localnet', 'ip6-mcastprefix',
+    'ip6-allnodes', 'ip6-allrouters', 'ip6-allhosts', '0.0.0.0',
+})
+_HOSTS_IPS = ('0.0.0.0', '127.0.0.1', '::1')
+
+
+def parse_blocklist_line(line: str) -> Optional[str]:
+    """Normalize one blocklist line to a bare domain, or None to skip.
+
+    Tolerant of hosts (``0.0.0.0 domain``), plain domains, ``*.`` wildcard
+    prefixes, and AdGuard ``||domain^`` rules. Drops comments, loopback noise,
+    and anything that is not a clean domain. Returned domains are stored
+    non-wildcard; the matcher's suffix walk supplies subdomain semantics.
+    """
+    if not line:
+        return None
+    s = line.strip()
+    if not s or s[0] in '#!':
+        return None
+    if s.startswith('||'):
+        parsed = parse_adguard_rule(s)
+        return parsed[0] if (parsed and not parsed[1]) else None
+    parts = s.split()
+    tok = parts[1] if (len(parts) >= 2 and parts[0] in _HOSTS_IPS) else parts[0]
+    tok = tok.lower()
+    if tok.startswith('*.'):
+        tok = tok[2:]
+    tok = tok.strip('.')
+    if (not tok or '.' not in tok or '*' in tok
+            or tok in _BLOCKLIST_NOISE or not _DOMAIN_RE.match(tok)):
+        return None
+    return tok
+
+
 @dataclass
 class MatchResult:
     app_id: int
