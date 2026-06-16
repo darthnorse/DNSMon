@@ -109,3 +109,68 @@ class ClassificationService:
         n = await self._replace_source(db, 'adguard', defs)
         logger.info(f"Refreshed AdGuard feed: {n} app definitions")
         return n
+
+    async def build_matcher(self, db: AsyncSession) -> DomainMatcher:
+        rows = await db.execute(
+            select(AppDomain.domain, AppDefinition.id, AppDefinition.name,
+                   AppDefinition.category, AppDefinition.source)
+            .join(AppDefinition, AppDomain.app_id == AppDefinition.id)
+            .where(AppDefinition.enabled == True, AppDomain.is_wildcard == False)
+        )
+        matcher = DomainMatcher()
+        for domain, app_id, name, category, source in rows:
+            matcher.add(domain, app_id=app_id, app_name=name, category=category, source=source)
+        return matcher
+
+    async def reclassify(self, db: AsyncSession) -> int:
+        """Resolve every distinct observed domain into domain_labels.
+
+        Stores a row for every distinct domain (matched or not). Idempotent —
+        upserts on the `domain` primary key. Returns rows written."""
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+        from .models import utcnow
+
+        matcher = await self.build_matcher(db)
+        distinct_domains = (await db.execute(select(Query.domain).distinct())).scalars().all()
+
+        now = utcnow()
+        values = []
+        for fqdn in distinct_domains:
+            hit = matcher.match(fqdn)
+            values.append({
+                'domain': fqdn,
+                'app_id': hit.app_id if hit else None,
+                'app_name': hit.app_name if hit else None,
+                'category': hit.category if hit else None,
+                'matched_source': hit.matched_source if hit else None,
+                'classified_at': now,
+            })
+
+        for i in range(0, len(values), 2000):
+            batch = values[i:i + 2000]
+            stmt = pg_insert(DomainLabel).values(batch)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=['domain'],
+                set_={
+                    'app_id': stmt.excluded.app_id,
+                    'app_name': stmt.excluded.app_name,
+                    'category': stmt.excluded.category,
+                    'matched_source': stmt.excluded.matched_source,
+                    'classified_at': stmt.excluded.classified_at,
+                },
+            )
+            await db.execute(stmt)
+        await db.commit()
+        logger.info(f"Reclassified {len(values)} distinct domains")
+        return len(values)
+
+    async def run_full(self, *, feed_enabled: bool = True,
+                       supplement_enabled: bool = True,
+                       url: str = CLASSIFICATION_FEED_URL) -> None:
+        """Top-level job: refresh sources then reclassify all domains."""
+        async with async_session_maker() as db:
+            if feed_enabled:
+                await self.refresh_feed(db, url)
+            if supplement_enabled:
+                await self.load_supplement(db)
+            await self.reclassify(db)
