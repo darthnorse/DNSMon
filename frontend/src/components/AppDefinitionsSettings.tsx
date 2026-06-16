@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { appDefinitionApi } from '../utils/api';
 import { getErrorMessage } from '../utils/errors';
 import type { AppDefinition, AppDefinitionCreate, FeedStatus } from '../types';
@@ -18,6 +18,9 @@ export default function AppDefinitionsSettings({ onError, onSuccess }: Props) {
   const [saving, setSaving] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
 
+  const mountedRef = useRef(true);
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const [formData, setFormData] = useState<AppDefinitionCreate>({
     name: '',
     category: null,
@@ -28,6 +31,13 @@ export default function AppDefinitionsSettings({ onError, onSuccess }: Props) {
 
   useEffect(() => {
     loadData();
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    };
   }, []);
 
   const loadData = async () => {
@@ -53,18 +63,20 @@ export default function AppDefinitionsSettings({ onError, onSuccess }: Props) {
       onError(null);
       await appDefinitionApi.refresh();
       onSuccess('Refresh started — data updates shortly');
-      setTimeout(async () => {
+      refreshTimerRef.current = setTimeout(async () => {
+        if (!mountedRef.current) return;
         try {
           const [defs, status] = await Promise.all([
             appDefinitionApi.getAll(),
             appDefinitionApi.feedStatus(),
           ]);
+          if (!mountedRef.current) return;
           setDefinitions(defs);
           setFeedStatus(status);
         } catch {
           // Best-effort reload after refresh
         }
-        setRefreshing(false);
+        if (mountedRef.current) setRefreshing(false);
       }, 1500);
     } catch (err: unknown) {
       onError(getErrorMessage(err, 'Failed to trigger refresh'));
