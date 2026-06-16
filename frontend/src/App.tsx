@@ -5,6 +5,7 @@ import Search from './pages/Search';
 import Lists from './pages/Lists';
 import AlertRules from './pages/AlertRules';
 import Statistics from './pages/Statistics';
+import Insights from './pages/Insights';
 import Settings from './pages/Settings';
 import Login from './pages/Login';
 import Setup from './pages/Setup';
@@ -42,6 +43,7 @@ function Navigation({ darkMode, toggleDarkMode }: { darkMode: boolean; toggleDar
     { path: '/', label: 'Dashboard' },
     { path: '/search', label: 'Search' },
     { path: '/statistics', label: 'Statistics' },
+    { path: '/insights', label: 'Insights' },
     ...(user?.is_admin ? [
       { path: '/lists', label: 'Lists' },
       { path: '/alerts', label: 'Alert Rules' },
@@ -375,6 +377,7 @@ function AppLayout() {
           <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
           <Route path="/search" element={<ProtectedRoute><Search /></ProtectedRoute>} />
           <Route path="/statistics" element={<ProtectedRoute><Statistics /></ProtectedRoute>} />
+          <Route path="/insights" element={<ProtectedRoute><Insights /></ProtectedRoute>} />
           <Route path="/lists" element={<ProtectedRoute requireAdmin><Lists /></ProtectedRoute>} />
           <Route path="/alerts" element={<ProtectedRoute requireAdmin><AlertRules /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute requireAdmin><Settings /></ProtectedRoute>} />
