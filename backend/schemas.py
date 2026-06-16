@@ -9,6 +9,26 @@ from typing import ClassVar, Literal, Optional, List, Tuple, Union, get_args, ge
 
 from pydantic import BaseModel, Field as PydanticField, field_validator, model_validator
 
+from .classification import _DOMAIN_RE
+
+
+def _validate_domain_list(domains):
+    if domains is None:
+        return domains
+    cleaned = []
+    for raw in domains:
+        d = raw.strip().strip('.').lower()
+        if not d:
+            raise ValueError("domain cannot be empty")
+        if len(d) > 255:
+            raise ValueError(f"domain too long (max 255): {raw!r}")
+        if '*' in d:
+            raise ValueError(f"wildcard domains are not supported: {raw!r}")
+        if '.' not in d or not _DOMAIN_RE.match(d):
+            raise ValueError(f"invalid domain: {raw!r}")
+        cleaned.append(d)
+    return cleaned
+
 
 MatchStatus = Literal['any', 'blocked', 'allowed']
 
@@ -490,12 +510,22 @@ class AppDefinitionCreate(BaseModel):
     domains: List[str] = PydanticField(min_length=1)
     enabled: bool = True
 
+    @field_validator('domains')
+    @classmethod
+    def _check_domains(cls, v):
+        return _validate_domain_list(v)
+
 
 class AppDefinitionUpdate(BaseModel):
     name: Optional[str] = PydanticField(default=None, max_length=150)
     category: Optional[str] = PydanticField(default=None, max_length=50)
     domains: Optional[List[str]] = PydanticField(default=None, min_length=1)
     enabled: Optional[bool] = None
+
+    @field_validator('domains')
+    @classmethod
+    def _check_domains(cls, v):
+        return _validate_domain_list(v)
 
 
 class AppDefinitionResponse(BaseModel):

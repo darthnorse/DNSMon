@@ -3,6 +3,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, func, delete, insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
@@ -11,6 +12,7 @@ from ..schemas import AppDefinitionCreate, AppDefinitionUpdate, AppDefinitionRes
 from ..auth import get_current_user, require_admin
 from ..config import get_settings_sync
 from ..service import get_service
+from ..constants import VALID_SOURCES
 
 router = APIRouter(prefix="/api/app-definitions", tags=["app-definitions"])
 
@@ -53,14 +55,19 @@ async def _reclassify_async():
 async def list_definitions(source: Optional[str] = None,
                            db: AsyncSession = Depends(get_db),
                            _: User = Depends(get_current_user)):
+    if source and source not in VALID_SOURCES:
+        raise HTTPException(status_code=400, detail=f"Invalid source. Must be one of: {sorted(VALID_SOURCES)}")
     stmt = select(AppDefinition).order_by(AppDefinition.name)
     if source:
         stmt = stmt.where(AppDefinition.source == source)
     defs = (await db.execute(stmt)).scalars().all()
-    out = []
-    for d in defs:
-        out.append(AppDefinitionResponse.model_validate(
-            {**d.to_dict(domains=await _domains_for(db, d.id))}))
+    ids = [d.id for d in defs]
+    domain_map: dict[int, list[str]] = {}
+    if ids:
+        rows = await db.execute(select(AppDomain.app_id, AppDomain.domain).where(AppDomain.app_id.in_(ids)))
+        for app_id, domain in rows:
+            domain_map.setdefault(app_id, []).append(domain)
+    out = [AppDefinitionResponse.model_validate(d.to_dict(domains=domain_map.get(d.id, []))) for d in defs]
     return out
 
 
@@ -77,10 +84,14 @@ async def create_definition(payload: AppDefinitionCreate,
     if domains:
         await db.execute(insert(AppDomain),
                          [{'domain': d, 'app_id': ad.id, 'is_wildcard': '*' in d} for d in domains])
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="An app with this name already exists")
     await db.refresh(ad)
     _run_in_background(_reclassify_async())
-    return AppDefinitionResponse.model_validate({**ad.to_dict(domains=domains)})
+    return AppDefinitionResponse.model_validate(ad.to_dict(domains=domains))
 
 
 @router.put("/{def_id}", response_model=AppDefinitionResponse)
@@ -112,7 +123,7 @@ async def update_definition(def_id: int, payload: AppDefinitionUpdate,
     await db.commit()
     await db.refresh(ad)
     _run_in_background(_reclassify_async())
-    return AppDefinitionResponse.model_validate({**ad.to_dict(domains=await _domains_for(db, ad.id))})
+    return AppDefinitionResponse.model_validate(ad.to_dict(domains=await _domains_for(db, ad.id)))
 
 
 @router.delete("/{def_id}")
