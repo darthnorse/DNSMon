@@ -4,11 +4,12 @@ import { useAuth } from '../contexts/AuthContext';
 import { getErrorMessage } from '../utils/errors';
 import { copyToClipboard } from '../utils/clipboard';
 import NotificationsSettings from '../components/NotificationsSettings';
+import AppDefinitionsSettings from '../components/AppDefinitionsSettings';
 import Users from './Users';
 import ApiKeys from './ApiKeys';
 import type { PiholeServer, PiholeServerCreate, ServerType, OIDCProvider, OIDCProviderCreate, SyncPreview, SyncPreviewSource, SyncHistoryEntry } from '../types';
 
-type TabType = 'servers' | 'notifications' | 'polling' | 'sync' | 'oidc' | 'advanced' | 'users' | 'api-keys';
+type TabType = 'servers' | 'notifications' | 'polling' | 'sync' | 'oidc' | 'advanced' | 'users' | 'api-keys' | 'app-definitions';
 
 const SERVER_TYPE_LABELS: Record<ServerType, string> = {
   pihole: 'Pi-hole',
@@ -645,6 +646,7 @@ export default function Settings() {
   const tabs: { id: TabType; label: string }[] = [
     { id: 'servers', label: 'DNS Servers' },
     { id: 'notifications', label: 'Notifications' },
+    { id: 'app-definitions', label: 'App Definitions' },
     { id: 'polling', label: 'Polling & Retention' },
     { id: 'sync', label: 'Sync' },
     ...(user?.is_admin ? [
@@ -1032,6 +1034,13 @@ export default function Settings() {
 
       {activeTab === 'notifications' && (
         <NotificationsSettings
+          onError={setError}
+          onSuccess={setSuccessMessage}
+        />
+      )}
+
+      {activeTab === 'app-definitions' && (
+        <AppDefinitionsSettings
           onError={setError}
           onSuccess={setSuccessMessage}
         />
