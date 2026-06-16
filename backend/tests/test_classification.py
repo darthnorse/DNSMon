@@ -47,3 +47,47 @@ def test_parse_rejects_non_domain_rules():
     assert parse_adguard_rule('@@||allow.com^') is None
     assert parse_adguard_rule('') is None
     assert parse_adguard_rule('||^') is None
+
+
+from backend.classification import DomainMatcher
+
+
+def _matcher():
+    m = DomainMatcher()
+    m.add('netflix.com', app_id=1, app_name='Netflix', category='Streaming', source='adguard')
+    m.add('example.com', app_id=2, app_name='ExampleFeed', category='Software', source='adguard')
+    return m
+
+
+def test_matches_subdomain_by_suffix():
+    m = _matcher()
+    hit = m.match('ipv4-c001.nflxvideo.netflix.com')
+    assert hit.app_name == 'Netflix'
+
+
+def test_no_match_returns_none():
+    assert _matcher().match('unknown-domain.test') is None
+
+
+def test_manual_overrides_adguard_at_same_domain():
+    m = _matcher()
+    m.add('example.com', app_id=9, app_name='My Override', category='Productivity', source='manual')
+    hit = m.match('www.example.com')
+    assert hit.app_name == 'My Override'
+    assert hit.matched_source == 'manual'
+
+
+def test_manual_less_specific_still_wins_over_adguard():
+    # User intent: manual/supplement always override the feed.
+    m = DomainMatcher()
+    m.add('cdn.vendor.com', app_id=1, app_name='VendorCDN', category='CDN', source='adguard')
+    m.add('vendor.com', app_id=2, app_name='Vendor (manual)', category='Software', source='manual')
+    hit = m.match('cdn.vendor.com')
+    assert hit.matched_source == 'manual'
+
+
+def test_more_specific_wins_within_same_source():
+    m = DomainMatcher()
+    m.add('vendor.com', app_id=1, app_name='Vendor', category='Software', source='adguard')
+    m.add('mail.vendor.com', app_id=2, app_name='VendorMail', category='Software', source='adguard')
+    assert m.match('mail.vendor.com').app_name == 'VendorMail'
