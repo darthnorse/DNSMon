@@ -1,10 +1,11 @@
+import asyncio
 import json
 import logging
 from pathlib import Path
 from typing import Optional
 
 import httpx
-from sqlalchemy import select, delete, insert
+from sqlalchemy import select, delete, insert, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .classification import parse_adguard_rule, DomainMatcher
@@ -13,7 +14,7 @@ from .constants import (
     ADGUARD_GROUP_TO_CATEGORY,
 )
 from .database import async_session_maker
-from .models import AppDefinition, AppDomain, DomainLabel, Query
+from .models import AppDefinition, AppDomain, DomainLabel, DomainStatsHourly, Query
 from .utils import async_validate_url_safety
 
 logger = logging.getLogger(__name__)
@@ -25,12 +26,23 @@ class ClassificationService:
     """Builds and maintains the app/category knowledge base and the
     resolved domain_labels cache."""
 
+    def __init__(self):
+        self._lock = asyncio.Lock()
+
     async def _replace_source(self, db: AsyncSession, source: str, defs: list[dict]) -> int:
         """Delete all definitions for `source` and re-insert `defs`.
 
         Each def: {slug, name, category, icon_svg?, domains: [(domain, is_wildcard)]}.
         CASCADE removes the old app_domains. Returns count of definitions written.
+        Preserves admin disable-toggles: slugs that were enabled=False before the
+        refresh are restored to enabled=False after re-insertion.
         """
+        disabled_slugs = set((await db.execute(
+            select(AppDefinition.slug).where(
+                AppDefinition.source == source, AppDefinition.enabled == False
+            )
+        )).scalars().all())
+
         old_ids = (await db.execute(
             select(AppDefinition.id).where(AppDefinition.source == source)
         )).scalars().all()
@@ -50,6 +62,12 @@ class ClassificationService:
             ]
             if domain_rows:
                 await db.execute(insert(AppDomain), domain_rows)
+
+        if disabled_slugs:
+            await db.execute(update(AppDefinition).where(
+                AppDefinition.source == source, AppDefinition.slug.in_(disabled_slugs)
+            ).values(enabled=False))
+
         await db.commit()
         return len(defs)
 
@@ -122,7 +140,7 @@ class ClassificationService:
             matcher.add(domain, app_id=app_id, app_name=name, category=category, source=source)
         return matcher
 
-    async def reclassify(self, db: AsyncSession) -> int:
+    async def _do_reclassify(self, db: AsyncSession) -> int:
         """Resolve every distinct observed domain into domain_labels.
 
         Stores a row for every distinct domain (matched or not). Idempotent —
@@ -131,7 +149,9 @@ class ClassificationService:
         from .models import utcnow
 
         matcher = await self.build_matcher(db)
-        distinct_domains = (await db.execute(select(Query.domain).distinct())).scalars().all()
+        distinct_domains = (await db.execute(
+            select(DomainStatsHourly.domain).distinct()
+        )).scalars().all()
 
         now = utcnow()
         values = []
@@ -164,13 +184,22 @@ class ClassificationService:
         logger.info(f"Reclassified {len(values)} distinct domains")
         return len(values)
 
+    async def reclassify(self, db: AsyncSession) -> int:
+        async with self._lock:
+            return await self._do_reclassify(db)
+
     async def run_full(self, *, feed_enabled: bool = True,
                        supplement_enabled: bool = True,
                        url: str = CLASSIFICATION_FEED_URL) -> None:
         """Top-level job: refresh sources then reclassify all domains."""
-        async with async_session_maker() as db:
-            if feed_enabled:
-                await self.refresh_feed(db, url)
-            if supplement_enabled:
-                await self.load_supplement(db)
-            await self.reclassify(db)
+        async with self._lock:
+            async with async_session_maker() as db:
+                if feed_enabled:
+                    await self.refresh_feed(db, url)
+                else:
+                    await self._replace_source(db, 'adguard', [])
+                if supplement_enabled:
+                    await self.load_supplement(db)
+                else:
+                    await self._replace_source(db, 'supplement', [])
+                await self._do_reclassify(db)

@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import select, func
 from backend.classification_service import ClassificationService
-from backend.models import AppDefinition, AppDomain, DomainLabel, Query
+from backend.models import AppDefinition, AppDomain, DomainLabel, DomainStatsHourly, Query
 
 
 async def test_load_supplement_populates_definitions(db_session):
@@ -41,6 +41,8 @@ async def _seed_query(db_session, domain):
         timestamp=datetime.now(timezone.utc), domain=domain,
         client_ip='10.0.0.5', status='OK', server='s1', query_type='A',
     ))
+    hour = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    db_session.add(DomainStatsHourly(hour=hour, server='s1', domain=domain, total=1, blocked=0))
     await db_session.commit()
 
 
@@ -71,3 +73,36 @@ async def test_reclassify_is_idempotent_and_updates(db_session):
 
     label = await db_session.get(DomainLabel, 'notion.so')
     assert label.app_name == 'Notion'
+
+
+async def test_replace_source_preserves_disabled_flag(db_session):
+    svc = ClassificationService()
+    await svc._replace_source(db_session, 'adguard', [
+        {'slug': 'foo', 'name': 'Foo', 'category': 'X', 'domains': [('foo.com', False)]},
+    ])
+    foo = await db_session.scalar(
+        select(AppDefinition).where(AppDefinition.slug == 'foo', AppDefinition.source == 'adguard')
+    )
+    foo.enabled = False
+    await db_session.commit()
+    # refresh the source again (same slug)
+    await svc._replace_source(db_session, 'adguard', [
+        {'slug': 'foo', 'name': 'Foo', 'category': 'X', 'domains': [('foo.com', False)]},
+    ])
+    foo2 = await db_session.scalar(
+        select(AppDefinition).where(AppDefinition.slug == 'foo', AppDefinition.source == 'adguard')
+    )
+    assert foo2.enabled is False  # admin's disable survived the refresh
+
+
+async def test_run_full_disabled_sources_are_cleared(db_session):
+    svc = ClassificationService()
+    await svc._replace_source(db_session, 'adguard', [
+        {'slug': 'a1', 'name': 'A1', 'category': 'X', 'domains': [('a1.com', False)]}])
+    await svc._replace_source(db_session, 'supplement', [
+        {'slug': 's1', 'name': 'S1', 'category': 'Y', 'domains': [('s1.com', False)]}])
+    # run_full opens its own session; feed+supplement disabled => both sources cleared, no network
+    await svc.run_full(feed_enabled=False, supplement_enabled=False)
+    # verify via a fresh query (run_full committed in its own session)
+    remaining = await db_session.scalar(select(func.count()).select_from(AppDefinition))
+    assert remaining == 0
