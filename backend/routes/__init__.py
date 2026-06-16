@@ -14,6 +14,7 @@ from .domains import router as domains_router
 from .blocking import router as blocking_router
 from .notifications import router as notifications_router
 from .api_keys import router as api_keys_router
+from .insights import router as insights_router
 
 __all__ = [
     'auth_router',
@@ -28,4 +29,5 @@ __all__ = [
     'blocking_router',
     'notifications_router',
     'api_keys_router',
+    'insights_router',
 ]
