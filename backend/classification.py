@@ -51,7 +51,7 @@ class DomainMatcher:
 
     def add(self, domain: str, app_id: int, app_name: str,
             category: Optional[str], source: str) -> None:
-        domain = domain.strip().rstrip('.').lower()
+        domain = domain.strip().strip('.').lower()
         if not domain:
             return
         existing = self._entries.get(domain)
