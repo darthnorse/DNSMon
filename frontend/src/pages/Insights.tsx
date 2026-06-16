@@ -44,6 +44,7 @@ export default function Insights() {
   const [appDomains, setAppDomains] = useState<DomainUsage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [drillDownError, setDrillDownError] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -66,13 +67,18 @@ export default function Insights() {
   }, [period]);
 
   useEffect(() => {
-    if (!selectedApp) {
-      setAppDomains([]);
-      return;
-    }
-    insightsApi.appDomains(selectedApp, { period })
-      .then(setAppDomains)
-      .catch(() => setAppDomains([]));
+    if (!selectedApp) { setAppDomains([]); setDrillDownError(null); return; }
+    const loadDomains = async () => {
+      try {
+        setDrillDownError(null);
+        const data = await insightsApi.appDomains(selectedApp, { period });
+        setAppDomains(data);
+      } catch {
+        setAppDomains([]);
+        setDrillDownError('Failed to load domains for this app');
+      }
+    };
+    loadDomains();
   }, [selectedApp, period]);
 
   const topApps = apps.slice(0, 15);
@@ -237,7 +243,11 @@ export default function Insights() {
                   </button>
                 </div>
 
-                {appDomains.length === 0 ? (
+                {drillDownError ? (
+                  <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800/50 text-red-700 dark:text-red-300 px-4 py-3 rounded">
+                    {drillDownError}
+                  </div>
+                ) : appDomains.length === 0 ? (
                   <div className="text-center text-gray-500 dark:text-gray-400 py-8">
                     No domain data available
                   </div>
