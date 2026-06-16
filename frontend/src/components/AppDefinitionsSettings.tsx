@@ -112,6 +112,7 @@ export default function AppDefinitionsSettings({ onError, onSuccess }: Props) {
   };
 
   const handleToggleEnabled = async (def: AppDefinition) => {
+    onError(null);
     try {
       setSaving(true);
       await appDefinitionApi.update(def.id, { enabled: !def.enabled });
