@@ -1,4 +1,3 @@
-import asyncio
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -10,23 +9,14 @@ from ..models import User, BlocklistSource
 from ..schemas import BlocklistSourceResponse, BlocklistSourceUpdate
 from ..auth import get_current_user, require_admin
 from ..service import get_service
+from ._background import run_in_background
 
 router = APIRouter(prefix="/api/blocklist-sources", tags=["blocklist-sources"])
-
-# Hold strong references so asyncio doesn't GC background tasks mid-run.
-_background_tasks: set = set()
-
-
-def _run_in_background(coro):
-    task = asyncio.create_task(coro)
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
-    return task
 
 
 def _trigger_refresh():
     svc = get_service().classification_service
-    _run_in_background(svc.refresh_and_reclassify_blocklists())
+    run_in_background(svc.refresh_and_reclassify_blocklists())
 
 
 @router.get("", response_model=List[BlocklistSourceResponse])

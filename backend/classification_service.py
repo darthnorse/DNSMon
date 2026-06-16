@@ -15,7 +15,7 @@ from .constants import (
     ADGUARD_GROUP_TO_CATEGORY,
 )
 from .database import async_session_maker
-from .models import AppDefinition, AppDomain, DomainLabel, DomainStatsHourly, Query
+from .models import AppDefinition, AppDomain, BlocklistSource, DomainLabel, DomainStatsHourly, Query
 from .utils import async_validate_url_safety
 
 logger = logging.getLogger(__name__)
@@ -25,6 +25,9 @@ _SUPPLEMENT_PATH = Path(__file__).parent / 'data' / 'shadow_it_supplement.json'
 # Chunk app_domains inserts so a large blocklist (pro.plus ~546k rows) stays well
 # under PostgreSQL's ~32k bind-parameter cap (3 cols * 5000 = 15k params/statement).
 _DOMAIN_INSERT_BATCH = 5000
+
+# Cap the fetched blocklist body to bound memory (pro.plus is ~13 MiB today).
+_MAX_BLOCKLIST_BYTES = 64 * 1024 * 1024
 
 
 def parse_blocklist_text(text: str) -> set[str]:
@@ -42,16 +45,15 @@ def _blocklist_slug(category: str) -> str:
     return f"blocklist-{base or 'misc'}"
 
 
-def build_blocklist_defs(fetched: list[tuple[str, str]]) -> list[dict]:
-    """Turn [(category, raw_text), ...] into _replace_source-shaped defs.
+def build_blocklist_defs_from_sets(fetched: list[tuple[str, set[str]]]) -> list[dict]:
+    """Turn [(category, domain_set), ...] into _replace_source-shaped defs.
 
     Merges + dedups domains per category; one category-only def per category
-    (sorted domains, all non-wildcard). Categories with no parseable domains
-    are dropped.
+    (sorted domains, all non-wildcard). Categories with no domains are dropped.
     """
     by_cat: dict[str, set[str]] = {}
-    for category, text in fetched:
-        by_cat.setdefault(category, set()).update(parse_blocklist_text(text))
+    for category, domains in fetched:
+        by_cat.setdefault(category, set()).update(domains)
     return [
         {
             'slug': _blocklist_slug(category),
@@ -61,6 +63,12 @@ def build_blocklist_defs(fetched: list[tuple[str, str]]) -> list[dict]:
         }
         for category, domains in by_cat.items() if domains
     ]
+
+
+def build_blocklist_defs(fetched: list[tuple[str, str]]) -> list[dict]:
+    """Text-input convenience wrapper over build_blocklist_defs_from_sets."""
+    return build_blocklist_defs_from_sets(
+        [(category, parse_blocklist_text(text)) for category, text in fetched])
 
 
 class ClassificationService:
@@ -169,13 +177,32 @@ class ClassificationService:
         logger.info(f"Refreshed AdGuard feed: {n} app definitions")
         return n
 
+    async def _fetch_blocklist(self, url: str) -> str:
+        """GET a blocklist body, streaming with a byte cap to bound memory.
+
+        Raises ValueError if the body exceeds the cap, httpx.HTTPError on
+        transport/status failures."""
+        chunks: list[bytes] = []
+        total = 0
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            async with client.stream("GET", url) as resp:
+                resp.raise_for_status()
+                async for chunk in resp.aiter_bytes():
+                    total += len(chunk)
+                    if total > _MAX_BLOCKLIST_BYTES:
+                        raise ValueError(
+                            f"blocklist body exceeds {_MAX_BLOCKLIST_BYTES} byte cap")
+                    chunks.append(chunk)
+        return b''.join(chunks).decode('utf-8', errors='replace')
+
     async def refresh_blocklists(self, db: AsyncSession) -> int:
         """Fetch each enabled blocklist source and replace the 'blocklist' tier.
 
-        No enabled sources → clears the tier (returns 0). All fetches failing →
+        No enabled sources → clears the tier (returns 0). No source yielding any
+        domains (every fetch failed, or returned an unparseable/empty body) →
         leaves existing data untouched (returns -1). Not lock-protected: callers
         (run_full / refresh_and_reclassify_blocklists) hold the lock."""
-        from .models import BlocklistSource, utcnow
+        from .models import utcnow
         sources = (await db.execute(
             select(BlocklistSource).where(BlocklistSource.enabled == True)
         )).scalars().all()
@@ -186,7 +213,7 @@ class ClassificationService:
 
         # parse_blocklist_line is tolerant of hosts/plain/wildcard/adguard formats,
         # so src.format is advisory metadata today (no per-format branching needed).
-        fetched: list[tuple[str, str]] = []
+        fetched: list[tuple[str, set[str]]] = []
         for src in sources:
             unsafe = await async_validate_url_safety(src.url)
             if unsafe:
@@ -194,24 +221,28 @@ class ClassificationService:
                 src.last_status = 'error'
                 continue
             try:
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    resp = await client.get(src.url)
-                    resp.raise_for_status()
-                    text = resp.text
-            except httpx.HTTPError as e:
+                text = await self._fetch_blocklist(src.url)
+            except (httpx.HTTPError, ValueError) as e:
                 logger.error(f"Failed to fetch blocklist {src.name}: {e}")
+                src.last_status = 'error'
+                continue
+            domains = parse_blocklist_text(text)
+            if not domains:
+                # A 200 with no parseable domains (error page, empty/changed file)
+                # must not wipe the tier — mark it an error and keep prior data.
+                logger.error(f"Blocklist {src.name} yielded 0 domains; treating as error")
                 src.last_status = 'error'
                 continue
             src.last_status = 'ok'
             src.last_fetched_at = utcnow()
-            src.domain_count = len(parse_blocklist_text(text))
-            fetched.append((src.category, text))
+            src.domain_count = len(domains)
+            fetched.append((src.category, domains))
 
         await db.commit()  # persist last_* even when nothing is replaced
         if not fetched:
-            logger.error("All blocklist fetches failed; keeping existing tier")
+            logger.error("No blocklist source yielded domains; keeping existing tier")
             return -1
-        defs = build_blocklist_defs(fetched)
+        defs = build_blocklist_defs_from_sets(fetched)
         n = await self._replace_source(db, 'blocklist', defs)
         logger.info(f"Loaded {n} blocklist category definitions")
         return n

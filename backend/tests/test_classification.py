@@ -216,3 +216,29 @@ async def test_refresh_blocklists_no_enabled_clears(db_session):
     cnt = await db_session.scalar(
         select(func.count()).select_from(AppDefinition).where(AppDefinition.source == "blocklist"))
     assert cnt == 0
+
+
+async def test_refresh_blocklists_empty_body_keeps_tier(db_session, monkeypatch):
+    """A 200 that parses to 0 domains must NOT wipe the existing tier."""
+    svc = ClassificationService()
+    await svc._replace_source(db_session, "blocklist", [{
+        "slug": "blocklist-ads-tracking", "name": "Ads & Tracking",
+        "category": "Ads & Tracking", "domains": [("x.com", False)],
+    }])
+    await db_session.execute(delete(BlocklistSource))
+    db_session.add(BlocklistSource(name="Bad", url="https://e.com/bad.txt",
+                                   category="Ads & Tracking", format="domains", enabled=True))
+    await db_session.commit()
+
+    async def fake_fetch(self, url):  # 200 with no parseable domains
+        return "# upstream error page\nNot Found\n"
+    monkeypatch.setattr(ClassificationService, "_fetch_blocklist", fake_fetch)
+
+    n = await svc.refresh_blocklists(db_session)
+    assert n == -1  # nothing yielded → keep existing tier
+    cnt = await db_session.scalar(
+        select(func.count()).select_from(AppDefinition).where(AppDefinition.source == "blocklist"))
+    assert cnt == 1  # prior "Ads & Tracking" def preserved
+    src = (await db_session.execute(
+        select(BlocklistSource).where(BlocklistSource.name == "Bad"))).scalar_one()
+    assert src.last_status == "error"

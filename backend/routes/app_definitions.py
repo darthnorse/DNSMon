@@ -1,4 +1,3 @@
-import asyncio
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,18 +12,9 @@ from ..auth import get_current_user, require_admin
 from ..config import get_settings_sync
 from ..service import get_service
 from ..constants import VALID_SOURCES
+from ._background import run_in_background as _run_in_background
 
 router = APIRouter(prefix="/api/app-definitions", tags=["app-definitions"])
-
-# Hold strong references to background tasks so asyncio doesn't GC them mid-run.
-_background_tasks: set = set()
-
-
-def _run_in_background(coro):
-    task = asyncio.create_task(coro)
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
-    return task
 
 
 async def _domains_for(db: AsyncSession, app_id: int) -> List[str]:
