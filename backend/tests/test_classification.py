@@ -1,6 +1,7 @@
 import pytest
 from backend.classification import parse_adguard_rule, parse_blocklist_line, DomainMatcher, MatchResult
-from backend.classification_service import _blocklist_slug, build_blocklist_defs, parse_blocklist_text
+from backend.classification_service import ClassificationService, _blocklist_slug, build_blocklist_defs, parse_blocklist_text
+from backend.models import AppDefinition, AppDomain
 from backend.constants import (
     CLASSIFICATION_FEED_URL,
     SOURCE_PRECEDENCE,
@@ -145,3 +146,38 @@ def test_build_blocklist_defs_skips_empty_category():
 ])
 def test_blocklist_slug(category, expected):
     assert _blocklist_slug(category) == expected
+
+
+async def test_blocklist_match_is_category_only(db_session):
+    ad = AppDefinition(slug="blocklist-ads-tracking", name="Ads & Tracking",
+                       category="Ads & Tracking", source="blocklist", enabled=True)
+    db_session.add(ad)
+    await db_session.flush()
+    db_session.add(AppDomain(domain="tracker.com", app_id=ad.id, is_wildcard=False))
+    await db_session.commit()
+
+    matcher = await ClassificationService().build_matcher(db_session)
+    hit = matcher.match("sub.tracker.com")
+    assert hit is not None
+    assert hit.app_id == ad.id
+    assert hit.app_name is None
+    assert hit.category == "Ads & Tracking"
+    assert hit.matched_source == "blocklist"
+
+
+async def test_real_app_beats_blocklist(db_session):
+    block = AppDefinition(slug="blocklist-ads-tracking", name="Ads & Tracking",
+                          category="Ads & Tracking", source="blocklist", enabled=True)
+    app = AppDefinition(slug="acme", name="Acme", category="Software",
+                        source="manual", enabled=True)
+    db_session.add_all([block, app])
+    await db_session.flush()
+    db_session.add(AppDomain(domain="acme.com", app_id=block.id, is_wildcard=False))
+    db_session.add(AppDomain(domain="acme.com", app_id=app.id, is_wildcard=False))
+    await db_session.commit()
+
+    matcher = await ClassificationService().build_matcher(db_session)
+    hit = matcher.match("acme.com")
+    assert hit.app_name == "Acme"
+    assert hit.category == "Software"
+    assert hit.matched_source == "manual"

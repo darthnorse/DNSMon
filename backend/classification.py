@@ -73,7 +73,7 @@ def parse_blocklist_line(line: str) -> Optional[str]:
 @dataclass
 class MatchResult:
     app_id: int
-    app_name: str
+    app_name: Optional[str]
     category: Optional[str]
     matched_source: str
 
@@ -85,7 +85,7 @@ class DomainMatcher:
     def __init__(self):
         self._entries: dict[str, MatchResult] = {}
 
-    def add(self, domain: str, app_id: int, app_name: str,
+    def add(self, domain: str, app_id: int, app_name: Optional[str],
             category: Optional[str], source: str) -> None:
         domain = domain.strip().strip('.').lower()
         if not domain:

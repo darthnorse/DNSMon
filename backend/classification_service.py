@@ -174,7 +174,8 @@ class ClassificationService:
         )
         matcher = DomainMatcher()
         for domain, app_id, name, category, source in rows:
-            matcher.add(domain, app_id=app_id, app_name=name, category=category, source=source)
+            app_name = None if source == 'blocklist' else name
+            matcher.add(domain, app_id=app_id, app_name=app_name, category=category, source=source)
         return matcher
 
     async def _do_reclassify(self, db: AsyncSession) -> int:
