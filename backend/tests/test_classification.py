@@ -1,4 +1,5 @@
 import pytest
+from sqlalchemy import select, func
 from backend.classification import parse_adguard_rule, parse_blocklist_line, DomainMatcher, MatchResult
 from backend.classification_service import ClassificationService, _blocklist_slug, build_blocklist_defs, parse_blocklist_text
 from backend.models import AppDefinition, AppDomain
@@ -181,3 +182,20 @@ async def test_real_app_beats_blocklist(db_session):
     assert hit.app_name == "Acme"
     assert hit.category == "Software"
     assert hit.matched_source == "manual"
+
+
+async def test_replace_source_blocklist_batches(db_session):
+    svc = ClassificationService()
+    defs = [{
+        "slug": "blocklist-ads-tracking", "name": "Ads & Tracking",
+        "category": "Ads & Tracking",
+        "domains": [(f"d{i}.com", False) for i in range(10500)],
+    }]
+    n = await svc._replace_source(db_session, "blocklist", defs)
+    assert n == 1
+
+    ad_id = await db_session.scalar(
+        select(AppDefinition.id).where(AppDefinition.source == "blocklist"))
+    cnt = await db_session.scalar(
+        select(func.count()).select_from(AppDomain).where(AppDomain.app_id == ad_id))
+    assert cnt == 10500

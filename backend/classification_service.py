@@ -22,6 +22,10 @@ logger = logging.getLogger(__name__)
 
 _SUPPLEMENT_PATH = Path(__file__).parent / 'data' / 'shadow_it_supplement.json'
 
+# Chunk app_domains inserts so a large blocklist (pro.plus ~546k rows) stays well
+# under PostgreSQL's ~32k bind-parameter cap (3 cols * 5000 = 15k params/statement).
+_DOMAIN_INSERT_BATCH = 5000
+
 
 def parse_blocklist_text(text: str) -> set[str]:
     """Parse raw blocklist text to a set of bare domains."""
@@ -97,8 +101,8 @@ class ClassificationService:
                 {'domain': dom, 'app_id': ad.id, 'is_wildcard': wild}
                 for (dom, wild) in d['domains']
             ]
-            if domain_rows:
-                await db.execute(insert(AppDomain), domain_rows)
+            for i in range(0, len(domain_rows), _DOMAIN_INSERT_BATCH):
+                await db.execute(insert(AppDomain), domain_rows[i:i + _DOMAIN_INSERT_BATCH])
 
         if disabled_slugs:
             await db.execute(update(AppDefinition).where(
