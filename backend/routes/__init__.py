@@ -15,6 +15,7 @@ from .blocking import router as blocking_router
 from .notifications import router as notifications_router
 from .api_keys import router as api_keys_router
 from .insights import router as insights_router
+from .app_definitions import router as app_definitions_router
 
 __all__ = [
     'auth_router',
@@ -30,4 +31,5 @@ __all__ = [
     'notifications_router',
     'api_keys_router',
     'insights_router',
+    'app_definitions_router',
 ]
