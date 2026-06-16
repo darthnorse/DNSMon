@@ -510,6 +510,9 @@ class AppDefinitionResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    class Config:
+        from_attributes = True
+
     @field_validator('created_at', 'updated_at', mode='after')
     @classmethod
     def coerce_to_utc(cls, v: datetime) -> datetime:
