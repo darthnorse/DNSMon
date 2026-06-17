@@ -504,6 +504,11 @@ class DomainUsage(BaseModel):
     blocked: int
 
 
+class ClassifySuggestions(BaseModel):
+    app_names: List[str]
+    categories: List[str]
+
+
 class ClassifyRequest(BaseModel):
     domain: str = PydanticField(min_length=1, max_length=255)
     app_name: Optional[str] = PydanticField(default=None, max_length=150)

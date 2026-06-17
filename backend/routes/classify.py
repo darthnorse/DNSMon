@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..models import User, AppDefinition, AppDomain, DomainLabel
-from ..schemas import ClassifyRequest
+from ..schemas import ClassifyRequest, ClassifySuggestions
 from ..auth import get_current_user, require_admin
 from ..utils import registrable_domain
 from ..classification_service import _slugify
@@ -118,3 +118,18 @@ async def get_label(domain: str = Query(..., min_length=1, max_length=255),
         "category": label.category if label else None,
         "matched_source": label.matched_source if label else None,
     }
+
+
+@router.get("/suggestions", response_model=ClassifySuggestions)
+async def get_suggestions(db: AsyncSession = Depends(get_db),
+                          _: User = Depends(get_current_user)):
+    """Existing app names + categories for the classify modal's autocomplete/typo guard."""
+    app_names = (await db.execute(
+        select(AppDefinition.name)
+        .where(AppDefinition.is_category_only == False)  # noqa: E712
+        .distinct().order_by(AppDefinition.name))).scalars().all()
+    categories = (await db.execute(
+        select(AppDefinition.category)
+        .where(AppDefinition.category.isnot(None))
+        .distinct().order_by(AppDefinition.category))).scalars().all()
+    return ClassifySuggestions(app_names=list(app_names), categories=list(categories))

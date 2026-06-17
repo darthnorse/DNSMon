@@ -156,3 +156,32 @@ async def test_label_rejects_overlong_domain(async_admin_client: AsyncClient):
     long_domain = "a" * 256 + ".com"
     r = await async_admin_client.get("/api/classify/label", params={"domain": long_domain})
     assert r.status_code == 422
+
+
+async def test_suggestions_requires_auth(async_client: AsyncClient):
+    r = await async_client.get("/api/classify/suggestions")
+    assert r.status_code == 401
+
+
+async def test_suggestions_readonly_allowed(async_readonly_client: AsyncClient):
+    r = await async_readonly_client.get("/api/classify/suggestions")
+    assert r.status_code == 200
+
+
+async def test_suggestions_returns_apps_and_categories(async_admin_client: AsyncClient, db_session):
+    db_session.add_all([
+        AppDefinition(slug="app-notion", name="Notion", category="Productivity",
+                      source="manual", enabled=True, is_category_only=False),
+        AppDefinition(slug="manual-cat-cdn", name="CDN", category="CDN",
+                      source="manual", enabled=True, is_category_only=True),
+        AppDefinition(slug="adg-netflix", name="Netflix", category="Streaming",
+                      source="adguard", enabled=True, is_category_only=False),
+    ])
+    await db_session.commit()
+    r = await async_admin_client.get("/api/classify/suggestions")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "Notion" in body["app_names"]
+    assert "Netflix" in body["app_names"]
+    assert "CDN" not in body["app_names"]
+    assert set(["Productivity", "Streaming", "CDN"]).issubset(set(body["categories"]))
