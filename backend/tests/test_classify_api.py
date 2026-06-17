@@ -143,3 +143,16 @@ async def test_label_reflects_manual_classification(async_admin_client: AsyncCli
     assert body["matched"] is True
     assert body["app_name"] == "Mapped"
     assert body["matched_source"] == "manual"
+
+
+async def test_unclassify_rejects_overlong_domain(async_admin_client: AsyncClient):
+    long_domain = "a" * 256 + ".com"
+    r = await async_admin_client.delete("/api/classify",
+                                        params={"domain": long_domain, "scope": "exact"})
+    assert r.status_code == 422  # query param length cap, mirroring POST's 255 limit
+
+
+async def test_label_rejects_overlong_domain(async_admin_client: AsyncClient):
+    long_domain = "a" * 256 + ".com"
+    r = await async_admin_client.get("/api/classify/label", params={"domain": long_domain})
+    assert r.status_code == 422

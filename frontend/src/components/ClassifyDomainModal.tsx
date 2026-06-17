@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { classifyApi, insightsClassifyApi } from '../utils/api';
+import { classifyApi, insightsApi } from '../utils/api';
 import { getErrorMessage } from '../utils/errors';
 import type { DomainLabelInfo } from '../types';
 
@@ -23,7 +23,7 @@ export default function ClassifyDomainModal({ domain, onClose, onClassified }: P
       try {
         const [lbl, cats] = await Promise.all([
           classifyApi.label(domain),
-          insightsClassifyApi.categories(),
+          insightsApi.categories(),
         ]);
         setInfo(lbl);
         setAppName(lbl.app_name ?? '');
@@ -91,12 +91,12 @@ export default function ClassifyDomainModal({ domain, onClose, onClassified }: P
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">App name (optional)</label>
         <input value={appName} onChange={(e) => setAppName(e.target.value)}
                placeholder="e.g. Notion — leave blank for a category-only tag"
-               className="w-full mb-3 rounded border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm" />
+               className="w-full mb-3 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm" />
 
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Category</label>
         <input value={category} onChange={(e) => setCategory(e.target.value)} list="dnsmon-category-options"
                placeholder="e.g. Productivity"
-               className="w-full mb-3 rounded border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm" />
+               className="w-full mb-3 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm" />
         <datalist id="dnsmon-category-options">
           {categoryOptions.map((c) => <option key={c} value={c} />)}
         </datalist>

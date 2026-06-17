@@ -444,6 +444,10 @@ export const insightsApi = {
     const response = await api.get<DomainUsage[]>('/insights/apps/domains', { params: { ...params, app_name } });
     return response.data;
   },
+  uncategorized: async (period = '24h', limit = 50): Promise<DomainUsage[]> => {
+    const response = await api.get<DomainUsage[]>('/insights/uncategorized-domains', { params: { period, limit } });
+    return response.data;
+  },
 };
 
 export const classifyApi = {
@@ -453,14 +457,6 @@ export const classifyApi = {
   remove: async (domain: string, scope: 'registrable' | 'exact'): Promise<void> => {
     await api.delete('/classify', { params: { domain, scope } });
   },
-};
-
-// Reads for the click-to-classify flow (uncategorized list + categories for the modal dropdown).
-export const insightsClassifyApi = {
-  uncategorized: async (period = '24h', limit = 50): Promise<DomainUsage[]> =>
-    (await api.get<DomainUsage[]>('/insights/uncategorized-domains', { params: { period, limit } })).data,
-  categories: async (period = '24h'): Promise<CategoryUsage[]> =>
-    (await api.get<CategoryUsage[]>('/insights/categories', { params: { period } })).data,
 };
 
 // ============================================================================

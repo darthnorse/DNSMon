@@ -10,7 +10,7 @@ import {
   Pie,
   Cell,
 } from 'recharts';
-import { insightsApi, insightsClassifyApi } from '../utils/api';
+import { insightsApi } from '../utils/api';
 import type { AppUsage, CategoryUsage, DomainUsage } from '../types';
 import ClassifyDomainModal from '../components/ClassifyDomainModal';
 
@@ -56,7 +56,7 @@ export default function Insights() {
       const [a, c, u] = await Promise.all([
         insightsApi.apps({ period }),
         insightsApi.categories({ period }),
-        insightsClassifyApi.uncategorized(period, 50).catch(() => [] as DomainUsage[]),
+        insightsApi.uncategorized(period, 50).catch(() => [] as DomainUsage[]),
       ]);
       setApps(a);
       setCategories(c);

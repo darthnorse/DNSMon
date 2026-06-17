@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -80,7 +80,8 @@ async def classify(payload: ClassifyRequest, db: AsyncSession = Depends(get_db),
 
 
 @router.delete("")
-async def unclassify(domain: str, scope: str = 'registrable',
+async def unclassify(domain: str = Query(..., min_length=1, max_length=255),
+                     scope: str = 'registrable',
                      db: AsyncSession = Depends(get_db), _: User = Depends(require_admin)):
     if scope not in ('registrable', 'exact'):
         raise HTTPException(status_code=400, detail="scope must be 'registrable' or 'exact'")
@@ -104,7 +105,8 @@ async def unclassify(domain: str, scope: str = 'registrable',
 
 
 @router.get("/label")
-async def get_label(domain: str, db: AsyncSession = Depends(get_db),
+async def get_label(domain: str = Query(..., min_length=1, max_length=255),
+                    db: AsyncSession = Depends(get_db),
                     _: User = Depends(get_current_user)):
     clean = domain.strip().rstrip('.').lower()
     label = await db.get(DomainLabel, clean)
