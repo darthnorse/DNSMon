@@ -57,9 +57,14 @@ async def test_statistics_top_domains_include_labels(db_session, async_admin_cli
     # Unmatched.
     assert top["edge-cdn.example.net"]["app_name"] is None
     assert top["edge-cdn.example.net"]["category"] is None
+    # Ranking preserved (by count desc) even though labels are joined after the LIMIT.
+    assert [d["domain"] for d in body["top_domains"]] == [
+        "i.instagram.com", "edge-cdn.example.net", "ads.example.com",
+    ]
 
     blocked = {d["domain"]: d for d in body["top_blocked_domains"]}
     assert blocked["ads.example.com"]["category"] == "Advertising"
+    assert [d["domain"] for d in body["top_blocked_domains"]] == ["ads.example.com"]
 
 
 async def test_statistics_top_domains_raw_path_includes_labels(db_session, async_admin_client):

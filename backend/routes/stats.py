@@ -16,17 +16,27 @@ from ..constants import BLOCKED_STATUSES, CACHE_STATUSES
 router = APIRouter(prefix="/api", tags=["stats"])
 
 
-def _attach_domain_labels(stmt, domain_col):
-    """LEFT JOIN domain_labels onto stmt so each row also carries
-    app_name and category. domain_labels.domain is the PK (one row per
-    domain), so adding (app_name, category) to the GROUP BY does not
-    change aggregated counts or the number of result rows."""
+def _select_top_domains_with_labels(agg):
+    """Given a top-domain aggregate (a select exposing `domain` and `count`,
+    already ORDER BY count DESC + LIMIT-ed), wrap it in a subquery and LEFT JOIN
+    domain_labels (PK = domain, 1:1) so each row carries app_name/category.
+    Joining *after* the LIMIT keeps the label lookup to the top-N rows instead
+    of every candidate domain. The outer ORDER BY re-applies the ranking the
+    subquery's LIMIT selected — a bare subquery select has no guaranteed order."""
+    sub = agg.subquery()
     return (
-        stmt
-        .add_columns(DomainLabel.app_name, DomainLabel.category)
-        .outerjoin(DomainLabel, domain_col == DomainLabel.domain)
-        .group_by(DomainLabel.app_name, DomainLabel.category)
+        select(sub.c.domain, sub.c.count, DomainLabel.app_name, DomainLabel.category)
+        .outerjoin(DomainLabel, sub.c.domain == DomainLabel.domain)
+        .order_by(sub.c.count.desc())
     )
+
+
+def _top_domain_rows(result):
+    """Serialize labeled top-domain rows as (domain, count, app_name, category) dicts."""
+    return [
+        {"domain": row[0], "count": row[1], "app_name": row[2], "category": row[3]}
+        for row in result
+    ]
 
 
 @router.get("/stats", response_model=StatsResponse)
@@ -289,40 +299,32 @@ async def get_statistics(
             if has_client_filter:
                 return await _run_top_domains_raw(s, period_start, server_list, client_list, period_end)
             T = DomainStatsHourly
-            stmt = (
+            agg = (
                 select(T.domain, func.sum(T.total).label('count'))
                 .where(T.hour >= period_start)
                 .group_by(T.domain)
                 .order_by(func.sum(T.total).desc())
                 .limit(10)
             )
-            stmt = apply_filters(stmt, T, client=False)
-            stmt = _attach_domain_labels(stmt, T.domain)
-            result = await s.execute(stmt)
-            return [
-                {"domain": row[0], "count": row[1], "app_name": row[2], "category": row[3]}
-                for row in result
-            ]
+            agg = apply_filters(agg, T, client=False)
+            result = await s.execute(_select_top_domains_with_labels(agg))
+            return _top_domain_rows(result)
 
     async def run_top_blocked():
         async with async_session_maker() as s:
             if has_client_filter:
                 return await _run_top_domains_raw(s, period_start, server_list, client_list, period_end, blocked_only=True)
             T = DomainStatsHourly
-            stmt = (
+            agg = (
                 select(T.domain, func.sum(T.blocked).label('count'))
                 .where(and_(T.hour >= period_start, T.blocked > 0))
                 .group_by(T.domain)
                 .order_by(func.sum(T.blocked).desc())
                 .limit(10)
             )
-            stmt = apply_filters(stmt, T, client=False)
-            stmt = _attach_domain_labels(stmt, T.domain)
-            result = await s.execute(stmt)
-            return [
-                {"domain": row[0], "count": row[1], "app_name": row[2], "category": row[3]}
-                for row in result
-            ]
+            agg = apply_filters(agg, T, client=False)
+            result = await s.execute(_select_top_domains_with_labels(agg))
+            return _top_domain_rows(result)
 
     async def run_top_clients():
         async with async_session_maker() as s:
@@ -465,7 +467,7 @@ async def _run_top_domains_raw(s, period_start, server_list, client_list,
 
     When blocked_only=True, only counts queries with blocked statuses.
     """
-    stmt = (
+    agg = (
         select(Query.domain, func.count(Query.id).label('count'))
         .where(Query.timestamp >= period_start)
         .group_by(Query.domain)
@@ -473,16 +475,12 @@ async def _run_top_domains_raw(s, period_start, server_list, client_list,
         .limit(10)
     )
     if blocked_only:
-        stmt = stmt.where(Query.status.in_(BLOCKED_STATUSES))
+        agg = agg.where(Query.status.in_(BLOCKED_STATUSES))
     if period_end:
-        stmt = stmt.where(Query.timestamp <= period_end)
+        agg = agg.where(Query.timestamp <= period_end)
     if server_list:
-        stmt = stmt.where(Query.server.in_(server_list))
+        agg = agg.where(Query.server.in_(server_list))
     if client_list:
-        stmt = stmt.where(Query.client_ip.in_(client_list))
-    stmt = _attach_domain_labels(stmt, Query.domain)
-    result = await s.execute(stmt)
-    return [
-        {"domain": row[0], "count": row[1], "app_name": row[2], "category": row[3]}
-        for row in result
-    ]
+        agg = agg.where(Query.client_ip.in_(client_list))
+    result = await s.execute(_select_top_domains_with_labels(agg))
+    return _top_domain_rows(result)
