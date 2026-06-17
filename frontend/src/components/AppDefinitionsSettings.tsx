@@ -328,7 +328,7 @@ export default function AppDefinitionsSettings({ onError, onSuccess }: Props) {
                       <button
                         onClick={() => handleToggleEnabled(def)}
                         disabled={saving}
-                        className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                        className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent align-middle transition-colors duration-200 ease-in-out focus:outline-none ${
                           def.enabled ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'
                         } ${saving ? 'opacity-50 cursor-not-allowed' : ''}`}
                         role="switch"
