@@ -1,7 +1,10 @@
 import pytest
 from sqlalchemy import select, func, delete
 from backend.classification import parse_adguard_rule, parse_blocklist_line, DomainMatcher, MatchResult
-from backend.classification_service import ClassificationService, _blocklist_slug, build_blocklist_defs, parse_blocklist_text
+from backend.classification_service import (
+    ClassificationService, _blocklist_slug, build_blocklist_defs,
+    parse_blocklist_text, parse_dnsmon_entries,
+)
 from backend.models import AppDefinition, AppDomain, BlocklistSource
 from backend.constants import (
     CLASSIFICATION_FEED_URL,
@@ -286,3 +289,34 @@ async def test_refresh_blocklists_empty_body_keeps_tier(db_session, monkeypatch)
     src = (await db_session.execute(
         select(BlocklistSource).where(BlocklistSource.name == "Bad"))).scalar_one()
     assert src.last_status == "error"
+
+
+def test_parse_dnsmon_app_entry():
+    defs = parse_dnsmon_entries([
+        {"slug": "notion", "name": "Notion", "category": "Productivity",
+         "domains": ["Notion.so", "notion.com"]},
+    ])
+    assert len(defs) == 1
+    d = defs[0]
+    assert d["slug"] == "notion"
+    assert d["name"] == "Notion"
+    assert d["category"] == "Productivity"
+    assert d["is_category_only"] is False
+    assert ("notion.so", False) in d["domains"]   # lowercased
+
+
+def test_parse_dnsmon_category_bucket_entry():
+    defs = parse_dnsmon_entries([{"category": "CDN", "domains": ["cdn.example.com"]}])
+    assert len(defs) == 1
+    d = defs[0]
+    assert d["is_category_only"] is True
+    assert d["slug"] == "dnsmon-cat-cdn"
+    assert d["name"] == "CDN"          # name falls back to the category for display
+
+
+def test_parse_dnsmon_skips_no_domains():
+    assert parse_dnsmon_entries([{"name": "X", "category": "Y", "domains": []}]) == []
+
+
+def test_parse_dnsmon_skips_no_name_no_category():
+    assert parse_dnsmon_entries([{"domains": ["a.com"]}]) == []

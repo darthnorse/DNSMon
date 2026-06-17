@@ -40,9 +40,43 @@ def parse_blocklist_text(text: str) -> set[str]:
     return domains
 
 
+def _slugify(value: str) -> str:
+    base = re.sub(r'-+', '-', ''.join(c if c.isalnum() else '-' for c in (value or '').lower())).strip('-')
+    return base or 'misc'
+
+
 def _blocklist_slug(category: str) -> str:
-    base = re.sub(r'-+', '-', ''.join(c if c.isalnum() else '-' for c in category.lower())).strip('-')
-    return f"blocklist-{base or 'misc'}"
+    return f"blocklist-{_slugify(category)}"
+
+
+def parse_dnsmon_entries(raw: list) -> list[dict]:
+    """Build _replace_source defs from DNSMon JSON entries.
+
+    Entry WITH a 'name' → app def (is_category_only=False). Entry WITHOUT a name
+    but WITH a category → category-only bucket (is_category_only=True, synthetic
+    slug). Entries with no usable domains, or with neither name nor category, are
+    skipped. Domains are lowercased; '*' marks a wildcard.
+    """
+    defs: list[dict] = []
+    for entry in raw:
+        domains = [(d.strip().lower(), '*' in d) for d in entry.get('domains', []) if d.strip()]
+        if not domains:
+            continue
+        name = (entry.get('name') or '').strip()
+        category = entry.get('category')
+        if name:
+            defs.append({
+                'slug': (entry.get('slug') or '').strip() or _slugify(name),
+                'name': name, 'category': category,
+                'domains': domains, 'is_category_only': False,
+            })
+        elif category:
+            defs.append({
+                'slug': (entry.get('slug') or '').strip() or f"dnsmon-cat-{_slugify(category)}",
+                'name': category, 'category': category,
+                'domains': domains, 'is_category_only': True,
+            })
+    return defs
 
 
 def build_blocklist_defs_from_sets(fetched: list[tuple[str, set[str]]]) -> list[dict]:
