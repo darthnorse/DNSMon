@@ -57,3 +57,27 @@ async def classify(payload: ClassifyRequest, db: AsyncSession = Depends(get_db),
     await db.commit()
     run_in_background(_reclassify_async())
     return {"domain": target, "app_name": app_name, "category": category, "scope": payload.scope}
+
+
+@router.delete("")
+async def unclassify(domain: str, scope: str = 'registrable',
+                     db: AsyncSession = Depends(get_db), _: User = Depends(require_admin)):
+    if scope not in ('registrable', 'exact'):
+        raise HTTPException(status_code=400, detail="scope must be 'registrable' or 'exact'")
+    target = _resolve(domain, scope)
+    manual_ids = (await db.execute(
+        select(AppDefinition.id).where(AppDefinition.source == 'manual'))).scalars().all()
+    if manual_ids:
+        await db.execute(delete(AppDomain).where(
+            AppDomain.domain == target, AppDomain.app_id.in_(manual_ids)))
+        await db.flush()
+        counts = (await db.execute(
+            select(AppDefinition.id, func.count(AppDomain.id))
+            .outerjoin(AppDomain, AppDomain.app_id == AppDefinition.id)
+            .where(AppDefinition.source == 'manual').group_by(AppDefinition.id))).all()
+        empty = [aid for aid, c in counts if c == 0]
+        if empty:
+            await db.execute(delete(AppDefinition).where(AppDefinition.id.in_(empty)))
+    await db.commit()
+    run_in_background(_reclassify_async())
+    return {"domain": target, "removed": True}

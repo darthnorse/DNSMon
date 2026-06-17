@@ -55,3 +55,32 @@ async def test_classify_appends_to_existing_app(async_admin_client: AsyncClient,
     cnt = await db_session.scalar(select(func.count()).select_from(AppDomain).where(
         AppDomain.app_id == defs[0].id))
     assert cnt == 2
+
+
+async def test_unclassify_removes_and_empties(async_admin_client: AsyncClient, db_session):
+    await async_admin_client.post("/api/classify", json={
+        "domain": "solo.example.org", "category": "CDN", "scope": "exact"})
+    # one category-only bucket now holds solo.example.org
+    r = await async_admin_client.delete("/api/classify",
+                                        params={"domain": "solo.example.org", "scope": "exact"})
+    assert r.status_code == 200, r.text
+    dom = await db_session.scalar(select(AppDomain).where(AppDomain.domain == "solo.example.org"))
+    assert dom is None  # mapping removed
+    # the bucket had only that domain -> def deleted
+    ad = await db_session.scalar(select(AppDefinition).where(AppDefinition.slug == "manual-cat-cdn"))
+    assert ad is None
+
+
+async def test_unclassify_keeps_def_with_other_domains(async_admin_client: AsyncClient, db_session):
+    await async_admin_client.post("/api/classify", json={
+        "domain": "a.example.net", "app_name": "Acme", "scope": "exact"})
+    await async_admin_client.post("/api/classify", json={
+        "domain": "b.example.net", "app_name": "Acme", "scope": "exact"})
+    await async_admin_client.delete("/api/classify",
+                                    params={"domain": "a.example.net", "scope": "exact"})
+    ad = await db_session.scalar(select(AppDefinition).where(
+        AppDefinition.source == 'manual', AppDefinition.name == 'Acme'))
+    assert ad is not None  # still has b.example.net
+    cnt = await db_session.scalar(select(func.count()).select_from(AppDomain).where(
+        AppDomain.app_id == ad.id))
+    assert cnt == 1
