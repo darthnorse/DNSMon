@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { classifyApi } from '../utils/api';
 import { getErrorMessage } from '../utils/errors';
 import { nearestSuggestion } from '../utils/typoGuard';
+import AutocompleteInput from './AutocompleteInput';
 import type { DomainLabelInfo } from '../types';
 
 interface Props {
@@ -101,20 +102,20 @@ export default function ClassifyDomainModal({ domain, onClose, onClassified }: P
         )}
 
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">App name (optional)</label>
-        <input value={appName} onChange={(e) => setAppName(e.target.value)} list="dnsmon-appname-options"
-               placeholder="e.g. Notion — leave blank for a category-only tag"
-               className="w-full mb-3 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm" />
-        <datalist id="dnsmon-appname-options">
-          {appNameOptions.map((a) => <option key={a} value={a} />)}
-        </datalist>
+        <AutocompleteInput
+          value={appName}
+          onChange={(v) => { setAppName(v); setGuardPrompt(null); }}
+          options={appNameOptions}
+          placeholder="e.g. Notion — leave blank for a category-only tag"
+        />
 
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Category</label>
-        <input value={category} onChange={(e) => setCategory(e.target.value)} list="dnsmon-category-options"
-               placeholder="e.g. Productivity"
-               className="w-full mb-3 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm" />
-        <datalist id="dnsmon-category-options">
-          {categoryOptions.map((c) => <option key={c} value={c} />)}
-        </datalist>
+        <AutocompleteInput
+          value={category}
+          onChange={(v) => { setCategory(v); setGuardPrompt(null); }}
+          options={categoryOptions}
+          placeholder="e.g. Productivity"
+        />
 
         <fieldset className="mb-4 text-sm">
           <label className="flex items-center gap-2 mb-1 text-gray-700 dark:text-gray-300">
@@ -142,8 +143,6 @@ export default function ClassifyDomainModal({ domain, onClose, onClassified }: P
                 onClick={() => {
                   const useApp = guardPrompt.appSug ?? appName.trim();
                   const useCat = guardPrompt.catSug ?? category.trim();
-                  setAppName(useApp);
-                  setCategory(useCat);
                   doClassify(useApp || undefined, useCat || undefined);
                 }}
                 disabled={saving}
