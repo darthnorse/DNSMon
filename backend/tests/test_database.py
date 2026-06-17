@@ -123,3 +123,22 @@ async def test_ensure_insight_sources_idempotent(db_session):
     assert cnt == expected
     kinds = set((await db_session.execute(select(InsightSource.kind))).scalars())
     assert kinds == {"adguard", "dnsmon", "hosts"}
+
+
+async def test_ensure_insight_sources_no_duplicate_singleton_on_url_change(db_session):
+    from backend.database import ensure_insight_sources
+    from backend.models import InsightSource
+    from sqlalchemy import update
+
+    await ensure_insight_sources()  # seeds AdGuard/DNSMon/Hagezi
+    # Simulate an admin editing the AdGuard URL via the panel.
+    await db_session.execute(update(InsightSource)
+                             .where(InsightSource.kind == 'adguard')
+                             .values(url='https://example.com/my-custom-feed.json'))
+    await db_session.commit()
+
+    added = await ensure_insight_sources()  # must NOT insert a 2nd adguard row
+    assert added == 0
+    cnt = await db_session.scalar(select(func.count()).select_from(InsightSource)
+                                  .where(InsightSource.kind == 'adguard'))
+    assert cnt == 1

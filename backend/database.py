@@ -134,8 +134,11 @@ async def _run_migrations(conn):
 
 
 async def ensure_insight_sources() -> int:
-    """Ensure each default insight source exists (insert-if-missing keyed on url).
-    Returns rows added. On upgrade, AdGuard/DNSMon inherit the legacy
+    """Ensure each default insight source exists. Returns rows added.
+
+    `adguard`/`dnsmon` are singletons keyed on `kind` (their URL is editable in the
+    panel, so URL-keying would insert a duplicate after a reboot). `hosts` rows may
+    be many, so they key on `url`. On upgrade, AdGuard/DNSMon inherit the legacy
     classification_* settings so an admin's prior toggle/URL is preserved.
 
     Owns its own session (matches cleanup_old_queries)."""
@@ -145,7 +148,9 @@ async def ensure_insight_sources() -> int:
 
     added = 0
     async with async_session_maker() as db:
-        existing_urls = set((await db.execute(select(InsightSource.url))).scalars().all())
+        existing = (await db.execute(select(InsightSource.kind, InsightSource.url))).all()
+        existing_kinds = {kind for kind, _ in existing}
+        existing_urls = {url for _, url in existing}
         settings = {row.key: row.get_typed_value()
                     for row in (await db.execute(select(AppSetting))).scalars()}
         for src in DEFAULT_INSIGHT_SOURCES:
@@ -155,13 +160,21 @@ async def ensure_insight_sources() -> int:
                 row['enabled'] = bool(settings.get('classification_feed_enabled', True))
             elif row['kind'] == 'dnsmon':
                 row['enabled'] = bool(settings.get('classification_supplement_enabled', True))
-            if row['url'] in existing_urls:
+
+            if row['kind'] in ('adguard', 'dnsmon'):
+                if row['kind'] in existing_kinds:
+                    continue
+            elif row['url'] in existing_urls:
                 continue
+
             db.add(InsightSource(**row))
+            existing_kinds.add(row['kind'])
+            existing_urls.add(row['url'])
             added += 1
         if added:
             await db.commit()
-    logger.info(f"Ensured insight sources ({added} added)")
+    if added:  # don't log on every boot once seeded
+        logger.info(f"Ensured insight sources ({added} added)")
     return added
 
 

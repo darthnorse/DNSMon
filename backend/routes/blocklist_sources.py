@@ -33,7 +33,7 @@ async def update_source(source_id: int, payload: InsightSourceUpdate,
                         _: User = Depends(require_admin)):
     src = await db.get(InsightSource, source_id)
     if not src:
-        raise HTTPException(status_code=404, detail="Blocklist source not found")
+        raise HTTPException(status_code=404, detail="Insight source not found")
     changed = src.enabled != payload.enabled
     src.enabled = payload.enabled
     await db.commit()
