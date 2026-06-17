@@ -58,6 +58,30 @@ async def get_db():
             await session.close()
 
 
+async def _run_pre_create_migrations(conn):
+    """Table renames that must run BEFORE create_all (else create_all makes a new
+    empty table and orphans the old one). Each step is guarded + idempotent."""
+    old = await conn.execute(text(
+        "SELECT 1 FROM information_schema.tables WHERE table_name = 'blocklist_sources'"))
+    new = await conn.execute(text(
+        "SELECT 1 FROM information_schema.tables WHERE table_name = 'insight_sources'"))
+    if old.scalar() and not new.scalar():
+        await conn.execute(text("ALTER TABLE blocklist_sources RENAME TO insight_sources"))
+        await conn.execute(text(
+            "ALTER INDEX IF EXISTS idx_blocklist_sources_url RENAME TO idx_insight_sources_url"))
+        logger.info("Migration: renamed blocklist_sources -> insight_sources")
+
+    # The legacy blocklist_sources.category was NOT NULL; the generalized model
+    # makes it nullable (adguard/dnsmon rows carry no category). create_all never
+    # relaxes existing columns, so an upgraded table would still reject the seed.
+    # DROP NOT NULL is idempotent (no-op once already nullable).
+    insight = await conn.execute(text(
+        "SELECT 1 FROM information_schema.tables WHERE table_name = 'insight_sources'"))
+    if insight.scalar():
+        await conn.execute(text(
+            "ALTER TABLE insight_sources ALTER COLUMN category DROP NOT NULL"))
+
+
 async def _run_migrations(conn):
     """Add missing columns to existing tables.
 
@@ -74,6 +98,8 @@ async def _run_migrations(conn):
                   col_type='VARCHAR(20)', default="'any'", nullable=False),
         Migration(table='app_definitions', column='is_category_only',
                   col_type='BOOLEAN', default='false', nullable=False),
+        Migration(table='insight_sources', column='kind',
+                  col_type='VARCHAR(20)', default="'hosts'", nullable=False),
     ]
     for m in migrations:
         result = await conn.execute(text(
@@ -107,33 +133,45 @@ async def _run_migrations(conn):
         # No log on every startup; DROP IF EXISTS is a no-op when already gone
 
 
-async def seed_blocklist_sources() -> int:
-    """Insert default blocklist sources iff the table is empty. Returns rows added.
+async def ensure_insight_sources() -> int:
+    """Ensure each default insight source exists (insert-if-missing keyed on url).
+    Returns rows added. On upgrade, AdGuard/DNSMon inherit the legacy
+    classification_* settings so an admin's prior toggle/URL is preserved.
 
-    Owns its own session (matches cleanup_old_queries) so callers never have a
-    session committed out from under them."""
-    from sqlalchemy import select, func
-    from .models import BlocklistSource
-    from .constants import DEFAULT_BLOCKLIST_SOURCES
+    Owns its own session (matches cleanup_old_queries)."""
+    from sqlalchemy import select
+    from .models import InsightSource, AppSetting
+    from .constants import DEFAULT_INSIGHT_SOURCES
 
+    added = 0
     async with async_session_maker() as db:
-        count = await db.scalar(select(func.count()).select_from(BlocklistSource)) or 0
-        if count > 0:
-            logger.debug("Blocklist sources already seeded; skipping")
-            return 0
-        for src in DEFAULT_BLOCKLIST_SOURCES:
-            db.add(BlocklistSource(**src))
-        await db.commit()
-    logger.info(f"Seeded {len(DEFAULT_BLOCKLIST_SOURCES)} default blocklist source(s)")
-    return len(DEFAULT_BLOCKLIST_SOURCES)
+        existing_urls = set((await db.execute(select(InsightSource.url))).scalars().all())
+        settings = {row.key: row.get_typed_value()
+                    for row in (await db.execute(select(AppSetting))).scalars()}
+        for src in DEFAULT_INSIGHT_SOURCES:
+            row = dict(src)
+            if row['kind'] == 'adguard':
+                row['url'] = settings.get('classification_feed_url', row['url'])
+                row['enabled'] = bool(settings.get('classification_feed_enabled', True))
+            elif row['kind'] == 'dnsmon':
+                row['enabled'] = bool(settings.get('classification_supplement_enabled', True))
+            if row['url'] in existing_urls:
+                continue
+            db.add(InsightSource(**row))
+            added += 1
+        if added:
+            await db.commit()
+    logger.info(f"Ensured insight sources ({added} added)")
+    return added
 
 
 async def init_db():
     """Initialize database tables and run migrations"""
     async with engine.begin() as conn:
+        await _run_pre_create_migrations(conn)
         await conn.run_sync(Base.metadata.create_all)
         await _run_migrations(conn)
-    await seed_blocklist_sources()
+    await ensure_insight_sources()
 
 
 async def cleanup_old_queries(days: int = 60):

@@ -672,15 +672,18 @@ class DomainLabel(Base):
         }
 
 
-class BlocklistSource(Base):
-    """A themed blocklist fetched at runtime to provide a category-only tier."""
-    __tablename__ = "blocklist_sources"
+class InsightSource(Base):
+    """A runtime-fetched classification feed: the AdGuard app list, the curated
+    DNSMon list, or a themed blocklist. `kind` selects the parser and the target
+    app_definitions source. Each row toggles from the Insight Sources panel."""
+    __tablename__ = "insight_sources"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(100), nullable=False)
     url = Column(String(2048), nullable=False)  # bounded so the unique index is btree-safe
-    category = Column(String(50), nullable=False)
-    format = Column(String(20), nullable=False, default='domains')  # domains|hosts|adguard
+    kind = Column(String(20), nullable=False, default='hosts')  # adguard | dnsmon | hosts
+    category = Column(String(50), nullable=True)  # set only for hosts (category-only) rows
+    format = Column(String(20), nullable=False, default='domains')  # domains|hosts|adguard|json
     license = Column(String(50), nullable=True)
     enabled = Column(Boolean, default=True)
     last_fetched_at = Column(DateTime(timezone=True), nullable=True)
@@ -690,7 +693,7 @@ class BlocklistSource(Base):
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     __table_args__ = (
-        Index('idx_blocklist_sources_url', 'url', unique=True),
+        Index('idx_insight_sources_url', 'url', unique=True),
     )
 
     def to_dict(self):
@@ -698,6 +701,7 @@ class BlocklistSource(Base):
             'id': self.id,
             'name': self.name,
             'url': self.url,
+            'kind': self.kind,
             'category': self.category,
             'format': self.format,
             'license': self.license,

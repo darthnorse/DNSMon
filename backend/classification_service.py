@@ -15,7 +15,7 @@ from .constants import (
     ADGUARD_GROUP_TO_CATEGORY,
 )
 from .database import async_session_maker
-from .models import AppDefinition, AppDomain, BlocklistSource, DomainLabel, DomainStatsHourly, Query
+from .models import AppDefinition, AppDomain, InsightSource, DomainLabel, DomainStatsHourly, Query
 from .utils import async_validate_url_safety
 
 logger = logging.getLogger(__name__)
@@ -271,7 +271,8 @@ class ClassificationService:
         (run_full / refresh_and_reclassify_blocklists) hold the lock."""
         from .models import utcnow
         sources = (await db.execute(
-            select(BlocklistSource).where(BlocklistSource.enabled == True)
+            select(InsightSource).where(
+                InsightSource.enabled == True, InsightSource.kind == 'hosts')
         )).scalars().all()
         if not sources:
             n = await self._replace_source(db, 'blocklist', [])

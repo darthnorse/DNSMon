@@ -1,12 +1,12 @@
 """End-to-end tests for /api/blocklist-sources and blocklist exclusion."""
 from httpx import AsyncClient
 
-from backend.models import BlocklistSource, AppDefinition
+from backend.models import InsightSource, AppDefinition
 
 
 async def _seed_source(db):
-    src = BlocklistSource(
-        name="Test List", url="https://example.com/list.txt",
+    src = InsightSource(
+        name="Test List", url="https://example.com/list.txt", kind="hosts",
         category="Ads & Tracking", format="domains", license="GPL-3.0", enabled=True)
     db.add(src)
     await db.commit()

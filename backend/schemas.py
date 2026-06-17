@@ -562,11 +562,12 @@ class FeedStatusResponse(BaseModel):
     last_refreshed_at: Optional[datetime]
 
 
-class BlocklistSourceResponse(BaseModel):
+class InsightSourceResponse(BaseModel):
     id: int
     name: str
     url: str
-    category: str
+    kind: str
+    category: Optional[str]
     format: str
     license: Optional[str]
     enabled: bool
@@ -587,5 +588,5 @@ class BlocklistSourceResponse(BaseModel):
         return v
 
 
-class BlocklistSourceUpdate(BaseModel):
+class InsightSourceUpdate(BaseModel):
     enabled: bool

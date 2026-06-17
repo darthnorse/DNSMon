@@ -54,14 +54,14 @@ SOURCE_PRECEDENCE = {'blocklist': 0, 'adguard': 1, 'supplement': 2, 'manual': 3}
 # Sources a user/admin may set on a manual app definition. 'blocklist' is engine-only.
 VALID_SOURCES = frozenset({'adguard', 'supplement', 'manual'})
 
-DEFAULT_BLOCKLIST_SOURCES = [
-    {
-        'name': 'Hagezi Pro.Plus',
-        'url': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/pro.plus.txt',
-        'category': 'Ads & Tracking',
-        'format': 'domains',
-        'license': 'GPL-3.0',
-    },
+DEFAULT_INSIGHT_SOURCES = [
+    {'name': 'AdGuard', 'url': CLASSIFICATION_FEED_URL, 'kind': 'adguard',
+     'category': None, 'format': 'adguard', 'license': 'GPL-3.0'},
+    {'name': 'DNSMon', 'url': DNSMON_LIST_URL, 'kind': 'dnsmon',
+     'category': None, 'format': 'json', 'license': 'MIT'},
+    {'name': 'Hagezi Pro.Plus',
+     'url': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/pro.plus.txt',
+     'kind': 'hosts', 'category': 'Ads & Tracking', 'format': 'domains', 'license': 'GPL-3.0'},
 ]
 
 # AdGuard's `group` values remapped to DNSMon's display taxonomy.

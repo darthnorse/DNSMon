@@ -5,7 +5,7 @@ from backend.constants import (
     BLOCKED_SQL_IN,
     CACHE_STATUSES,
     CACHE_SQL_IN,
-    DEFAULT_BLOCKLIST_SOURCES,
+    DEFAULT_INSIGHT_SOURCES,
     SOURCE_PRECEDENCE,
     VALID_SOURCES,
 )
@@ -53,9 +53,14 @@ def test_valid_sources_excludes_blocklist():
     assert VALID_SOURCES == frozenset({"adguard", "supplement", "manual"})
 
 
-def test_default_blocklist_seed_is_hagezi_pro_plus():
-    assert len(DEFAULT_BLOCKLIST_SOURCES) == 1
-    src = DEFAULT_BLOCKLIST_SOURCES[0]
+def test_default_insight_sources_cover_all_kinds():
+    kinds = {src["kind"] for src in DEFAULT_INSIGHT_SOURCES}
+    assert kinds == {"adguard", "dnsmon", "hosts"}
+
+
+def test_default_insight_seed_includes_hagezi_pro_plus():
+    src = next(s for s in DEFAULT_INSIGHT_SOURCES if s["kind"] == "hosts")
+    assert src["name"] == "Hagezi Pro.Plus"
     assert src["category"] == "Ads & Tracking"
     assert src["format"] == "domains"
     assert src["license"] == "GPL-3.0"

@@ -5,7 +5,7 @@ from backend.classification_service import (
     ClassificationService, _blocklist_slug, build_blocklist_defs,
     parse_blocklist_text, parse_dnsmon_entries,
 )
-from backend.models import AppDefinition, AppDomain, BlocklistSource
+from backend.models import AppDefinition, AppDomain, InsightSource
 from backend.constants import (
     CLASSIFICATION_FEED_URL,
     SOURCE_PRECEDENCE,
@@ -230,10 +230,10 @@ async def test_refresh_blocklists_no_enabled_clears(db_session):
         "slug": "blocklist-ads-tracking", "name": "Ads & Tracking",
         "category": "Ads & Tracking", "domains": [("x.com", False)],
     }])
-    # Ensure no enabled BlocklistSource rows exist (seed may have run).
-    await db_session.execute(delete(BlocklistSource))
+    # Ensure no enabled InsightSource rows exist (seed may have run).
+    await db_session.execute(delete(InsightSource))
     await db_session.commit()
-    # No enabled BlocklistSource rows exist → tier should be cleared.
+    # No enabled InsightSource rows exist → tier should be cleared.
     n = await svc.refresh_blocklists(db_session)
     assert n == 0
     cnt = await db_session.scalar(
@@ -272,9 +272,9 @@ async def test_refresh_blocklists_empty_body_keeps_tier(db_session, monkeypatch)
         "slug": "blocklist-ads-tracking", "name": "Ads & Tracking",
         "category": "Ads & Tracking", "domains": [("x.com", False)],
     }])
-    await db_session.execute(delete(BlocklistSource))
-    db_session.add(BlocklistSource(name="Bad", url="https://e.com/bad.txt",
-                                   category="Ads & Tracking", format="domains", enabled=True))
+    await db_session.execute(delete(InsightSource))
+    db_session.add(InsightSource(name="Bad", url="https://e.com/bad.txt", kind="hosts",
+                                 category="Ads & Tracking", format="domains", enabled=True))
     await db_session.commit()
 
     async def fake_fetch(self, url):  # 200 with no parseable domains
@@ -287,7 +287,7 @@ async def test_refresh_blocklists_empty_body_keeps_tier(db_session, monkeypatch)
         select(func.count()).select_from(AppDefinition).where(AppDefinition.source == "blocklist"))
     assert cnt == 1  # prior "Ads & Tracking" def preserved
     src = (await db_session.execute(
-        select(BlocklistSource).where(BlocklistSource.name == "Bad"))).scalar_one()
+        select(InsightSource).where(InsightSource.name == "Bad"))).scalar_one()
     assert src.last_status == "error"
 
 
