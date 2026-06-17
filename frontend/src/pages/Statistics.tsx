@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { statisticsApi, settingsApi } from '../utils/api';
 import { getErrorMessage } from '../utils/errors';
+import { formatDomainLabel } from '../utils/labels';
 import ClassifyDomainModal from '../components/ClassifyDomainModal';
 import type { Statistics, PiholeServer, ClientInfo } from '../types';
 import { format } from 'date-fns';
@@ -668,6 +669,7 @@ export default function StatisticsPage() {
             items={stats.top_domains.map((d, i) => ({
               rank: i + 1,
               label: d.domain,
+              sublabel: formatDomainLabel(d.app_name, d.category) || undefined,
               value: d.count,
             }))}
             onItemClick={setClassifyTarget}
@@ -682,6 +684,7 @@ export default function StatisticsPage() {
             items={stats.top_blocked_domains.map((d, i) => ({
               rank: i + 1,
               label: d.domain,
+              sublabel: formatDomainLabel(d.app_name, d.category) || undefined,
               value: d.count,
             }))}
             highlight="red"
