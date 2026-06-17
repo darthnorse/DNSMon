@@ -56,7 +56,7 @@ export default function Insights() {
       const [a, c, u] = await Promise.all([
         insightsApi.apps({ period }),
         insightsApi.categories({ period }),
-        insightsClassifyApi.uncategorized(period, 50),
+        insightsClassifyApi.uncategorized(period, 50).catch(() => [] as DomainUsage[]),
       ]);
       setApps(a);
       setCategories(c);
@@ -227,7 +227,7 @@ export default function Insights() {
             </div>
 
             {/* Top Uncategorized Domains panel */}
-            <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
+            <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6 lg:col-span-2">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">Top Uncategorized Domains</h2>
               <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Classify the heaviest hitters first to raise coverage fastest.</p>
               {uncat.length === 0 ? (
