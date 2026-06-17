@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { appDefinitionApi } from '../utils/api';
 import { getErrorMessage } from '../utils/errors';
 import type { AppDefinition, AppDefinitionCreate, FeedStatus } from '../types';
@@ -14,12 +14,8 @@ export default function AppDefinitionsSettings({ onError, onSuccess }: Props) {
   const [definitions, setDefinitions] = useState<AppDefinition[]>([]);
   const [feedStatus, setFeedStatus] = useState<FeedStatus | null>(null);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
-
-  const mountedRef = useRef(true);
-  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [formData, setFormData] = useState<AppDefinitionCreate>({
     name: '',
@@ -31,13 +27,6 @@ export default function AppDefinitionsSettings({ onError, onSuccess }: Props) {
 
   useEffect(() => {
     loadData();
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      mountedRef.current = false;
-      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
-    };
   }, []);
 
   const loadData = async () => {
@@ -54,33 +43,6 @@ export default function AppDefinitionsSettings({ onError, onSuccess }: Props) {
       onError(getErrorMessage(err, 'Failed to load app definitions'));
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleRefresh = async () => {
-    try {
-      setRefreshing(true);
-      onError(null);
-      await appDefinitionApi.refresh();
-      onSuccess('Refresh started — data updates shortly');
-      refreshTimerRef.current = setTimeout(async () => {
-        if (!mountedRef.current) return;
-        try {
-          const [defs, status] = await Promise.all([
-            appDefinitionApi.getAll(),
-            appDefinitionApi.feedStatus(),
-          ]);
-          if (!mountedRef.current) return;
-          setDefinitions(defs);
-          setFeedStatus(status);
-        } catch {
-          // Best-effort reload after refresh
-        }
-        if (mountedRef.current) setRefreshing(false);
-      }, 1500);
-    } catch (err: unknown) {
-      onError(getErrorMessage(err, 'Failed to trigger refresh'));
-      setRefreshing(false);
     }
   };
 
@@ -178,65 +140,31 @@ export default function AppDefinitionsSettings({ onError, onSuccess }: Props) {
 
   return (
     <div>
-      <h2 className="text-lg font-medium text-gray-900 dark:text-white mb-4">App Definitions</h2>
+      <h2 className="text-lg font-medium text-gray-900 dark:text-white mb-2">App Definitions</h2>
 
-      {/* Feed status card */}
-      <div className="mb-6 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
-        <div className="flex items-start justify-between mb-3">
-          <h3 className="text-sm font-medium text-gray-900 dark:text-white">Feed Status</h3>
-          <button
-            onClick={handleRefresh}
-            disabled={refreshing || saving}
-            className="px-3 py-1 text-sm bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white rounded-md font-medium"
-          >
-            {refreshing ? 'Refreshing...' : 'Refresh now'}
-          </button>
-        </div>
+      <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+        Manage runtime feeds (AdGuard, DNSMon, blocklists) under <span className="font-medium">Insight Sources</span>.
+      </p>
 
-        {feedStatus && (
-          <dl className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm mb-3">
-            <div>
-              <dt className="text-gray-500 dark:text-gray-400">Feed enabled</dt>
-              <dd className="font-medium text-gray-900 dark:text-white">
-                {feedStatus.feed_enabled ? 'Yes' : 'No'}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-gray-500 dark:text-gray-400">AdGuard apps</dt>
-              <dd className="font-medium text-gray-900 dark:text-white">{feedStatus.adguard_app_count}</dd>
-            </div>
-            <div>
-              <dt className="text-gray-500 dark:text-gray-400">Supplement apps</dt>
-              <dd className="font-medium text-gray-900 dark:text-white">{feedStatus.supplement_app_count}</dd>
-            </div>
+      {/* Slim status summary */}
+      {feedStatus && (
+        <div className="mb-6 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+          <dl className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
             <div>
               <dt className="text-gray-500 dark:text-gray-400">Manual apps</dt>
-              <dd className="font-medium text-gray-900 dark:text-white">{feedStatus.manual_app_count}</dd>
+              <dd className="font-medium text-gray-900 dark:text-white">{feedStatus.manual_app_count.toLocaleString()}</dd>
             </div>
             <div>
-              <dt className="text-gray-500 dark:text-gray-400">Labeled domains</dt>
-              <dd className="font-medium text-gray-900 dark:text-white">{feedStatus.labeled_domain_count}</dd>
+              <dt className="text-gray-500 dark:text-gray-400">Classified domains</dt>
+              <dd className="font-medium text-gray-900 dark:text-white">{feedStatus.labeled_domain_count.toLocaleString()}</dd>
             </div>
             <div>
               <dt className="text-gray-500 dark:text-gray-400">Last refreshed</dt>
               <dd className="font-medium text-gray-900 dark:text-white">{formatDate(feedStatus.last_refreshed_at)}</dd>
             </div>
           </dl>
-        )}
-
-        <p className="text-xs text-gray-500 dark:text-gray-400 border-t border-gray-200 dark:border-gray-700 pt-3">
-          App &amp; category data from{' '}
-          <a
-            href="https://github.com/AdguardTeam/AdguardFilters"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="underline hover:text-gray-700 dark:hover:text-gray-200"
-          >
-            AdGuard's services list (GPL-3.0)
-          </a>
-          , fetched at runtime.
-        </p>
-      </div>
+        </div>
+      )}
 
       {/* Add custom app form */}
       <div className="mb-6 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
@@ -303,7 +231,7 @@ export default function AppDefinitionsSettings({ onError, onSuccess }: Props) {
             </div>
             <button
               type="submit"
-              disabled={saving || refreshing}
+              disabled={saving}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white rounded-md text-sm font-medium"
             >
               {saving ? 'Creating...' : 'Create App'}
@@ -399,10 +327,10 @@ export default function AppDefinitionsSettings({ onError, onSuccess }: Props) {
                     <td className="px-3 py-2">
                       <button
                         onClick={() => handleToggleEnabled(def)}
-                        disabled={saving || refreshing}
+                        disabled={saving}
                         className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
                           def.enabled ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'
-                        } ${saving || refreshing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        } ${saving ? 'opacity-50 cursor-not-allowed' : ''}`}
                         role="switch"
                         aria-checked={def.enabled}
                         title={def.enabled ? 'Disable' : 'Enable'}
@@ -418,7 +346,7 @@ export default function AppDefinitionsSettings({ onError, onSuccess }: Props) {
                       {def.source === 'manual' && (
                         <button
                           onClick={() => handleDelete(def)}
-                          disabled={saving || refreshing}
+                          disabled={saving}
                           className="px-2 py-1 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded disabled:opacity-50"
                         >
                           Delete

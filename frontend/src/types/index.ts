@@ -436,11 +436,6 @@ export interface AppDefinitionCreate {
 }
 
 export interface FeedStatus {
-  feed_enabled: boolean;
-  feed_url: string;
-  supplement_enabled: boolean;
-  adguard_app_count: number;
-  supplement_app_count: number;
   manual_app_count: number;
   labeled_domain_count: number;
   last_refreshed_at: string | null;
