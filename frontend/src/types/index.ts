@@ -7,6 +7,8 @@ export interface Query {
   query_type: string | null;
   status: string | null;
   server: string;
+  app_name: string | null;
+  category: string | null;
 }
 
 export type MatchStatus = 'any' | 'blocked' | 'allowed';
@@ -128,8 +130,8 @@ export interface Statistics {
   blocked_percentage: number;
   queries_hourly: Array<{ hour: string; queries: number; blocked: number }>;
   queries_daily: Array<{ date: string; queries: number; blocked: number }>;
-  top_domains: Array<{ domain: string; count: number }>;
-  top_blocked_domains: Array<{ domain: string; count: number }>;
+  top_domains: Array<{ domain: string; count: number; app_name: string | null; category: string | null }>;
+  top_blocked_domains: Array<{ domain: string; count: number; app_name: string | null; category: string | null }>;
   top_clients: Array<{ client_ip: string; client_hostname: string | null; count: number }>;
   queries_by_server: Array<{ server: string; queries: number; blocked: number; cached: number }>;
   unique_clients: number;
