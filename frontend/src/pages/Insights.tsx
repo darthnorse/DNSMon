@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   ResponsiveContainer,
   BarChart,
@@ -10,8 +10,9 @@ import {
   Pie,
   Cell,
 } from 'recharts';
-import { insightsApi } from '../utils/api';
+import { insightsApi, insightsClassifyApi } from '../utils/api';
 import type { AppUsage, CategoryUsage, DomainUsage } from '../types';
+import ClassifyDomainModal from '../components/ClassifyDomainModal';
 
 const COLORS = [
   '#3B82F6', '#EF4444', '#10B981', '#F59E0B',
@@ -42,29 +43,32 @@ export default function Insights() {
   const [categories, setCategories] = useState<CategoryUsage[]>([]);
   const [selectedApp, setSelectedApp] = useState<string | null>(null);
   const [appDomains, setAppDomains] = useState<DomainUsage[]>([]);
+  const [uncat, setUncat] = useState<DomainUsage[]>([]);
+  const [classifyTarget, setClassifyTarget] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [drillDownError, setDrillDownError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const [a, c] = await Promise.all([
-          insightsApi.apps({ period }),
-          insightsApi.categories({ period }),
-        ]);
-        setApps(a);
-        setCategories(c);
-      } catch {
-        setError('Failed to load insights');
-      } finally {
-        setLoading(false);
-      }
-    };
-    load();
+  const loadInsights = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const [a, c, u] = await Promise.all([
+        insightsApi.apps({ period }),
+        insightsApi.categories({ period }),
+        insightsClassifyApi.uncategorized(period, 50),
+      ]);
+      setApps(a);
+      setCategories(c);
+      setUncat(u);
+    } catch {
+      setError('Failed to load insights');
+    } finally {
+      setLoading(false);
+    }
   }, [period]);
+
+  useEffect(() => { loadInsights(); }, [loadInsights]);
 
   useEffect(() => {
     if (!selectedApp) { setAppDomains([]); setDrillDownError(null); return; }
@@ -221,6 +225,34 @@ export default function Insights() {
                 </ResponsiveContainer>
               )}
             </div>
+
+            {/* Top Uncategorized Domains panel */}
+            <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">Top Uncategorized Domains</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Classify the heaviest hitters first to raise coverage fastest.</p>
+              {uncat.length === 0 ? (
+                <div className="flex items-center justify-center h-64 text-gray-500 dark:text-gray-400">
+                  Nothing uncategorized in this period 🎉
+                </div>
+              ) : (
+                <ul className="divide-y divide-gray-100 dark:divide-gray-700">
+                  {uncat.map((d) => (
+                    <li key={d.domain} className="flex items-center justify-between py-1.5 text-sm">
+                      <span className="font-mono text-gray-800 dark:text-gray-200 break-all">{d.domain}</span>
+                      <span className="flex items-center gap-3 shrink-0">
+                        <span className="text-gray-500 dark:text-gray-400">{d.total.toLocaleString()}</span>
+                        <button
+                          onClick={() => setClassifyTarget(d.domain)}
+                          className="px-2 py-0.5 text-xs rounded bg-blue-600 hover:bg-blue-700 text-white"
+                        >
+                          Classify
+                        </button>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
 
           {/* App drill-down panel */}
@@ -308,6 +340,14 @@ export default function Insights() {
             )}
           </div>
         </>
+      )}
+
+      {classifyTarget && (
+        <ClassifyDomainModal
+          domain={classifyTarget}
+          onClose={() => setClassifyTarget(null)}
+          onClassified={() => { setClassifyTarget(null); loadInsights(); }}
+        />
       )}
     </div>
   );
