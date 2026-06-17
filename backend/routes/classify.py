@@ -37,8 +37,12 @@ async def classify(payload: ClassifyRequest, db: AsyncSession = Depends(get_db),
                                is_category_only=False)
             db.add(ad)
             await db.flush()
-        elif category is not None:
-            ad.category = category
+        else:
+            # Reusing a manual def: re-enable it, else the matcher (enabled-only)
+            # would silently skip it and the classification would be a no-op.
+            ad.enabled = True
+            if category is not None:
+                ad.category = category
     else:
         slug = f"manual-cat-{_slugify(category)}"
         ad = (await db.execute(select(AppDefinition).where(
@@ -49,6 +53,8 @@ async def classify(payload: ClassifyRequest, db: AsyncSession = Depends(get_db),
                                source='manual', enabled=True, is_category_only=True)
             db.add(ad)
             await db.flush()
+        else:
+            ad.enabled = True
 
     # A domain belongs to exactly one manual bucket; re-classifying moves it here
     # and prunes any def it emptied, so equal-precedence manual mappings can't collide.

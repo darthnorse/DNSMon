@@ -185,3 +185,27 @@ async def test_suggestions_returns_apps_and_categories(async_admin_client: Async
     assert "Netflix" in body["app_names"]
     assert "CDN" not in body["app_names"]
     assert set(["Productivity", "Streaming", "CDN"]).issubset(set(body["categories"]))
+
+
+async def test_classify_reenables_disabled_manual_app(async_admin_client: AsyncClient, db_session):
+    ad = AppDefinition(slug="app-notion", name="Notion", category="Productivity",
+                       source="manual", enabled=False, is_category_only=False)
+    db_session.add(ad)
+    await db_session.commit()
+    r = await async_admin_client.post("/api/classify", json={
+        "domain": "notion.so", "app_name": "Notion", "scope": "exact"})
+    assert r.status_code == 200, r.text
+    await db_session.refresh(ad)
+    assert ad.enabled is True  # matcher is enabled-only; a reused def must be re-enabled
+
+
+async def test_classify_reenables_disabled_category_bucket(async_admin_client: AsyncClient, db_session):
+    ad = AppDefinition(slug="manual-cat-cdn", name="CDN", category="CDN",
+                       source="manual", enabled=False, is_category_only=True)
+    db_session.add(ad)
+    await db_session.commit()
+    r = await async_admin_client.post("/api/classify", json={
+        "domain": "cdn.example.com", "category": "CDN", "scope": "exact"})
+    assert r.status_code == 200, r.text
+    await db_session.refresh(ad)
+    assert ad.enabled is True
