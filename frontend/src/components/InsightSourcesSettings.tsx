@@ -45,7 +45,7 @@ export default function InsightSourcesSettings({ onError, onSuccess }: Props) {
     try {
       setSaving(true);
       await insightSourceApi.toggle(src.id, !src.enabled);
-      onSuccess('Saved — categories update shortly');
+      onSuccess('Saved — insights update shortly');
       await loadData();
     } catch (err: unknown) {
       onError(getErrorMessage(err, 'Failed to update insight source'));
@@ -59,7 +59,7 @@ export default function InsightSourcesSettings({ onError, onSuccess }: Props) {
       setRefreshing(true);
       onError(null);
       await insightSourceApi.refresh();
-      onSuccess('Refresh started — categories update shortly');
+      onSuccess('Refresh started — insights update shortly');
       refreshTimerRef.current = setTimeout(async () => {
         if (!mountedRef.current) return;
         try {
