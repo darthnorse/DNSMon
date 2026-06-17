@@ -202,7 +202,7 @@ class ClassificationService:
         existing = await db.scalar(select(func.count()).select_from(AppDefinition).where(
             AppDefinition.source == 'supplement'))
         if existing:
-            logger.warning("DNSMon fetch failed; keeping existing supplement tier")
+            logger.warning("DNSMon refresh yielded no usable list; keeping existing supplement tier")
             return -1
         return await self._load_dnsmon_bundled(db)
 
