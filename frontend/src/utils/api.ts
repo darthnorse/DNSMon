@@ -43,7 +43,7 @@ import type {
   AppDefinition,
   AppDefinitionCreate,
   FeedStatus,
-  BlocklistSource,
+  InsightSource,
 } from '../types';
 
 const API_BASE_URL = '/api';
@@ -460,15 +460,15 @@ export const appDefinitionApi = {
 };
 
 // ============================================================================
-// Blocklist Sources API
+// Insight Sources API
 // ============================================================================
 
-export const blocklistSourceApi = {
-  getAll: async (): Promise<BlocklistSource[]> =>
-    (await api.get<BlocklistSource[]>('/blocklist-sources')).data,
-  toggle: async (id: number, enabled: boolean): Promise<BlocklistSource> =>
-    (await api.patch<BlocklistSource>(`/blocklist-sources/${id}`, { enabled })).data,
-  refresh: async (): Promise<void> => { await api.post('/blocklist-sources/refresh'); },
+export const insightSourceApi = {
+  getAll: async (): Promise<InsightSource[]> =>
+    (await api.get<InsightSource[]>('/insight-sources')).data,
+  toggle: async (id: number, enabled: boolean): Promise<InsightSource> =>
+    (await api.patch<InsightSource>(`/insight-sources/${id}`, { enabled })).data,
+  refresh: async (): Promise<void> => { await api.post('/insight-sources/refresh'); },
 };
 
 export default api;

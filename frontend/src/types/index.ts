@@ -495,11 +495,12 @@ export interface SyncHistoryEntry {
   errors: string[];
 }
 
-export interface BlocklistSource {
+export interface InsightSource {
   id: number;
   name: string;
   url: string;
-  category: string;
+  kind: string;
+  category: string | null;
   format: string;
   license: string | null;
   enabled: boolean;
