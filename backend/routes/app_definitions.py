@@ -149,7 +149,11 @@ async def feed_status(db: AsyncSession = Depends(get_db), _: User = Depends(get_
 
 @router.post("/refresh")
 async def refresh_feed(_: User = Depends(require_admin)):
-    """Trigger a feed refresh + reclassify (admin)."""
+    """Trigger a full source refresh + reclassify (admin).
+
+    Deprecated: prefer POST /api/insight-sources/refresh. Both call run_full();
+    this endpoint is retained for backward compatibility (external scripts) and
+    is no longer used by the UI."""
     svc = get_service().classification_service
     _run_in_background(svc.run_full())
     return {"message": "Refresh started"}

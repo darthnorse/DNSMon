@@ -456,7 +456,6 @@ export const appDefinitionApi = {
     (await api.put<AppDefinition>(`/app-definitions/${id}`, data)).data,
   delete: async (id: number): Promise<void> => { await api.delete(`/app-definitions/${id}`); },
   feedStatus: async (): Promise<FeedStatus> => (await api.get<FeedStatus>('/app-definitions/feed-status')).data,
-  refresh: async (): Promise<void> => { await api.post('/app-definitions/refresh'); },
 };
 
 // ============================================================================
