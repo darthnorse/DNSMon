@@ -9,7 +9,6 @@ from ..database import get_db
 from ..models import User, AppDefinition, AppDomain, DomainLabel
 from ..schemas import AppDefinitionCreate, AppDefinitionUpdate, AppDefinitionResponse, FeedStatusResponse
 from ..auth import get_current_user, require_admin
-from ..config import get_settings_sync
 from ..service import get_service
 from ..constants import VALID_SOURCES
 from ._background import run_in_background as _run_in_background
@@ -91,7 +90,7 @@ async def update_definition(def_id: int, payload: AppDefinitionUpdate,
                             db: AsyncSession = Depends(get_db),
                             _: User = Depends(require_admin)):
     ad = await db.get(AppDefinition, def_id)
-    # blocklist pseudo-apps are managed via /api/blocklist-sources, not here —
+    # blocklist pseudo-apps are managed via /api/insight-sources, not here —
     # treat them as absent so this endpoint can't toggle them or serialize ~547k domains.
     if not ad or ad.source == 'blocklist':
         raise HTTPException(status_code=404, detail="App definition not found")
@@ -136,17 +135,13 @@ async def delete_definition(def_id: int, db: AsyncSession = Depends(get_db),
 
 @router.get("/feed-status", response_model=FeedStatusResponse)
 async def feed_status(db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
-    async def count(src):
-        return await db.scalar(select(func.count()).select_from(AppDefinition).where(AppDefinition.source == src)) or 0
-    last = await db.scalar(select(func.max(AppDefinition.updated_at)).where(AppDefinition.source == 'adguard'))
-    labeled = await db.scalar(select(func.count()).select_from(DomainLabel).where(DomainLabel.app_id.isnot(None))) or 0
-    s = get_settings_sync()
-    return FeedStatusResponse(
-        feed_enabled=s.classification_feed_enabled, feed_url=s.classification_feed_url,
-        supplement_enabled=s.classification_supplement_enabled,
-        adguard_app_count=await count('adguard'), supplement_app_count=await count('supplement'),
-        manual_app_count=await count('manual'), labeled_domain_count=labeled, last_refreshed_at=last,
-    )
+    manual = await db.scalar(select(func.count()).select_from(AppDefinition).where(
+        AppDefinition.source == 'manual')) or 0
+    labeled = await db.scalar(select(func.count()).select_from(DomainLabel).where(
+        DomainLabel.app_id.isnot(None))) or 0
+    last = await db.scalar(select(func.max(AppDefinition.updated_at)))
+    return FeedStatusResponse(manual_app_count=manual, labeled_domain_count=labeled,
+                              last_refreshed_at=last)
 
 
 @router.post("/refresh")

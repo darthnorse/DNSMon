@@ -42,7 +42,7 @@ async def test_anonymous_list_401(async_client: AsyncClient):
 async def test_feed_status(async_admin_client: AsyncClient):
     r = await async_admin_client.get("/api/app-definitions/feed-status")
     assert r.status_code == 200, r.text
-    assert "adguard_app_count" in r.json()
+    assert "manual_app_count" in r.json()
 
 
 async def test_create_rejects_invalid_domain(async_admin_client: AsyncClient):

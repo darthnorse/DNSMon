@@ -1,4 +1,4 @@
-"""End-to-end tests for /api/blocklist-sources and blocklist exclusion."""
+"""End-to-end tests for /api/insight-sources and blocklist exclusion."""
 from httpx import AsyncClient
 
 from backend.models import InsightSource, AppDefinition
@@ -15,13 +15,13 @@ async def _seed_source(db):
 
 
 async def test_list_requires_auth(async_client: AsyncClient):
-    r = await async_client.get("/api/blocklist-sources")
+    r = await async_client.get("/api/insight-sources")
     assert r.status_code == 401
 
 
 async def test_list_returns_sources(async_admin_client: AsyncClient, db_session):
     await _seed_source(db_session)
-    r = await async_admin_client.get("/api/blocklist-sources")
+    r = await async_admin_client.get("/api/insight-sources")
     assert r.status_code == 200, r.text
     assert any(s["name"] == "Test List" and s["category"] == "Ads & Tracking"
                for s in r.json())
@@ -30,23 +30,23 @@ async def test_list_returns_sources(async_admin_client: AsyncClient, db_session)
 async def test_toggle_requires_admin(async_readonly_client: AsyncClient, db_session):
     src = await _seed_source(db_session)
     r = await async_readonly_client.patch(
-        f"/api/blocklist-sources/{src.id}", json={"enabled": False})
+        f"/api/insight-sources/{src.id}", json={"enabled": False})
     assert r.status_code == 403
 
 
 async def test_toggle_updates_enabled(async_admin_client: AsyncClient, db_session, monkeypatch):
     # Keep the test hermetic: the toggle would otherwise spawn a fire-and-forget
     # refresh that opens its own session and fetches list URLs.
-    monkeypatch.setattr("backend.routes.blocklist_sources._trigger_refresh", lambda: None)
+    monkeypatch.setattr("backend.routes.insight_sources._trigger_refresh", lambda: None)
     src = await _seed_source(db_session)
     r = await async_admin_client.patch(
-        f"/api/blocklist-sources/{src.id}", json={"enabled": False})
+        f"/api/insight-sources/{src.id}", json={"enabled": False})
     assert r.status_code == 200, r.text
     assert r.json()["enabled"] is False
 
 
 async def test_toggle_unknown_id_404(async_admin_client: AsyncClient):
-    r = await async_admin_client.patch("/api/blocklist-sources/999999", json={"enabled": False})
+    r = await async_admin_client.patch("/api/insight-sources/999999", json={"enabled": False})
     assert r.status_code == 404
 
 

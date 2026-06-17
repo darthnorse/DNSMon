@@ -16,7 +16,7 @@ from .notifications import router as notifications_router
 from .api_keys import router as api_keys_router
 from .insights import router as insights_router
 from .app_definitions import router as app_definitions_router
-from .blocklist_sources import router as blocklist_sources_router
+from .insight_sources import router as insight_sources_router
 
 __all__ = [
     'auth_router',
@@ -33,5 +33,5 @@ __all__ = [
     'api_keys_router',
     'insights_router',
     'app_definitions_router',
-    'blocklist_sources_router',
+    'insight_sources_router',
 ]

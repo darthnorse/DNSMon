@@ -552,11 +552,6 @@ class AppDefinitionResponse(BaseModel):
 
 
 class FeedStatusResponse(BaseModel):
-    feed_enabled: bool
-    feed_url: str
-    supplement_enabled: bool
-    adguard_app_count: int
-    supplement_app_count: int
     manual_app_count: int
     labeled_domain_count: int
     last_refreshed_at: Optional[datetime]

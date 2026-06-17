@@ -11,12 +11,12 @@ from ..auth import get_current_user, require_admin
 from ..service import get_service
 from ._background import run_in_background
 
-router = APIRouter(prefix="/api/blocklist-sources", tags=["blocklist-sources"])
+router = APIRouter(prefix="/api/insight-sources", tags=["insight-sources"])
 
 
 def _trigger_refresh():
     svc = get_service().classification_service
-    run_in_background(svc.refresh_and_reclassify_blocklists())
+    run_in_background(svc.run_full())
 
 
 @router.get("", response_model=List[InsightSourceResponse])
