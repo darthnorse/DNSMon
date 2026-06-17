@@ -504,6 +504,26 @@ class DomainUsage(BaseModel):
     blocked: int
 
 
+class ClassifyRequest(BaseModel):
+    domain: str = PydanticField(min_length=1, max_length=255)
+    app_name: Optional[str] = PydanticField(default=None, max_length=150)
+    category: Optional[str] = PydanticField(default=None, max_length=50)
+    scope: str = PydanticField(default='registrable')
+
+    @field_validator('scope')
+    @classmethod
+    def _valid_scope(cls, v: str) -> str:
+        if v not in ('registrable', 'exact'):
+            raise ValueError("scope must be 'registrable' or 'exact'")
+        return v
+
+    @model_validator(mode='after')
+    def _require_label(self):
+        if not (self.app_name and self.app_name.strip()) and not (self.category and self.category.strip()):
+            raise ValueError("Provide an app_name and/or a category")
+        return self
+
+
 class AppDefinitionCreate(BaseModel):
     name: str = PydanticField(max_length=150)
     category: Optional[str] = PydanticField(default=None, max_length=50)
