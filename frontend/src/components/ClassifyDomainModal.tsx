@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { classifyApi } from '../utils/api';
 import { getErrorMessage } from '../utils/errors';
+import { nearestSuggestion } from '../utils/typoGuard';
 import type { DomainLabelInfo } from '../types';
 
 interface Props {
@@ -18,6 +19,7 @@ export default function ClassifyDomainModal({ domain, onClose, onClassified }: P
   const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [guardPrompt, setGuardPrompt] = useState<{ appSug: string | null; catSug: string | null } | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -37,20 +39,12 @@ export default function ClassifyDomainModal({ domain, onClose, onClassified }: P
     })();
   }, [domain]);
 
-  const handleSave = async () => {
-    if (!appName.trim() && !category.trim()) {
-      setError('Enter an app name and/or a category');
-      return;
-    }
+  const doClassify = async (appNameArg?: string, categoryArg?: string) => {
     try {
       setSaving(true);
       setError(null);
-      await classifyApi.classify({
-        domain,
-        app_name: appName.trim() || undefined,
-        category: category.trim() || undefined,
-        scope,
-      });
+      setGuardPrompt(null);
+      await classifyApi.classify({ domain, app_name: appNameArg, category: categoryArg, scope });
       onClassified();
       onClose();
     } catch (err: unknown) {
@@ -58,6 +52,22 @@ export default function ClassifyDomainModal({ domain, onClose, onClassified }: P
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleSave = () => {
+    const an = appName.trim();
+    const cat = category.trim();
+    if (!an && !cat) {
+      setError('Enter an app name and/or a category');
+      return;
+    }
+    const appSug = an ? nearestSuggestion(an, appNameOptions) : null;
+    const catSug = cat ? nearestSuggestion(cat, categoryOptions) : null;
+    if (appSug || catSug) {
+      setGuardPrompt({ appSug, catSug });
+      return;
+    }
+    doClassify(an || undefined, cat || undefined);
   };
 
   const handleRemove = async () => {
@@ -118,6 +128,39 @@ export default function ClassifyDomainModal({ domain, onClose, onClassified }: P
         </fieldset>
 
         {error && <div className="mb-3 text-sm text-red-600 dark:text-red-400">{error}</div>}
+
+        {guardPrompt && (
+          <div className="mb-3 rounded border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 p-3 text-sm">
+            {guardPrompt.appSug && (
+              <p className="text-amber-800 dark:text-amber-300">App &ldquo;{appName.trim()}&rdquo; looks close to &ldquo;{guardPrompt.appSug}&rdquo;.</p>
+            )}
+            {guardPrompt.catSug && (
+              <p className="text-amber-800 dark:text-amber-300">Category &ldquo;{category.trim()}&rdquo; looks close to &ldquo;{guardPrompt.catSug}&rdquo;.</p>
+            )}
+            <div className="mt-2 flex gap-2">
+              <button
+                onClick={() => {
+                  const useApp = guardPrompt.appSug ?? appName.trim();
+                  const useCat = guardPrompt.catSug ?? category.trim();
+                  setAppName(useApp);
+                  setCategory(useCat);
+                  doClassify(useApp || undefined, useCat || undefined);
+                }}
+                disabled={saving}
+                className="px-2 py-1 text-xs rounded bg-blue-600 hover:bg-blue-700 text-white disabled:bg-gray-400"
+              >
+                Use suggested
+              </button>
+              <button
+                onClick={() => doClassify(appName.trim() || undefined, category.trim() || undefined)}
+                disabled={saving}
+                className="px-2 py-1 text-xs rounded text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+              >
+                Keep as typed
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="flex justify-between gap-2">
           {isManual ? (
