@@ -599,14 +599,14 @@ class NotificationChannel(Base):
 
 class AppDefinition(Base):
     """A known application/service (from the AdGuard feed, the bundled
-    supplement, or a manual user entry)."""
+    DNSMon list, or a manual user entry)."""
     __tablename__ = "app_definitions"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     slug = Column(String(100), nullable=False)
     name = Column(String(150), nullable=False)
     category = Column(String(50), nullable=True)
-    source = Column(String(20), nullable=False)  # adguard | supplement | manual | blocklist
+    source = Column(String(20), nullable=False)  # adguard | dnsmon | manual | blocklist
     icon_svg = Column(Text, nullable=True)
     enabled = Column(Boolean, default=True)
     is_category_only = Column(Boolean, nullable=False, default=False)

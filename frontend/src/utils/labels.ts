@@ -16,3 +16,18 @@ export function formatDomainLabel(
   }
   return appName || category || '';
 }
+
+/**
+ * Human-readable label for an app-definition `source` / `matched_source` value.
+ * Falls back to the raw value for anything unmapped (e.g. a future source).
+ */
+export function sourceLabel(source: string | null): string {
+  if (!source) return '';
+  const labels: Record<string, string> = {
+    adguard: 'AdGuard',
+    dnsmon: 'DNSMon',
+    manual: 'Manual',
+    blocklist: 'Blocklist',
+  };
+  return labels[source] ?? source;
+}

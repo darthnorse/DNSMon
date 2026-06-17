@@ -99,7 +99,7 @@ async def update_definition(def_id: int, payload: AppDefinitionUpdate,
     # `enabled` can be toggled on any source; other edits are manual-only.
     if ad.source != 'manual' and (set(data.keys()) - {'enabled'}):
         raise HTTPException(status_code=400,
-                            detail="Only the 'enabled' flag can be changed on feed/supplement apps")
+                            detail="Only the 'enabled' flag can be changed on feed apps (AdGuard, DNSMon)")
 
     if 'name' in data and data['name'] is not None:
         ad.name = data['name']

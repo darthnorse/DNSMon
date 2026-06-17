@@ -14,8 +14,8 @@ from backend.constants import (
 
 
 def test_source_precedence_orders_manual_highest():
-    assert SOURCE_PRECEDENCE['manual'] > SOURCE_PRECEDENCE['supplement']
-    assert SOURCE_PRECEDENCE['supplement'] > SOURCE_PRECEDENCE['adguard']
+    assert SOURCE_PRECEDENCE['manual'] > SOURCE_PRECEDENCE['dnsmon']
+    assert SOURCE_PRECEDENCE['dnsmon'] > SOURCE_PRECEDENCE['adguard']
 
 
 def test_feed_url_is_adguard_https():
@@ -80,7 +80,7 @@ def test_manual_overrides_adguard_at_same_domain():
 
 
 def test_manual_less_specific_still_wins_over_adguard():
-    # User intent: manual/supplement always override the feed.
+    # User intent: manual/dnsmon always override the feed.
     m = DomainMatcher()
     m.add('cdn.vendor.com', app_id=1, app_name='VendorCDN', category='CDN', source='adguard')
     m.add('vendor.com', app_id=2, app_name='Vendor (manual)', category='Software', source='manual')
@@ -192,7 +192,7 @@ async def test_real_app_beats_blocklist(db_session):
 async def test_build_matcher_uses_is_category_only_flag(db_session):
     # A definition flagged is_category_only renders app_name=None regardless of source.
     ad = AppDefinition(slug="dnsmon-cat-cdn", name="CDN", category="CDN",
-                       source="supplement", enabled=True, is_category_only=True)
+                       source="dnsmon", enabled=True, is_category_only=True)
     db_session.add(ad)
     await db_session.flush()
     db_session.add(AppDomain(domain="cdn.example.com", app_id=ad.id, is_wildcard=False))
@@ -203,7 +203,7 @@ async def test_build_matcher_uses_is_category_only_flag(db_session):
     assert hit is not None
     assert hit.app_name is None          # category bucket, not an app
     assert hit.category == "CDN"
-    assert hit.matched_source == "supplement"
+    assert hit.matched_source == "dnsmon"
 
 
 async def test_replace_source_blocklist_batches(db_session):
@@ -245,7 +245,7 @@ def test_app_beats_category_bucket_from_higher_source():
     # A category-only bucket (app_name=None) from a HIGHER-ranked source must NOT
     # shadow a real app from a lower-ranked source. Apps win across the board.
     m = DomainMatcher()
-    m.add('foo.com', app_id=1, app_name=None, category='Ads & Tracking', source='supplement')
+    m.add('foo.com', app_id=1, app_name=None, category='Ads & Tracking', source='dnsmon')
     m.add('foo.com', app_id=2, app_name='FooApp', category='Software', source='adguard')
     hit = m.match('foo.com')
     assert hit.app_name == 'FooApp'
@@ -253,7 +253,7 @@ def test_app_beats_category_bucket_from_higher_source():
 
 def test_app_beats_category_bucket_across_suffixes():
     m = DomainMatcher()
-    m.add('sub.foo.com', app_id=1, app_name=None, category='Ads & Tracking', source='supplement')
+    m.add('sub.foo.com', app_id=1, app_name=None, category='Ads & Tracking', source='dnsmon')
     m.add('foo.com', app_id=2, app_name='FooApp', category='Software', source='adguard')
     assert m.match('sub.foo.com').app_name == 'FooApp'
 
@@ -261,7 +261,7 @@ def test_app_beats_category_bucket_across_suffixes():
 def test_category_bucket_higher_source_wins_over_lower_bucket():
     m = DomainMatcher()
     m.add('bar.com', app_id=1, app_name=None, category='Ads & Tracking', source='blocklist')
-    m.add('bar.com', app_id=2, app_name=None, category='Telemetry', source='supplement')
+    m.add('bar.com', app_id=2, app_name=None, category='Telemetry', source='dnsmon')
     assert m.match('bar.com').category == 'Telemetry'
 
 

@@ -50,7 +50,7 @@ def test_blocklist_precedence_is_lowest():
 
 def test_valid_sources_excludes_blocklist():
     assert "blocklist" not in VALID_SOURCES
-    assert VALID_SOURCES == frozenset({"adguard", "supplement", "manual"})
+    assert VALID_SOURCES == frozenset({"adguard", "dnsmon", "manual"})
 
 
 def test_default_insight_sources_cover_all_kinds():

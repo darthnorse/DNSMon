@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { appDefinitionApi } from '../utils/api';
 import { getErrorMessage } from '../utils/errors';
+import { sourceLabel } from '../utils/labels';
 import type { AppDefinition, AppDefinitionCreate, FeedStatus } from '../types';
 
-type SourceFilter = 'all' | 'adguard' | 'supplement' | 'manual';
+type SourceFilter = 'all' | 'adguard' | 'dnsmon' | 'manual';
 
 interface Props {
   onError: (error: string | null) => void;
@@ -121,7 +122,7 @@ export default function AppDefinitionsSettings({ onError, onSuccess }: Props) {
 
   const SOURCE_BADGE: Record<AppDefinition['source'], string> = {
     adguard: 'bg-teal-100 dark:bg-teal-900/30 text-teal-800 dark:text-teal-300',
-    supplement: 'bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300',
+    dnsmon: 'bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300',
     manual: 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300',
   };
 
@@ -254,7 +255,7 @@ export default function AppDefinitionsSettings({ onError, onSuccess }: Props) {
           >
             <option value="all">All sources</option>
             <option value="adguard">AdGuard</option>
-            <option value="supplement">Supplement</option>
+            <option value="dnsmon">DNSMon</option>
             <option value="manual">Manual</option>
           </select>
         </div>
@@ -309,7 +310,7 @@ export default function AppDefinitionsSettings({ onError, onSuccess }: Props) {
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap">
                       <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${SOURCE_BADGE[def.source]}`}>
-                        {def.source}
+                        {sourceLabel(def.source)}
                       </span>
                     </td>
                     <td className="px-3 py-2 text-gray-600 dark:text-gray-400">

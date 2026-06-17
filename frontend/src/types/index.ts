@@ -443,7 +443,7 @@ export interface AppDefinition {
   slug: string;
   name: string;
   category: string | null;
-  source: 'adguard' | 'supplement' | 'manual';
+  source: 'adguard' | 'dnsmon' | 'manual';
   icon_svg: string | null;
   enabled: boolean;
   domains: string[];

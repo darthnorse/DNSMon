@@ -169,12 +169,12 @@ class ClassificationService:
             logger.error(f"Could not read bundled DNSMon list: {e}")
             return 0
         defs = parse_dnsmon_entries(raw)
-        n = await self._replace_source(db, 'supplement', defs)
+        n = await self._replace_source(db, 'dnsmon', defs)
         logger.info(f"Loaded {n} DNSMon definitions from bundled file")
         return n
 
     async def load_dnsmon(self, db: AsyncSession, url: str) -> int:
-        """Fetch the remote DNSMon curated list and replace the 'supplement' source.
+        """Fetch the remote DNSMon curated list and replace the 'dnsmon' source.
 
         Remote success → replace from remote. Remote failure → keep existing defs
         if any (don't regress a known-good fetch to the older bundled copy on a
@@ -196,15 +196,15 @@ class ClassificationService:
         if raw is not None:
             defs = parse_dnsmon_entries(raw)
             if defs:
-                n = await self._replace_source(db, 'supplement', defs)
+                n = await self._replace_source(db, 'dnsmon', defs)
                 logger.info(f"Loaded {n} DNSMon definitions from remote")
                 return n
             logger.error("DNSMon remote list yielded 0 definitions; falling back")
 
         existing = await db.scalar(select(func.count()).select_from(AppDefinition).where(
-            AppDefinition.source == 'supplement'))
+            AppDefinition.source == 'dnsmon'))
         if existing:
-            logger.warning("DNSMon refresh yielded no usable list; keeping existing supplement tier")
+            logger.warning("DNSMon refresh yielded no usable list; keeping existing dnsmon tier")
             return -1
         return await self.load_dnsmon_bundled(db)
 
@@ -386,7 +386,7 @@ class ClassificationService:
                 if kind == 'hosts':
                     await self.refresh_blocklists(db)
                 else:
-                    source_tag = 'adguard' if kind == 'adguard' else 'supplement'
+                    source_tag = 'adguard' if kind == 'adguard' else 'dnsmon'
                     row = (await db.execute(select(InsightSource).where(
                         InsightSource.enabled == True, InsightSource.kind == kind))).scalars().first()
                     if row:
@@ -418,7 +418,7 @@ class ClassificationService:
         sources = (await db.execute(
             select(InsightSource).where(InsightSource.enabled == True)
         )).scalars().all()
-        for kind, source_tag in (('adguard', 'adguard'), ('dnsmon', 'supplement')):
+        for kind, source_tag in (('adguard', 'adguard'), ('dnsmon', 'dnsmon')):
             row = next((s for s in sources if s.kind == kind), None)
             if row:
                 await self._refresh_singleton_row(db, row, source_tag)

@@ -4,6 +4,7 @@ import { getErrorMessage } from '../utils/errors';
 import { nearestSuggestion } from '../utils/typoGuard';
 import AutocompleteInput from './AutocompleteInput';
 import type { DomainLabelInfo } from '../types';
+import { sourceLabel } from '../utils/labels';
 
 interface Props {
   domain: string;
@@ -97,7 +98,7 @@ export default function ClassifyDomainModal({ domain, onClose, onClassified }: P
         {info?.matched && (
           <p className="text-xs mb-3 text-gray-500 dark:text-gray-400">
             Currently: <span className="font-medium">{info.app_name ?? info.category}</span>
-            {' '}(via {info.matched_source}){!isManual && ' — saving creates a manual override'}
+            {' '}(via {sourceLabel(info.matched_source)}){!isManual && ' — saving creates a manual override'}
           </p>
         )}
 

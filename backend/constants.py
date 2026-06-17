@@ -49,10 +49,10 @@ DNSMON_LIST_URL = (
 )
 
 # Higher number wins when more than one source claims a domain.
-SOURCE_PRECEDENCE = {'blocklist': 0, 'adguard': 1, 'supplement': 2, 'manual': 3}
+SOURCE_PRECEDENCE = {'blocklist': 0, 'adguard': 1, 'dnsmon': 2, 'manual': 3}
 
 # Sources a user/admin may set on a manual app definition. 'blocklist' is engine-only.
-VALID_SOURCES = frozenset({'adguard', 'supplement', 'manual'})
+VALID_SOURCES = frozenset({'adguard', 'dnsmon', 'manual'})
 
 DEFAULT_INSIGHT_SOURCES = [
     {'name': 'AdGuard', 'url': CLASSIFICATION_FEED_URL, 'kind': 'adguard',
