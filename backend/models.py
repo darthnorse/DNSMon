@@ -609,6 +609,7 @@ class AppDefinition(Base):
     source = Column(String(20), nullable=False)  # adguard | supplement | manual
     icon_svg = Column(Text, nullable=True)
     enabled = Column(Boolean, default=True)
+    is_category_only = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -625,6 +626,7 @@ class AppDefinition(Base):
             'source': self.source,
             'icon_svg': self.icon_svg,
             'enabled': self.enabled,
+            'is_category_only': self.is_category_only,
             'domains': domains if domains is not None else [],
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,

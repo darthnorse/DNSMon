@@ -59,6 +59,7 @@ def build_blocklist_defs_from_sets(fetched: list[tuple[str, set[str]]]) -> list[
             'slug': _blocklist_slug(category),
             'name': category,
             'category': category,
+            'is_category_only': True,
             'domains': [(d, False) for d in sorted(domains)],
         }
         for category, domains in by_cat.items() if domains
@@ -102,6 +103,7 @@ class ClassificationService:
             ad = AppDefinition(
                 slug=d['slug'], name=d['name'], category=d.get('category'),
                 source=source, icon_svg=d.get('icon_svg'), enabled=True,
+                is_category_only=d.get('is_category_only', False),
             )
             db.add(ad)
             await db.flush()  # assign ad.id
@@ -257,13 +259,14 @@ class ClassificationService:
     async def build_matcher(self, db: AsyncSession) -> DomainMatcher:
         rows = await db.execute(
             select(AppDomain.domain, AppDefinition.id, AppDefinition.name,
-                   AppDefinition.category, AppDefinition.source)
+                   AppDefinition.category, AppDefinition.source,
+                   AppDefinition.is_category_only)
             .join(AppDefinition, AppDomain.app_id == AppDefinition.id)
             .where(AppDefinition.enabled == True, AppDomain.is_wildcard == False)
         )
         matcher = DomainMatcher()
-        for domain, app_id, name, category, source in rows:
-            app_name = None if source == 'blocklist' else name
+        for domain, app_id, name, category, source, is_category_only in rows:
+            app_name = None if is_category_only else name
             matcher.add(domain, app_id=app_id, app_name=app_name, category=category, source=source)
         return matcher
 

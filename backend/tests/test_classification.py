@@ -151,7 +151,8 @@ def test_blocklist_slug(category, expected):
 
 async def test_blocklist_match_is_category_only(db_session):
     ad = AppDefinition(slug="blocklist-ads-tracking", name="Ads & Tracking",
-                       category="Ads & Tracking", source="blocklist", enabled=True)
+                       category="Ads & Tracking", source="blocklist", enabled=True,
+                       is_category_only=True)
     db_session.add(ad)
     await db_session.flush()
     db_session.add(AppDomain(domain="tracker.com", app_id=ad.id, is_wildcard=False))
@@ -168,7 +169,8 @@ async def test_blocklist_match_is_category_only(db_session):
 
 async def test_real_app_beats_blocklist(db_session):
     block = AppDefinition(slug="blocklist-ads-tracking", name="Ads & Tracking",
-                          category="Ads & Tracking", source="blocklist", enabled=True)
+                          category="Ads & Tracking", source="blocklist", enabled=True,
+                          is_category_only=True)
     app = AppDefinition(slug="acme", name="Acme", category="Software",
                         source="manual", enabled=True)
     db_session.add_all([block, app])
@@ -182,6 +184,23 @@ async def test_real_app_beats_blocklist(db_session):
     assert hit.app_name == "Acme"
     assert hit.category == "Software"
     assert hit.matched_source == "manual"
+
+
+async def test_build_matcher_uses_is_category_only_flag(db_session):
+    # A definition flagged is_category_only renders app_name=None regardless of source.
+    ad = AppDefinition(slug="dnsmon-cat-cdn", name="CDN", category="CDN",
+                       source="supplement", enabled=True, is_category_only=True)
+    db_session.add(ad)
+    await db_session.flush()
+    db_session.add(AppDomain(domain="cdn.example.com", app_id=ad.id, is_wildcard=False))
+    await db_session.commit()
+
+    matcher = await ClassificationService().build_matcher(db_session)
+    hit = matcher.match("img.cdn.example.com")
+    assert hit is not None
+    assert hit.app_name is None          # category bucket, not an app
+    assert hit.category == "CDN"
+    assert hit.matched_source == "supplement"
 
 
 async def test_replace_source_blocklist_batches(db_session):

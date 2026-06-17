@@ -72,6 +72,8 @@ async def _run_migrations(conn):
                   col_type='JSON', default=None, nullable=True),
         Migration(table='alert_rules', column='match_status',
                   col_type='VARCHAR(20)', default="'any'", nullable=False),
+        Migration(table='app_definitions', column='is_category_only',
+                  col_type='BOOLEAN', default='false', nullable=False),
     ]
     for m in migrations:
         result = await conn.execute(text(
@@ -85,6 +87,13 @@ async def _run_migrations(conn):
                 f'ALTER TABLE {m.table} ADD COLUMN {m.column} {m.col_type}{default_clause}{null_clause}'
             ))
             logger.info(f"Migration: added {m.table}.{m.column} ({m.col_type})")
+
+    # Backfill the flag for the pre-existing blocklist tier. `AND is_category_only
+    # = false` keeps this idempotent + cheap (touches only un-backfilled rows).
+    await conn.execute(text(
+        "UPDATE app_definitions SET is_category_only = true "
+        "WHERE source = 'blocklist' AND is_category_only = false"
+    ))
 
     # Drop redundant indexes that are covered by composite indexes
     redundant_indexes = [
