@@ -423,6 +423,11 @@ export interface ClassifyRequest {
   scope: 'registrable' | 'exact';
 }
 
+export interface ClassifySuggestions {
+  app_names: string[];
+  categories: string[];
+}
+
 export interface InsightsParams {
   period?: string;
   servers?: string;

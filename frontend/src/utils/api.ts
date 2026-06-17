@@ -46,6 +46,7 @@ import type {
   InsightSource,
   DomainLabelInfo,
   ClassifyRequest,
+  ClassifySuggestions,
 } from '../types';
 
 const API_BASE_URL = '/api';
@@ -454,6 +455,8 @@ export const classifyApi = {
   label: async (domain: string): Promise<DomainLabelInfo> =>
     (await api.get<DomainLabelInfo>('/classify/label', { params: { domain } })).data,
   classify: async (req: ClassifyRequest): Promise<void> => { await api.post('/classify', req); },
+  suggestions: async (): Promise<ClassifySuggestions> =>
+    (await api.get<ClassifySuggestions>('/classify/suggestions')).data,
   remove: async (domain: string, scope: 'registrable' | 'exact'): Promise<void> => {
     await api.delete('/classify', { params: { domain, scope } });
   },
