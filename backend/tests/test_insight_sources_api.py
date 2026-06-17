@@ -37,7 +37,7 @@ async def test_toggle_requires_admin(async_readonly_client: AsyncClient, db_sess
 async def test_toggle_updates_enabled(async_admin_client: AsyncClient, db_session, monkeypatch):
     # Keep the test hermetic: the toggle would otherwise spawn a fire-and-forget
     # refresh that opens its own session and fetches list URLs.
-    monkeypatch.setattr("backend.routes.insight_sources._trigger_refresh", lambda: None)
+    monkeypatch.setattr("backend.routes.insight_sources._trigger_kind_refresh", lambda kind: None)
     src = await _seed_source(db_session)
     r = await async_admin_client.patch(
         f"/api/insight-sources/{src.id}", json={"enabled": False})

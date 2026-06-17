@@ -7,9 +7,9 @@ from backend.classification_service import ClassificationService
 from backend.models import AppDefinition, AppDomain, DomainLabel, DomainStatsHourly, Query, InsightSource
 
 
-async def test_load_supplement_populates_definitions(db_session):
+async def test_load_dnsmon_bundled_populates_definitions(db_session):
     svc = ClassificationService()
-    await svc.load_supplement(db_session)
+    await svc.load_dnsmon_bundled(db_session)
 
     count = await db_session.scalar(
         select(func.count()).select_from(AppDefinition).where(AppDefinition.source == 'supplement')
@@ -27,10 +27,10 @@ async def test_load_supplement_populates_definitions(db_session):
     assert dom_count >= 1
 
 
-async def test_load_supplement_is_idempotent(db_session):
+async def test_load_dnsmon_bundled_is_idempotent(db_session):
     svc = ClassificationService()
-    await svc.load_supplement(db_session)
-    await svc.load_supplement(db_session)  # second run must not duplicate
+    await svc.load_dnsmon_bundled(db_session)
+    await svc.load_dnsmon_bundled(db_session)  # second run must not duplicate
 
     count = await db_session.scalar(
         select(func.count()).select_from(AppDefinition).where(AppDefinition.slug == 'teamviewer')
@@ -50,7 +50,7 @@ async def _seed_query(db_session, domain):
 
 async def test_reclassify_labels_known_and_unknown(db_session):
     svc = ClassificationService()
-    await svc.load_supplement(db_session)
+    await svc.load_dnsmon_bundled(db_session)
     await _seed_query(db_session, 'files.github.com')
     await _seed_query(db_session, 'totally-unknown-host.test')
 
@@ -68,7 +68,7 @@ async def test_reclassify_labels_known_and_unknown(db_session):
 
 async def test_reclassify_is_idempotent_and_updates(db_session):
     svc = ClassificationService()
-    await svc.load_supplement(db_session)
+    await svc.load_dnsmon_bundled(db_session)
     await _seed_query(db_session, 'notion.so')
     await svc.reclassify(db_session)
     await svc.reclassify(db_session)  # rerun must not error or duplicate (PK domain)
@@ -179,3 +179,27 @@ async def test_load_dnsmon_fetch_fail_first_boot_uses_bundled(db_session, monkey
     tv = await db_session.scalar(select(AppDefinition).where(
         AppDefinition.slug == "teamviewer", AppDefinition.source == "supplement"))
     assert tv is not None
+
+
+async def test_refresh_and_reclassify_kind_only_touches_that_kind(db_session, monkeypatch):
+    await _allow_ssrf(monkeypatch)
+    svc = ClassificationService()
+    # Pre-seed an adguard tier that a FULL refresh (no adguard row) would clear.
+    await svc._replace_source(db_session, 'adguard', [
+        {'slug': 'a1', 'name': 'A1', 'category': 'X', 'domains': [('a1.com', False)]}])
+    async def fake(self, url):
+        return json.dumps([{"slug": "acme", "name": "Acme", "category": "Software",
+                            "domains": ["acme.com"]}])
+    monkeypatch.setattr(ClassificationService, "_fetch_capped_text", fake)
+    db_session.add(InsightSource(name="DNSMon", url="https://example.com/dnsmon.json",
+                                 kind="dnsmon", format="json", enabled=True))
+    await db_session.commit()
+
+    await svc.refresh_and_reclassify_kind('dnsmon')
+    acme = await db_session.scalar(select(AppDefinition).where(
+        AppDefinition.source == 'supplement', AppDefinition.slug == 'acme'))
+    assert acme is not None
+    # The adguard tier was NOT touched (a full refresh would have cleared it).
+    a1 = await db_session.scalar(select(AppDefinition).where(
+        AppDefinition.source == 'adguard', AppDefinition.slug == 'a1'))
+    assert a1 is not None

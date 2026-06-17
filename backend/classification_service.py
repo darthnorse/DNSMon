@@ -59,7 +59,13 @@ def parse_dnsmon_entries(raw: list) -> list[dict]:
     """
     defs: list[dict] = []
     for entry in raw:
-        domains = [(d.strip().lower(), '*' in d) for d in entry.get('domains', []) if d.strip()]
+        if not isinstance(entry, dict):
+            continue
+        raw_domains = entry.get('domains')
+        if not isinstance(raw_domains, list):
+            continue
+        domains = [(d.strip().lower(), '*' in d) for d in raw_domains
+                   if isinstance(d, str) and d.strip()]
         if not domains:
             continue
         name = (entry.get('name') or '').strip()
@@ -156,7 +162,7 @@ class ClassificationService:
         await db.commit()
         return len(defs)
 
-    async def _load_dnsmon_bundled(self, db: AsyncSession) -> int:
+    async def load_dnsmon_bundled(self, db: AsyncSession) -> int:
         try:
             raw = json.loads(_DNSMON_BUNDLED_PATH.read_text())
         except (OSError, json.JSONDecodeError) as e:
@@ -166,10 +172,6 @@ class ClassificationService:
         n = await self._replace_source(db, 'supplement', defs)
         logger.info(f"Loaded {n} DNSMon definitions from bundled file")
         return n
-
-    async def load_supplement(self, db: AsyncSession) -> int:
-        """Back-compat shim: load the bundled DNSMon list (offline path)."""
-        return await self._load_dnsmon_bundled(db)
 
     async def load_dnsmon(self, db: AsyncSession, url: str) -> int:
         """Fetch the remote DNSMon curated list and replace the 'supplement' source.
@@ -204,7 +206,7 @@ class ClassificationService:
         if existing:
             logger.warning("DNSMon refresh yielded no usable list; keeping existing supplement tier")
             return -1
-        return await self._load_dnsmon_bundled(db)
+        return await self.load_dnsmon_bundled(db)
 
     async def refresh_feed(self, db: AsyncSession, url: str = CLASSIFICATION_FEED_URL) -> int:
         """Fetch AdGuard services.json and replace the 'adguard' definitions.
@@ -377,37 +379,51 @@ class ClassificationService:
         async with self._lock:
             return await self._do_reclassify(db)
 
+    async def refresh_and_reclassify_kind(self, kind: str) -> None:
+        """Refresh only the given kind's tier + reclassify (ad-hoc, e.g. a per-row toggle)."""
+        async with self._lock:
+            async with async_session_maker() as db:
+                if kind == 'hosts':
+                    await self.refresh_blocklists(db)
+                else:
+                    source_tag = 'adguard' if kind == 'adguard' else 'supplement'
+                    row = (await db.execute(select(InsightSource).where(
+                        InsightSource.enabled == True, InsightSource.kind == kind))).scalars().first()
+                    if row:
+                        await self._refresh_singleton_row(db, row, source_tag)
+                        await db.commit()
+                    else:
+                        await self._replace_source(db, source_tag, [])
+                await self._do_reclassify(db)
+
+    async def _source_domain_count(self, db: AsyncSession, source: str) -> int:
+        return await db.scalar(
+            select(func.count()).select_from(AppDomain)
+            .join(AppDefinition, AppDomain.app_id == AppDefinition.id)
+            .where(AppDefinition.source == source)) or 0
+
+    async def _refresh_singleton_row(self, db: AsyncSession, row, source_tag: str) -> None:
+        """Fetch one enabled adguard/dnsmon row and record its status + real domain count."""
+        from .models import utcnow
+        refresh = self.refresh_feed if row.kind == 'adguard' else self.load_dnsmon
+        n = await refresh(db, row.url)
+        row.last_status = 'ok' if n >= 0 else 'error'
+        if n >= 0:
+            row.last_fetched_at = utcnow()
+            row.domain_count = await self._source_domain_count(db, source_tag)
+
     async def _refresh_all_sources(self, db: AsyncSession) -> None:
-        """Fetch every enabled insight_sources row, dispatch by kind, and replace
-        each target app_definitions source. Tiers with no enabled row are cleared.
-        Records last_status/last_fetched_at/domain_count per fetched row."""
-        from .models import InsightSource, utcnow
+        """Fetch every enabled insight_sources row, dispatch by kind, replace each
+        target app_definitions source. Tiers with no enabled row are cleared."""
         sources = (await db.execute(
             select(InsightSource).where(InsightSource.enabled == True)
         )).scalars().all()
-
-        adguard = next((s for s in sources if s.kind == 'adguard'), None)
-        if adguard:
-            n = await self.refresh_feed(db, adguard.url)
-            adguard.last_status = 'ok' if n >= 0 else 'error'
-            if n >= 0:
-                adguard.last_fetched_at = utcnow()
-                adguard.domain_count = n
-        else:
-            await self._replace_source(db, 'adguard', [])
-
-        dnsmon = next((s for s in sources if s.kind == 'dnsmon'), None)
-        if dnsmon:
-            n = await self.load_dnsmon(db, dnsmon.url)
-            dnsmon.last_status = 'ok' if n >= 0 else 'error'
-            if n >= 0:
-                dnsmon.last_fetched_at = utcnow()
-                dnsmon.domain_count = n
-        else:
-            await self._replace_source(db, 'supplement', [])
-
-        # hosts rows (the category-only blocklist tier) — refresh_blocklists already
-        # iterates enabled kind=='hosts' rows and records their per-row status.
+        for kind, source_tag in (('adguard', 'adguard'), ('dnsmon', 'supplement')):
+            row = next((s for s in sources if s.kind == kind), None)
+            if row:
+                await self._refresh_singleton_row(db, row, source_tag)
+            else:
+                await self._replace_source(db, source_tag, [])
         await self.refresh_blocklists(db)
         await db.commit()
 

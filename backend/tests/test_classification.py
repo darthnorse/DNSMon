@@ -320,3 +320,14 @@ def test_parse_dnsmon_skips_no_domains():
 
 def test_parse_dnsmon_skips_no_name_no_category():
     assert parse_dnsmon_entries([{"domains": ["a.com"]}]) == []
+
+
+def test_parse_dnsmon_skips_malformed_entries():
+    defs = parse_dnsmon_entries([
+        None,                                   # not a dict
+        {"domains": None},                      # domains not a list
+        {"name": "X", "category": "Y", "domains": [123, "ok.com", "  "]},  # mixed/garbage domains
+    ])
+    assert len(defs) == 1
+    assert defs[0]["name"] == "X"
+    assert defs[0]["domains"] == [("ok.com", False)]

@@ -136,9 +136,9 @@ async def _run_migrations(conn):
 async def ensure_insight_sources() -> int:
     """Ensure each default insight source exists. Returns rows added.
 
-    `adguard`/`dnsmon` are singletons keyed on `kind` (their URL is editable in the
-    panel, so URL-keying would insert a duplicate after a reboot). `hosts` rows may
-    be many, so they key on `url`. On upgrade, AdGuard/DNSMon inherit the legacy
+    `adguard`/`dnsmon` are singletons keyed on `kind` (only one row of each is
+    meaningful); keying on url would risk a duplicate row if a singleton's url ever
+    diverges from the default. `hosts` rows may be many, so they key on `url`. On upgrade, AdGuard/DNSMon inherit the legacy
     classification_* settings so an admin's prior toggle/URL is preserved.
 
     Owns its own session (matches cleanup_old_queries)."""

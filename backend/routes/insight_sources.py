@@ -14,9 +14,14 @@ from ._background import run_in_background
 router = APIRouter(prefix="/api/insight-sources", tags=["insight-sources"])
 
 
-def _trigger_refresh():
+def _trigger_full_refresh():
     svc = get_service().classification_service
     run_in_background(svc.run_full())
+
+
+def _trigger_kind_refresh(kind: str):
+    svc = get_service().classification_service
+    run_in_background(svc.refresh_and_reclassify_kind(kind))
 
 
 @router.get("", response_model=List[InsightSourceResponse])
@@ -39,11 +44,11 @@ async def update_source(source_id: int, payload: InsightSourceUpdate,
     await db.commit()
     await db.refresh(src)
     if changed:  # a no-op toggle shouldn't kick off an HTTP fetch + reclassify
-        _trigger_refresh()
+        _trigger_kind_refresh(src.kind)
     return InsightSourceResponse.model_validate(src)
 
 
 @router.post("/refresh")
 async def refresh_sources(_: User = Depends(require_admin)):
-    _trigger_refresh()
+    _trigger_full_refresh()
     return {"message": "Refresh started"}
