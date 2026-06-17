@@ -606,7 +606,7 @@ class AppDefinition(Base):
     slug = Column(String(100), nullable=False)
     name = Column(String(150), nullable=False)
     category = Column(String(50), nullable=True)
-    source = Column(String(20), nullable=False)  # adguard | supplement | manual
+    source = Column(String(20), nullable=False)  # adguard | supplement | manual | blocklist
     icon_svg = Column(Text, nullable=True)
     enabled = Column(Boolean, default=True)
     is_category_only = Column(Boolean, nullable=False, default=False)

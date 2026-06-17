@@ -207,16 +207,17 @@ async def test_replace_source_blocklist_batches(db_session):
     svc = ClassificationService()
     defs = [{
         "slug": "blocklist-ads-tracking", "name": "Ads & Tracking",
-        "category": "Ads & Tracking",
+        "category": "Ads & Tracking", "is_category_only": True,
         "domains": [(f"d{i}.com", False) for i in range(10500)],
     }]
     n = await svc._replace_source(db_session, "blocklist", defs)
     assert n == 1
 
-    ad_id = await db_session.scalar(
-        select(AppDefinition.id).where(AppDefinition.source == "blocklist"))
+    ad = await db_session.scalar(
+        select(AppDefinition).where(AppDefinition.source == "blocklist"))
+    assert ad.is_category_only is True  # _replace_source persisted the flag
     cnt = await db_session.scalar(
-        select(func.count()).select_from(AppDomain).where(AppDomain.app_id == ad_id))
+        select(func.count()).select_from(AppDomain).where(AppDomain.app_id == ad.id))
     assert cnt == 10500
 
 
