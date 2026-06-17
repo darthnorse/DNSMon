@@ -139,7 +139,10 @@ async def feed_status(db: AsyncSession = Depends(get_db), _: User = Depends(get_
         AppDefinition.source == 'manual')) or 0
     labeled = await db.scalar(select(func.count()).select_from(DomainLabel).where(
         DomainLabel.app_id.isnot(None))) or 0
-    last = await db.scalar(select(func.max(AppDefinition.updated_at)))
+    # Feed-refresh recency: exclude 'manual' so an admin editing a manual app
+    # definition doesn't read as a feed refresh.
+    last = await db.scalar(select(func.max(AppDefinition.updated_at)).where(
+        AppDefinition.source != 'manual'))
     return FeedStatusResponse(manual_app_count=manual, labeled_domain_count=labeled,
                               last_refreshed_at=last)
 

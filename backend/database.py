@@ -153,6 +153,10 @@ async def ensure_insight_sources() -> int:
         existing_urls = {url for _, url in existing}
         settings = {row.key: row.get_typed_value()
                     for row in (await db.execute(select(AppSetting))).scalars()}
+        # Legacy migration read: classification_feed_*/classification_supplement_enabled
+        # were dropped from bootstrap defaults in v1.2. On UPGRADE these AppSetting rows
+        # still exist and seed the AdGuard/DNSMon rows so prior toggle/URL is preserved;
+        # on FRESH install they're absent and .get() falls back to the defaults below.
         for src in DEFAULT_INSIGHT_SOURCES:
             row = dict(src)
             if row['kind'] == 'adguard':
