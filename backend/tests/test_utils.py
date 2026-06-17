@@ -6,6 +6,7 @@ from unittest.mock import patch
 from backend.utils import (
     async_validate_url_safety,
     ensure_utc,
+    registrable_domain,
     validate_url_safety,
 )
 
@@ -74,3 +75,24 @@ async def test_async_validate_url_safety_delegates_to_sync():
         mock_gai.return_value = [(0, 0, 0, "", ("192.168.1.10", 0))]
         result = await async_validate_url_safety("http://pihole.lan/")
         assert result is None
+
+
+def test_registrable_domain_strips_subdomains():
+    assert registrable_domain("dev-nat20.lumasurveillance.com") == "lumasurveillance.com"
+    assert registrable_domain("a.b.c.example.com") == "example.com"
+
+
+def test_registrable_domain_multipart_tld():
+    assert registrable_domain("foo.bar.co.uk") == "bar.co.uk"
+    assert registrable_domain("shop.example.com.au") == "example.com.au"
+
+
+def test_registrable_domain_already_registrable():
+    assert registrable_domain("example.com") == "example.com"
+
+
+def test_registrable_domain_normalizes_and_falls_back():
+    assert registrable_domain("WWW.Example.COM.") == "example.com"
+    # Unknown/internal TLD -> safe fallback to the cleaned input
+    assert registrable_domain("host.runald.lan") == "host.runald.lan"
+    assert registrable_domain("") == ""

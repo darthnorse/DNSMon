@@ -9,7 +9,13 @@ from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import urlparse
 
+import tldextract
+
 logger = logging.getLogger(__name__)
+
+# Offline PSL snapshot: suffix_list_urls=() forces the bundled list so the first
+# call never makes a network request (avoids runtime latency + SSRF surface).
+_TLD_EXTRACT = tldextract.TLDExtract(suffix_list_urls=())
 
 # Networks that are never legitimate targets for outbound HTTP from this app.
 # RFC 1918 private ranges are intentionally NOT blocked — this app commonly
@@ -51,6 +57,18 @@ def validate_url_safety(url: str) -> Optional[str]:
 async def async_validate_url_safety(url: str) -> Optional[str]:
     """Async version — runs DNS resolution in a thread pool to avoid blocking the event loop."""
     return await asyncio.get_running_loop().run_in_executor(None, validate_url_safety, url)
+
+
+def registrable_domain(fqdn: str) -> str:
+    """Resolve a hostname to its registrable domain (e.g. a.b.example.co.uk ->
+    example.co.uk). Falls back to the cleaned input for internal/unknown TLDs."""
+    fqdn = (fqdn or "").strip().rstrip(".").lower()
+    if not fqdn:
+        return ""
+    ext = _TLD_EXTRACT(fqdn)
+    if ext.domain and ext.suffix:
+        return f"{ext.domain}.{ext.suffix}"
+    return fqdn
 
 
 def ensure_utc(dt: Optional[datetime]) -> Optional[str]:
