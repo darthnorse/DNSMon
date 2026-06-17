@@ -15,7 +15,9 @@ logger = logging.getLogger(__name__)
 
 # Offline PSL snapshot: suffix_list_urls=() forces the bundled list so the first
 # call never makes a network request (avoids runtime latency + SSRF surface).
-_TLD_EXTRACT = tldextract.TLDExtract(suffix_list_urls=())
+# cache_dir=None disables on-disk caching — the container runs as appuser with a
+# non-writable HOME, so a disk cache write would fail and log a confusing warning.
+_TLD_EXTRACT = tldextract.TLDExtract(suffix_list_urls=(), cache_dir=None)
 
 # Networks that are never legitimate targets for outbound HTTP from this app.
 # RFC 1918 private ranges are intentionally NOT blocked — this app commonly
