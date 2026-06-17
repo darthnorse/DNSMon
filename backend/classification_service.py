@@ -384,19 +384,43 @@ class ClassificationService:
         async with self._lock:
             return await self._do_reclassify(db)
 
-    async def run_full(self, *, feed_enabled: bool = True,
-                       supplement_enabled: bool = True,
-                       url: str = CLASSIFICATION_FEED_URL) -> None:
-        """Top-level job: refresh sources then reclassify all domains."""
+    async def _refresh_all_sources(self, db: AsyncSession) -> None:
+        """Fetch every enabled insight_sources row, dispatch by kind, and replace
+        each target app_definitions source. Tiers with no enabled row are cleared.
+        Records last_status/last_fetched_at/domain_count per fetched row."""
+        from .models import InsightSource, utcnow
+        sources = (await db.execute(
+            select(InsightSource).where(InsightSource.enabled == True)
+        )).scalars().all()
+
+        adguard = next((s for s in sources if s.kind == 'adguard'), None)
+        if adguard:
+            n = await self.refresh_feed(db, adguard.url)
+            adguard.last_status = 'ok' if n >= 0 else 'error'
+            if n >= 0:
+                adguard.last_fetched_at = utcnow()
+                adguard.domain_count = n
+        else:
+            await self._replace_source(db, 'adguard', [])
+
+        dnsmon = next((s for s in sources if s.kind == 'dnsmon'), None)
+        if dnsmon:
+            n = await self.load_dnsmon(db, dnsmon.url)
+            dnsmon.last_status = 'ok' if n >= 0 else 'error'
+            if n >= 0:
+                dnsmon.last_fetched_at = utcnow()
+                dnsmon.domain_count = n
+        else:
+            await self._replace_source(db, 'supplement', [])
+
+        # hosts rows (the category-only blocklist tier) — refresh_blocklists already
+        # iterates enabled kind=='hosts' rows and records their per-row status.
+        await self.refresh_blocklists(db)
+        await db.commit()
+
+    async def run_full(self) -> None:
+        """Top-level job: refresh every enabled source then reclassify all domains."""
         async with self._lock:
             async with async_session_maker() as db:
-                if feed_enabled:
-                    await self.refresh_feed(db, url)
-                else:
-                    await self._replace_source(db, 'adguard', [])
-                if supplement_enabled:
-                    await self.load_supplement(db)
-                else:
-                    await self._replace_source(db, 'supplement', [])
-                await self.refresh_blocklists(db)
+                await self._refresh_all_sources(db)
                 await self._do_reclassify(db)

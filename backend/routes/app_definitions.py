@@ -152,10 +152,6 @@ async def feed_status(db: AsyncSession = Depends(get_db), _: User = Depends(get_
 @router.post("/refresh")
 async def refresh_feed(_: User = Depends(require_admin)):
     """Trigger a feed refresh + reclassify (admin)."""
-    s = get_settings_sync()
     svc = get_service().classification_service
-    _run_in_background(svc.run_full(
-        feed_enabled=s.classification_feed_enabled,
-        supplement_enabled=s.classification_supplement_enabled,
-        url=s.classification_feed_url))
+    _run_in_background(svc.run_full())
     return {"message": "Refresh started"}

@@ -123,11 +123,7 @@ class DNSMonService:
         """Refresh the app/category feed and reclassify observed domains."""
         try:
             logger.info("Running domain classification refresh...")
-            await self.classification_service.run_full(
-                feed_enabled=self.settings.classification_feed_enabled,
-                supplement_enabled=self.settings.classification_supplement_enabled,
-                url=self.settings.classification_feed_url,
-            )
+            await self.classification_service.run_full()
         except Exception as e:
             logger.error(f"Error in classification task: {e}", exc_info=True)
 

@@ -2,9 +2,9 @@ import json
 import httpx
 from datetime import datetime, timezone
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete
 from backend.classification_service import ClassificationService
-from backend.models import AppDefinition, AppDomain, DomainLabel, DomainStatsHourly, Query
+from backend.models import AppDefinition, AppDomain, DomainLabel, DomainStatsHourly, Query, InsightSource
 
 
 async def test_load_supplement_populates_definitions(db_session):
@@ -97,17 +97,36 @@ async def test_replace_source_preserves_disabled_flag(db_session):
     assert foo2.enabled is False  # admin's disable survived the refresh
 
 
-async def test_run_full_disabled_sources_are_cleared(db_session):
+async def test_run_full_no_enabled_sources_clears_all(db_session):
     svc = ClassificationService()
     await svc._replace_source(db_session, 'adguard', [
         {'slug': 'a1', 'name': 'A1', 'category': 'X', 'domains': [('a1.com', False)]}])
     await svc._replace_source(db_session, 'supplement', [
         {'slug': 's1', 'name': 'S1', 'category': 'Y', 'domains': [('s1.com', False)]}])
-    # run_full opens its own session; feed+supplement disabled => both sources cleared, no network
-    await svc.run_full(feed_enabled=False, supplement_enabled=False)
-    # verify via a fresh query (run_full committed in its own session)
+    # Wipe any seeded insight_sources so run_full sees zero enabled rows.
+    await db_session.execute(delete(InsightSource))
+    await db_session.commit()
+    # No insight_sources rows → every tier is cleared, no network.
+    await svc.run_full()
     remaining = await db_session.scalar(select(func.count()).select_from(AppDefinition))
     assert remaining == 0
+
+
+async def test_run_full_dispatches_dnsmon_row(db_session, monkeypatch):
+    from backend.models import InsightSource
+    await _allow_ssrf(monkeypatch)
+    async def fake(self, url):
+        return json.dumps([{"slug": "acme", "name": "Acme", "category": "Software",
+                            "domains": ["acme.com"]}])
+    monkeypatch.setattr(ClassificationService, "_fetch_capped_text", fake)
+    db_session.add(InsightSource(name="DNSMon", url="https://example.com/dnsmon.json",
+                                 kind="dnsmon", format="json", enabled=True))
+    await db_session.commit()
+
+    await ClassificationService().run_full()
+    acme = await db_session.scalar(select(AppDefinition).where(
+        AppDefinition.slug == "acme", AppDefinition.source == "supplement"))
+    assert acme is not None and acme.name == "Acme"
 
 
 async def _allow_ssrf(monkeypatch):
