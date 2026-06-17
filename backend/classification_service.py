@@ -268,7 +268,7 @@ class ClassificationService:
         No enabled sources → clears the tier (returns 0). No source yielding any
         domains (every fetch failed, or returned an unparseable/empty body) →
         leaves existing data untouched (returns -1). Not lock-protected: callers
-        (run_full / refresh_and_reclassify_blocklists) hold the lock."""
+        run_full holds the lock."""
         from .models import utcnow
         sources = (await db.execute(
             select(InsightSource).where(
@@ -314,13 +314,6 @@ class ClassificationService:
         n = await self._replace_source(db, 'blocklist', defs)
         logger.info(f"Loaded {n} blocklist category definitions")
         return n
-
-    async def refresh_and_reclassify_blocklists(self) -> None:
-        """Locked wrapper for ad-hoc refresh (toggle / manual refresh endpoint)."""
-        async with self._lock:
-            async with async_session_maker() as db:
-                await self.refresh_blocklists(db)
-                await self._do_reclassify(db)
 
     async def build_matcher(self, db: AsyncSession) -> DomainMatcher:
         rows = await db.execute(
