@@ -407,6 +407,22 @@ export interface DomainUsage {
   blocked: number;
 }
 
+export interface DomainLabelInfo {
+  domain: string;
+  registrable: string;
+  matched: boolean;
+  app_name: string | null;
+  category: string | null;
+  matched_source: string | null;
+}
+
+export interface ClassifyRequest {
+  domain: string;
+  app_name?: string;
+  category?: string;
+  scope: 'registrable' | 'exact';
+}
+
 export interface InsightsParams {
   period?: string;
   servers?: string;

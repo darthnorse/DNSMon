@@ -44,6 +44,8 @@ import type {
   AppDefinitionCreate,
   FeedStatus,
   InsightSource,
+  DomainLabelInfo,
+  ClassifyRequest,
 } from '../types';
 
 const API_BASE_URL = '/api';
@@ -442,6 +444,23 @@ export const insightsApi = {
     const response = await api.get<DomainUsage[]>('/insights/apps/domains', { params: { ...params, app_name } });
     return response.data;
   },
+};
+
+export const classifyApi = {
+  label: async (domain: string): Promise<DomainLabelInfo> =>
+    (await api.get<DomainLabelInfo>('/classify/label', { params: { domain } })).data,
+  classify: async (req: ClassifyRequest): Promise<void> => { await api.post('/classify', req); },
+  remove: async (domain: string, scope: 'registrable' | 'exact'): Promise<void> => {
+    await api.delete('/classify', { params: { domain, scope } });
+  },
+};
+
+// Reads for the click-to-classify flow (uncategorized list + categories for the modal dropdown).
+export const insightsClassifyApi = {
+  uncategorized: async (period = '24h', limit = 50): Promise<DomainUsage[]> =>
+    (await api.get<DomainUsage[]>('/insights/uncategorized-domains', { params: { period, limit } })).data,
+  categories: async (period = '24h'): Promise<CategoryUsage[]> =>
+    (await api.get<CategoryUsage[]>('/insights/categories', { params: { period } })).data,
 };
 
 // ============================================================================
