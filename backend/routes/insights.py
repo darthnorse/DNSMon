@@ -126,3 +126,25 @@ async def get_app_domains(
         stmt = stmt.where(T.server.in_(server_list))
     rows = await db.execute(stmt)
     return [DomainUsage(domain=r[0], total=int(r[1] or 0), blocked=int(r[2] or 0)) for r in rows]
+
+
+@router.get("/uncategorized-domains", response_model=List[DomainUsage])
+async def get_uncategorized_domains(
+    period: str = "24h", servers: Optional[str] = None,
+    from_date: Optional[str] = None, to_date: Optional[str] = None, limit: int = 50,
+    db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user),
+):
+    """Top domains with no resolved category, by query volume — the coverage backlog."""
+    start, end = _resolve_period(period, from_date, to_date)
+    T = DomainStatsHourly
+    stmt = (
+        select(T.domain, func.sum(T.total).label('total'), func.sum(T.blocked).label('blocked'))
+        .join(DomainLabel, DomainLabel.domain == T.domain, isouter=True)
+        .where(T.hour >= start, DomainLabel.category.is_(None))
+        .group_by(T.domain).order_by(func.sum(T.total).desc()).limit(limit)
+    )
+    server_list = _server_list(servers)
+    if server_list:
+        stmt = stmt.where(T.server.in_(server_list))
+    rows = (await db.execute(stmt)).all()
+    return [DomainUsage(domain=r[0], total=int(r[1] or 0), blocked=int(r[2] or 0)) for r in rows]

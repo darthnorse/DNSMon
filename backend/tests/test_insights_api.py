@@ -55,3 +55,21 @@ async def test_categories_counts_domains_without_label_row(async_admin_client: A
     assert r.status_code == 200, r.text
     cats = {c['category']: c['total'] for c in r.json()}
     assert cats.get('Uncategorized', 0) >= 7
+
+
+async def test_uncategorized_domains_lists_only_null_category(async_admin_client, db_session):
+    hour = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    db_session.add_all([
+        DomainStatsHourly(hour=hour, server='s1', domain='big-uncat.com', total=1000, blocked=0),
+        DomainStatsHourly(hour=hour, server='s1', domain='small-uncat.com', total=5, blocked=0),
+        DomainStatsHourly(hour=hour, server='s1', domain='categorized.com', total=900, blocked=0),
+        DomainLabel(domain='categorized.com', category='Streaming', app_name='X', matched_source='manual'),
+        DomainLabel(domain='big-uncat.com', category=None, app_name=None, matched_source=None),
+    ])
+    await db_session.commit()
+    r = await async_admin_client.get("/api/insights/uncategorized-domains", params={"period": "24h"})
+    assert r.status_code == 200, r.text
+    domains = [row["domain"] for row in r.json()]
+    assert "categorized.com" not in domains
+    assert domains[0] == "big-uncat.com"           # volume-sorted desc
+    assert "small-uncat.com" in domains
