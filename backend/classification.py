@@ -79,8 +79,9 @@ class MatchResult:
 
 
 class DomainMatcher:
-    """In-memory suffix matcher. Resolution: manual > supplement > adguard
-    (source precedence dominates), then most-specific suffix wins."""
+    """In-memory suffix matcher. Resolution: any app match > any category-only
+    bucket, then source precedence (manual > supplement > adguard > blocklist),
+    then most-specific suffix."""
 
     def __init__(self):
         self._entries: dict[str, MatchResult] = {}
@@ -91,8 +92,13 @@ class DomainMatcher:
         if not domain:
             return
         existing = self._entries.get(domain)
-        rank = SOURCE_PRECEDENCE.get(source, 0)
-        if existing is None or rank > SOURCE_PRECEDENCE.get(existing.matched_source, 0):
+        key = (app_name is not None, SOURCE_PRECEDENCE.get(source, 0))
+        if existing is None:
+            self._entries[domain] = MatchResult(app_id, app_name, category, source)
+            return
+        existing_key = (existing.app_name is not None,
+                        SOURCE_PRECEDENCE.get(existing.matched_source, 0))
+        if key > existing_key:
             self._entries[domain] = MatchResult(app_id, app_name, category, source)
 
     def match(self, fqdn: str) -> Optional[MatchResult]:
@@ -100,14 +106,15 @@ class DomainMatcher:
             return None
         labels = fqdn.strip().rstrip('.').lower().split('.')
         best: Optional[MatchResult] = None
-        best_key = (-1, -1)  # (source_rank, specificity)
+        best_key = (-1, -1, -1)  # (is_app, source_rank, specificity)
         for i in range(len(labels) - 1):
             specificity = len(labels) - i
             candidate = '.'.join(labels[i:])
             hit = self._entries.get(candidate)
             if hit is None:
                 continue
-            key = (SOURCE_PRECEDENCE.get(hit.matched_source, 0), specificity)
+            key = (1 if hit.app_name is not None else 0,
+                   SOURCE_PRECEDENCE.get(hit.matched_source, 0), specificity)
             if key > best_key:
                 best_key = key
                 best = hit

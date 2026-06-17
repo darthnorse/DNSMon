@@ -218,6 +218,30 @@ async def test_refresh_blocklists_no_enabled_clears(db_session):
     assert cnt == 0
 
 
+def test_app_beats_category_bucket_from_higher_source():
+    # A category-only bucket (app_name=None) from a HIGHER-ranked source must NOT
+    # shadow a real app from a lower-ranked source. Apps win across the board.
+    m = DomainMatcher()
+    m.add('foo.com', app_id=1, app_name=None, category='Ads & Tracking', source='supplement')
+    m.add('foo.com', app_id=2, app_name='FooApp', category='Software', source='adguard')
+    hit = m.match('foo.com')
+    assert hit.app_name == 'FooApp'
+
+
+def test_app_beats_category_bucket_across_suffixes():
+    m = DomainMatcher()
+    m.add('sub.foo.com', app_id=1, app_name=None, category='Ads & Tracking', source='supplement')
+    m.add('foo.com', app_id=2, app_name='FooApp', category='Software', source='adguard')
+    assert m.match('sub.foo.com').app_name == 'FooApp'
+
+
+def test_category_bucket_higher_source_wins_over_lower_bucket():
+    m = DomainMatcher()
+    m.add('bar.com', app_id=1, app_name=None, category='Ads & Tracking', source='blocklist')
+    m.add('bar.com', app_id=2, app_name=None, category='Telemetry', source='supplement')
+    assert m.match('bar.com').category == 'Telemetry'
+
+
 async def test_refresh_blocklists_empty_body_keeps_tier(db_session, monkeypatch):
     """A 200 that parses to 0 domains must NOT wipe the existing tier."""
     svc = ClassificationService()
