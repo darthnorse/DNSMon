@@ -8,7 +8,7 @@ from typing import Optional, List
 from datetime import datetime, timezone
 
 from ..database import get_db
-from ..models import Query, User
+from ..models import Query, User, DomainLabel
 from ..schemas import QueryResponse
 from ..auth import get_current_user
 from ..utils import ensure_utc
@@ -41,7 +41,9 @@ async def search_queries(
     - search: searches across domain, client_ip, and client_hostname (OR)
     - domain/client_ip/client_hostname: specific field filters (AND)
     """
-    stmt = select(Query)
+    stmt = select(Query, DomainLabel.app_name, DomainLabel.category).outerjoin(
+        DomainLabel, Query.domain == DomainLabel.domain
+    )
     conditions = []
 
     if search:
@@ -99,7 +101,7 @@ async def search_queries(
     stmt = stmt.limit(limit).offset(offset)
 
     result = await db.execute(stmt)
-    queries = result.scalars().all()
+    rows = result.all()
 
     return [QueryResponse(
         id=q.id,
@@ -109,8 +111,10 @@ async def search_queries(
         client_hostname=q.client_hostname,
         query_type=q.query_type,
         status=q.status,
-        server=q.server
-    ) for q in queries]
+        server=q.server,
+        app_name=app_name,
+        category=category,
+    ) for q, app_name, category in rows]
 
 
 @router.get("/queries/count")

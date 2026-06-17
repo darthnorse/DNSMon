@@ -46,6 +46,8 @@ class QueryResponse(BaseModel):
     query_type: Optional[str]
     status: Optional[str]
     server: str
+    app_name: Optional[str] = None
+    category: Optional[str] = None
 
     class Config:
         from_attributes = True

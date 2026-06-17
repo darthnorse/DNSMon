@@ -7,13 +7,26 @@ from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db, async_session_maker
-from ..models import Query, User, QueryStatsHourly, ClientStatsHourly, DomainStatsHourly
+from ..models import Query, User, QueryStatsHourly, ClientStatsHourly, DomainStatsHourly, DomainLabel
 from ..schemas import StatsResponse, StatisticsResponse
 from ..auth import get_current_user
 from ..config import get_settings_sync
 from ..constants import BLOCKED_STATUSES, CACHE_STATUSES
 
 router = APIRouter(prefix="/api", tags=["stats"])
+
+
+def _attach_domain_labels(stmt, domain_col):
+    """LEFT JOIN domain_labels onto stmt so each row also carries
+    app_name and category. domain_labels.domain is the PK (one row per
+    domain), so adding (app_name, category) to the GROUP BY does not
+    change aggregated counts or the number of result rows."""
+    return (
+        stmt
+        .add_columns(DomainLabel.app_name, DomainLabel.category)
+        .outerjoin(DomainLabel, domain_col == DomainLabel.domain)
+        .group_by(DomainLabel.app_name, DomainLabel.category)
+    )
 
 
 @router.get("/stats", response_model=StatsResponse)
@@ -284,8 +297,12 @@ async def get_statistics(
                 .limit(10)
             )
             stmt = apply_filters(stmt, T, client=False)
+            stmt = _attach_domain_labels(stmt, T.domain)
             result = await s.execute(stmt)
-            return [{"domain": row[0], "count": row[1]} for row in result]
+            return [
+                {"domain": row[0], "count": row[1], "app_name": row[2], "category": row[3]}
+                for row in result
+            ]
 
     async def run_top_blocked():
         async with async_session_maker() as s:
@@ -300,8 +317,12 @@ async def get_statistics(
                 .limit(10)
             )
             stmt = apply_filters(stmt, T, client=False)
+            stmt = _attach_domain_labels(stmt, T.domain)
             result = await s.execute(stmt)
-            return [{"domain": row[0], "count": row[1]} for row in result]
+            return [
+                {"domain": row[0], "count": row[1], "app_name": row[2], "category": row[3]}
+                for row in result
+            ]
 
     async def run_top_clients():
         async with async_session_maker() as s:
@@ -459,5 +480,9 @@ async def _run_top_domains_raw(s, period_start, server_list, client_list,
         stmt = stmt.where(Query.server.in_(server_list))
     if client_list:
         stmt = stmt.where(Query.client_ip.in_(client_list))
+    stmt = _attach_domain_labels(stmt, Query.domain)
     result = await s.execute(stmt)
-    return [{"domain": row[0], "count": row[1]} for row in result]
+    return [
+        {"domain": row[0], "count": row[1], "app_name": row[2], "category": row[3]}
+        for row in result
+    ]
