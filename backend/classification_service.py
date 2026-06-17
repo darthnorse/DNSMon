@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
-from sqlalchemy import select, delete, insert, update
+from sqlalchemy import select, delete, insert, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .classification import parse_adguard_rule, parse_blocklist_line, DomainMatcher
@@ -20,7 +20,7 @@ from .utils import async_validate_url_safety
 
 logger = logging.getLogger(__name__)
 
-_SUPPLEMENT_PATH = Path(__file__).parent / 'data' / 'shadow_it_supplement.json'
+_DNSMON_BUNDLED_PATH = Path(__file__).parent / 'data' / 'dnsmon.json'
 
 # Chunk app_domains inserts so a large blocklist (pro.plus ~546k rows) stays well
 # under PostgreSQL's ~32k bind-parameter cap (3 cols * 5000 = 15k params/statement).
@@ -156,24 +156,55 @@ class ClassificationService:
         await db.commit()
         return len(defs)
 
-    async def load_supplement(self, db: AsyncSession) -> int:
+    async def _load_dnsmon_bundled(self, db: AsyncSession) -> int:
         try:
-            raw = json.loads(_SUPPLEMENT_PATH.read_text())
+            raw = json.loads(_DNSMON_BUNDLED_PATH.read_text())
         except (OSError, json.JSONDecodeError) as e:
-            logger.error(f"Could not read supplement file: {e}")
+            logger.error(f"Could not read bundled DNSMon list: {e}")
             return 0
-        defs = []
-        for entry in raw:
-            domains = [(d.strip().lower(), '*' in d) for d in entry.get('domains', []) if d.strip()]
-            if not domains:
-                continue
-            defs.append({
-                'slug': entry['slug'], 'name': entry['name'],
-                'category': entry.get('category'), 'domains': domains,
-            })
+        defs = parse_dnsmon_entries(raw)
         n = await self._replace_source(db, 'supplement', defs)
-        logger.info(f"Loaded {n} supplement app definitions")
+        logger.info(f"Loaded {n} DNSMon definitions from bundled file")
         return n
+
+    async def load_supplement(self, db: AsyncSession) -> int:
+        """Back-compat shim: load the bundled DNSMon list (offline path)."""
+        return await self._load_dnsmon_bundled(db)
+
+    async def load_dnsmon(self, db: AsyncSession, url: str) -> int:
+        """Fetch the remote DNSMon curated list and replace the 'supplement' source.
+
+        Remote success → replace from remote. Remote failure → keep existing defs
+        if any (don't regress a known-good fetch to the older bundled copy on a
+        transient blip), else fall back to the bundled dnsmon.json (first boot)."""
+        raw = None
+        unsafe = await async_validate_url_safety(url)
+        if unsafe:
+            logger.error(f"Refusing to fetch DNSMon list: {unsafe}")
+        else:
+            try:
+                text = await self._fetch_capped_text(url)
+                parsed = json.loads(text)
+                if not isinstance(parsed, list):
+                    raise ValueError("DNSMon list is not a JSON array")
+                raw = parsed
+            except (httpx.HTTPError, ValueError, json.JSONDecodeError) as e:
+                logger.error(f"Failed to fetch DNSMon list: {e}")
+
+        if raw is not None:
+            defs = parse_dnsmon_entries(raw)
+            if defs:
+                n = await self._replace_source(db, 'supplement', defs)
+                logger.info(f"Loaded {n} DNSMon definitions from remote")
+                return n
+            logger.error("DNSMon remote list yielded 0 definitions; falling back")
+
+        existing = await db.scalar(select(func.count()).select_from(AppDefinition).where(
+            AppDefinition.source == 'supplement'))
+        if existing:
+            logger.warning("DNSMon fetch failed; keeping existing supplement tier")
+            return -1
+        return await self._load_dnsmon_bundled(db)
 
     async def refresh_feed(self, db: AsyncSession, url: str = CLASSIFICATION_FEED_URL) -> int:
         """Fetch AdGuard services.json and replace the 'adguard' definitions.
@@ -213,8 +244,8 @@ class ClassificationService:
         logger.info(f"Refreshed AdGuard feed: {n} app definitions")
         return n
 
-    async def _fetch_blocklist(self, url: str) -> str:
-        """GET a blocklist body, streaming with a byte cap to bound memory.
+    async def _fetch_capped_text(self, url: str) -> str:
+        """GET a body, streaming with a byte cap to bound memory.
 
         Raises ValueError if the body exceeds the cap, httpx.HTTPError on
         transport/status failures."""
@@ -257,7 +288,7 @@ class ClassificationService:
                 src.last_status = 'error'
                 continue
             try:
-                text = await self._fetch_blocklist(src.url)
+                text = await self._fetch_capped_text(src.url)
             except (httpx.HTTPError, ValueError) as e:
                 logger.error(f"Failed to fetch blocklist {src.name}: {e}")
                 src.last_status = 'error'

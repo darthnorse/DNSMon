@@ -279,7 +279,7 @@ async def test_refresh_blocklists_empty_body_keeps_tier(db_session, monkeypatch)
 
     async def fake_fetch(self, url):  # 200 with no parseable domains
         return "# upstream error page\nNot Found\n"
-    monkeypatch.setattr(ClassificationService, "_fetch_blocklist", fake_fetch)
+    monkeypatch.setattr(ClassificationService, "_fetch_capped_text", fake_fetch)
 
     n = await svc.refresh_blocklists(db_session)
     assert n == -1  # nothing yielded → keep existing tier

@@ -41,6 +41,13 @@ CLASSIFICATION_FEED_URL = (
     "/main/assets/services.json"
 )
 
+# Our own curated shadow-IT app list (MIT), hosted in this repo and fetched at
+# runtime so it updates without a redeploy. The bundled copy is the offline fallback.
+DNSMON_LIST_URL = (
+    "https://raw.githubusercontent.com/darthnorse/DNSMon"
+    "/main/backend/data/dnsmon.json"
+)
+
 # Higher number wins when more than one source claims a domain.
 SOURCE_PRECEDENCE = {'blocklist': 0, 'adguard': 1, 'supplement': 2, 'manual': 3}
 

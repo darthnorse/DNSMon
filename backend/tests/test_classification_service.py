@@ -1,3 +1,5 @@
+import json
+import httpx
 from datetime import datetime, timezone
 
 from sqlalchemy import select, func
@@ -106,3 +108,55 @@ async def test_run_full_disabled_sources_are_cleared(db_session):
     # verify via a fresh query (run_full committed in its own session)
     remaining = await db_session.scalar(select(func.count()).select_from(AppDefinition))
     assert remaining == 0
+
+
+async def _allow_ssrf(monkeypatch):
+    async def ok(url):
+        return None
+    monkeypatch.setattr("backend.classification_service.async_validate_url_safety", ok)
+
+
+async def test_load_dnsmon_remote_success(db_session, monkeypatch):
+    await _allow_ssrf(monkeypatch)
+    async def fake(self, url):
+        return json.dumps([{"slug": "acme", "name": "Acme", "category": "Software",
+                            "domains": ["acme.com"]}])
+    monkeypatch.setattr(ClassificationService, "_fetch_capped_text", fake)
+
+    svc = ClassificationService()
+    n = await svc.load_dnsmon(db_session, "https://example.com/dnsmon.json")
+    assert n == 1
+    acme = await db_session.scalar(select(AppDefinition).where(
+        AppDefinition.slug == "acme", AppDefinition.source == "supplement"))
+    assert acme.name == "Acme"
+    assert acme.is_category_only is False
+
+
+async def test_load_dnsmon_fetch_fail_keeps_existing(db_session, monkeypatch):
+    await _allow_ssrf(monkeypatch)
+    svc = ClassificationService()
+    await svc._replace_source(db_session, "supplement", [
+        {"slug": "old", "name": "Old", "category": "X", "domains": [("old.com", False)]}])
+    async def boom(self, url):
+        raise httpx.ConnectError("down")
+    monkeypatch.setattr(ClassificationService, "_fetch_capped_text", boom)
+
+    n = await svc.load_dnsmon(db_session, "https://example.com/dnsmon.json")
+    assert n == -1
+    cnt = await db_session.scalar(select(func.count()).select_from(AppDefinition).where(
+        AppDefinition.source == "supplement"))
+    assert cnt == 1  # existing tier preserved, not regressed to bundled
+
+
+async def test_load_dnsmon_fetch_fail_first_boot_uses_bundled(db_session, monkeypatch):
+    await _allow_ssrf(monkeypatch)
+    svc = ClassificationService()
+    async def boom(self, url):
+        raise httpx.ConnectError("down")
+    monkeypatch.setattr(ClassificationService, "_fetch_capped_text", boom)
+
+    n = await svc.load_dnsmon(db_session, "https://example.com/dnsmon.json")
+    assert n >= 10  # bundled dnsmon.json loaded on first boot
+    tv = await db_session.scalar(select(AppDefinition).where(
+        AppDefinition.slug == "teamviewer", AppDefinition.source == "supplement"))
+    assert tv is not None
