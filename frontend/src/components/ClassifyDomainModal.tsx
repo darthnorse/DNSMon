@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { classifyApi, insightsApi } from '../utils/api';
+import { classifyApi } from '../utils/api';
 import { getErrorMessage } from '../utils/errors';
 import type { DomainLabelInfo } from '../types';
 
@@ -14,6 +14,7 @@ export default function ClassifyDomainModal({ domain, onClose, onClassified }: P
   const [appName, setAppName] = useState('');
   const [category, setCategory] = useState('');
   const [scope, setScope] = useState<'registrable' | 'exact'>('registrable');
+  const [appNameOptions, setAppNameOptions] = useState<string[]>([]);
   const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -21,14 +22,15 @@ export default function ClassifyDomainModal({ domain, onClose, onClassified }: P
   useEffect(() => {
     (async () => {
       try {
-        const [lbl, cats] = await Promise.all([
+        const [lbl, sug] = await Promise.all([
           classifyApi.label(domain),
-          insightsApi.categories(),
+          classifyApi.suggestions(),
         ]);
         setInfo(lbl);
         setAppName(lbl.app_name ?? '');
         setCategory(lbl.category ?? '');
-        setCategoryOptions(cats.map((c) => c.category).filter((c) => c && c !== 'Uncategorized'));
+        setAppNameOptions(sug.app_names);
+        setCategoryOptions(sug.categories.filter((c) => c && c !== 'Uncategorized'));
       } catch (err: unknown) {
         setError(getErrorMessage(err, 'Failed to load domain info'));
       }
@@ -89,9 +91,12 @@ export default function ClassifyDomainModal({ domain, onClose, onClassified }: P
         )}
 
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">App name (optional)</label>
-        <input value={appName} onChange={(e) => setAppName(e.target.value)}
+        <input value={appName} onChange={(e) => setAppName(e.target.value)} list="dnsmon-appname-options"
                placeholder="e.g. Notion — leave blank for a category-only tag"
                className="w-full mb-3 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm" />
+        <datalist id="dnsmon-appname-options">
+          {appNameOptions.map((a) => <option key={a} value={a} />)}
+        </datalist>
 
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Category</label>
         <input value={category} onChange={(e) => setCategory(e.target.value)} list="dnsmon-category-options"
