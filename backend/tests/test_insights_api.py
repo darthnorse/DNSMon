@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from httpx import AsyncClient
 from backend.models import DomainLabel, DomainStatsHourly
 
@@ -73,3 +73,26 @@ async def test_uncategorized_domains_lists_only_null_category(async_admin_client
     assert "categorized.com" not in domains
     assert domains[0] == "big-uncat.com"           # volume-sorted desc
     assert "small-uncat.com" in domains
+
+
+async def test_uncategorized_domains_respects_custom_range_upper_bound(async_admin_client, db_session):
+    # _resolve_period takes the custom branch whenever BOTH from_date and to_date
+    # are supplied (period value is ignored). Dates parse as ISO 8601, so a bare
+    # YYYY-MM-DD is that day at 00:00:00 UTC, and to_date is an EXACT exclusive-ish
+    # ceiling (T.hour <= to_date_midnight), NOT inclusive end-of-day.
+    midnight_today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    in_range = midnight_today - timedelta(days=2)   # 2 days ago, inside [3d ago, 1d ago midnight]
+    out_of_range = midnight_today                   # today's midnight, after the to_date ceiling
+    db_session.add_all([
+        DomainStatsHourly(hour=in_range, server='s1', domain='inrange-uncat.com', total=100, blocked=0),
+        DomainStatsHourly(hour=out_of_range, server='s1', domain='today-uncat.com', total=500, blocked=0),
+    ])
+    await db_session.commit()
+    frm = (midnight_today - timedelta(days=3)).strftime('%Y-%m-%d')
+    to = (midnight_today - timedelta(days=1)).strftime('%Y-%m-%d')
+    r = await async_admin_client.get("/api/insights/uncategorized-domains",
+                                     params={"period": "custom", "from_date": frm, "to_date": to})
+    assert r.status_code == 200, r.text
+    domains = [row["domain"] for row in r.json()]
+    assert "inrange-uncat.com" in domains
+    assert "today-uncat.com" not in domains   # excluded by the to_date upper bound

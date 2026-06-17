@@ -1,6 +1,6 @@
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query as QueryParam
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -131,7 +131,8 @@ async def get_app_domains(
 @router.get("/uncategorized-domains", response_model=List[DomainUsage])
 async def get_uncategorized_domains(
     period: str = "24h", servers: Optional[str] = None,
-    from_date: Optional[str] = None, to_date: Optional[str] = None, limit: int = 50,
+    from_date: Optional[str] = None, to_date: Optional[str] = None,
+    limit: int = QueryParam(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user),
 ):
     """Top domains with no resolved category, by query volume — the coverage backlog."""
@@ -143,8 +144,10 @@ async def get_uncategorized_domains(
         .where(T.hour >= start, DomainLabel.category.is_(None))
         .group_by(T.domain).order_by(func.sum(T.total).desc()).limit(limit)
     )
+    if end:
+        stmt = stmt.where(T.hour <= end)
     server_list = _server_list(servers)
     if server_list:
         stmt = stmt.where(T.server.in_(server_list))
-    rows = (await db.execute(stmt)).all()
+    rows = await db.execute(stmt)
     return [DomainUsage(domain=r[0], total=int(r[1] or 0), blocked=int(r[2] or 0)) for r in rows]
