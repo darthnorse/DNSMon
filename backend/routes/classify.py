@@ -50,10 +50,30 @@ async def classify(payload: ClassifyRequest, db: AsyncSession = Depends(get_db),
             db.add(ad)
             await db.flush()
 
+    # A domain belongs to exactly one manual bucket; re-classifying moves it here
+    # and prunes any def it emptied, so equal-precedence manual mappings can't collide.
+    manual_ids = (await db.execute(
+        select(AppDefinition.id).where(AppDefinition.source == 'manual'))).scalars().all()
+    other_ids = [i for i in manual_ids if i != ad.id]
+    if other_ids:
+        await db.execute(delete(AppDomain).where(
+            AppDomain.domain == target, AppDomain.app_id.in_(other_ids)))
+
     exists = await db.scalar(select(AppDomain.id).where(
         AppDomain.app_id == ad.id, AppDomain.domain == target))
     if not exists:
         db.add(AppDomain(domain=target, app_id=ad.id, is_wildcard=False))
+    await db.flush()
+
+    if other_ids:
+        counts = (await db.execute(
+            select(AppDefinition.id, func.count(AppDomain.id))
+            .outerjoin(AppDomain, AppDomain.app_id == AppDefinition.id)
+            .where(AppDefinition.id.in_(other_ids)).group_by(AppDefinition.id))).all()
+        empty = [aid for aid, c in counts if c == 0]
+        if empty:
+            await db.execute(delete(AppDefinition).where(AppDefinition.id.in_(empty)))
+
     await db.commit()
     run_in_background(_reclassify_async())
     return {"domain": target, "app_name": app_name, "category": category, "scope": payload.scope}

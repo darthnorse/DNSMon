@@ -86,6 +86,36 @@ async def test_unclassify_keeps_def_with_other_domains(async_admin_client: Async
     assert cnt == 1
 
 
+async def test_classify_moves_domain_between_category_buckets(async_admin_client: AsyncClient, db_session):
+    await async_admin_client.post("/api/classify", json={
+        "domain": "move.example.com", "category": "CDN", "scope": "exact"})
+    await async_admin_client.post("/api/classify", json={
+        "domain": "move.example.com", "category": "Analytics", "scope": "exact"})
+    rows = (await db_session.execute(select(AppDomain).where(
+        AppDomain.domain == "move.example.com"))).scalars().all()
+    assert len(rows) == 1  # exactly one manual mapping, not two
+    ad = await db_session.scalar(select(AppDefinition).where(AppDefinition.id == rows[0].app_id))
+    assert ad.category == "Analytics" and ad.is_category_only is True
+    # old CDN bucket held only this domain -> pruned
+    old = await db_session.scalar(select(AppDefinition).where(AppDefinition.slug == "manual-cat-cdn"))
+    assert old is None
+
+
+async def test_classify_moves_domain_from_one_app_to_another(async_admin_client: AsyncClient, db_session):
+    await async_admin_client.post("/api/classify", json={
+        "domain": "switch.example.com", "app_name": "AppA", "scope": "exact"})
+    await async_admin_client.post("/api/classify", json={
+        "domain": "switch.example.com", "app_name": "AppB", "scope": "exact"})
+    rows = (await db_session.execute(select(AppDomain).where(
+        AppDomain.domain == "switch.example.com"))).scalars().all()
+    assert len(rows) == 1
+    ad = await db_session.scalar(select(AppDefinition).where(AppDefinition.id == rows[0].app_id))
+    assert ad.name == "AppB"
+    appa = await db_session.scalar(select(AppDefinition).where(
+        AppDefinition.source == 'manual', AppDefinition.name == 'AppA'))
+    assert appa is None  # AppA emptied -> pruned
+
+
 async def test_label_unlabeled_returns_registrable(async_admin_client: AsyncClient):
     r = await async_admin_client.get("/api/classify/label",
                                      params={"domain": "sub.unknownhost.com"})
