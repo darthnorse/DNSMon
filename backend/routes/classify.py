@@ -81,3 +81,18 @@ async def unclassify(domain: str, scope: str = 'registrable',
     await db.commit()
     run_in_background(_reclassify_async())
     return {"domain": target, "removed": True}
+
+
+@router.get("/label")
+async def get_label(domain: str, db: AsyncSession = Depends(get_db),
+                    _: User = Depends(get_current_user)):
+    clean = domain.strip().rstrip('.').lower()
+    label = await db.get(DomainLabel, clean)
+    return {
+        "domain": clean,
+        "registrable": registrable_domain(clean),
+        "matched": bool(label and (label.app_name or label.category)),
+        "app_name": label.app_name if label else None,
+        "category": label.category if label else None,
+        "matched_source": label.matched_source if label else None,
+    }

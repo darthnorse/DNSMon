@@ -84,3 +84,32 @@ async def test_unclassify_keeps_def_with_other_domains(async_admin_client: Async
     cnt = await db_session.scalar(select(func.count()).select_from(AppDomain).where(
         AppDomain.app_id == ad.id))
     assert cnt == 1
+
+
+async def test_label_unlabeled_returns_registrable(async_admin_client: AsyncClient):
+    r = await async_admin_client.get("/api/classify/label",
+                                     params={"domain": "sub.unknownhost.com"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["registrable"] == "unknownhost.com"
+    assert body["matched"] is False
+
+
+async def test_label_reflects_manual_classification(async_admin_client: AsyncClient):
+    await async_admin_client.post("/api/classify", json={
+        "domain": "mapped.example.com", "app_name": "Mapped", "category": "Tools", "scope": "exact"})
+    # reclassify runs in the background after POST; force it deterministically.
+    # reclassify only labels domains observed in domain_stats_hourly, so seed one.
+    from backend.service import get_service
+    from backend.database import async_session_maker
+    from backend.models import DomainStatsHourly, utcnow
+    async with async_session_maker() as s:
+        s.add(DomainStatsHourly(hour=utcnow(), server="t", domain="mapped.example.com",
+                                total=1, blocked=0))
+        await s.commit()
+        await get_service().classification_service.reclassify(s)
+    r = await async_admin_client.get("/api/classify/label", params={"domain": "mapped.example.com"})
+    body = r.json()
+    assert body["matched"] is True
+    assert body["app_name"] == "Mapped"
+    assert body["matched_source"] == "manual"
