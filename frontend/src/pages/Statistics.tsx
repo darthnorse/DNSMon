@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { statisticsApi, settingsApi } from '../utils/api';
 import { getErrorMessage } from '../utils/errors';
+import ClassifyDomainModal from '../components/ClassifyDomainModal';
 import type { Statistics, PiholeServer, ClientInfo } from '../types';
 import { format } from 'date-fns';
 import {
@@ -51,6 +52,8 @@ export default function StatisticsPage() {
   const [customTo, setCustomTo] = useState(() => toLocalDatetimeString(new Date()));
   const [appliedFrom, setAppliedFrom] = useState<string | null>(null);
   const [appliedTo, setAppliedTo] = useState<string | null>(null);
+
+  const [classifyTarget, setClassifyTarget] = useState<string | null>(null);
 
   const [clients, setClients] = useState<ClientInfo[]>([]);
   const [selectedClients, setSelectedClients] = useState<string[]>([]);
@@ -667,6 +670,7 @@ export default function StatisticsPage() {
               label: d.domain,
               value: d.count,
             }))}
+            onItemClick={setClassifyTarget}
           />
         </div>
 
@@ -681,6 +685,7 @@ export default function StatisticsPage() {
               value: d.count,
             }))}
             highlight="red"
+            onItemClick={setClassifyTarget}
           />
         </div>
 
@@ -782,6 +787,14 @@ export default function StatisticsPage() {
           </div>
         </div>
       </div>
+
+      {classifyTarget && (
+        <ClassifyDomainModal
+          domain={classifyTarget}
+          onClose={() => setClassifyTarget(null)}
+          onClassified={() => setClassifyTarget(null)}
+        />
+      )}
     </div>
   );
 }
@@ -816,7 +829,7 @@ interface TopListItem {
   value: number;
 }
 
-function TopList({ items, highlight }: { items: TopListItem[]; highlight?: 'red' }) {
+function TopList({ items, highlight, onItemClick }: { items: TopListItem[]; highlight?: 'red'; onItemClick?: (label: string) => void }) {
   if (items.length === 0) {
     return (
       <div className="text-center text-gray-500 dark:text-gray-400 py-4">
@@ -827,6 +840,12 @@ function TopList({ items, highlight }: { items: TopListItem[]; highlight?: 'red'
 
   const maxValue = Math.max(...items.map(i => i.value));
 
+  const labelClassName = `text-sm truncate ${
+    highlight === 'red'
+      ? 'text-red-700 dark:text-red-400'
+      : 'text-gray-900 dark:text-white'
+  }`;
+
   return (
     <div className="space-y-2">
       {items.map((item) => (
@@ -836,16 +855,20 @@ function TopList({ items, highlight }: { items: TopListItem[]; highlight?: 'red'
           </span>
           <div className="flex-1 min-w-0">
             <div className="flex justify-between items-center mb-1">
-              <span
-                className={`text-sm truncate ${
-                  highlight === 'red'
-                    ? 'text-red-700 dark:text-red-400'
-                    : 'text-gray-900 dark:text-white'
-                }`}
-                title={item.label}
-              >
-                {item.label}
-              </span>
+              {onItemClick ? (
+                <button
+                  type="button"
+                  onClick={() => onItemClick(item.label)}
+                  className={`${labelClassName} text-left hover:underline`}
+                  title={item.label}
+                >
+                  {item.label}
+                </button>
+              ) : (
+                <span className={labelClassName} title={item.label}>
+                  {item.label}
+                </span>
+              )}
               <span className="text-sm text-gray-500 dark:text-gray-400 ml-2">
                 {item.value.toLocaleString()}
               </span>

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { statsApi, queryApi, domainApi } from '../utils/api';
 import { getErrorMessage } from '../utils/errors';
+import ClassifyDomainModal from '../components/ClassifyDomainModal';
 import type { Stats, Query } from '../types';
 import { format } from 'date-fns';
 
@@ -30,6 +31,7 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [classifyTarget, setClassifyTarget] = useState<string | null>(null);
   const [pageSize, setPageSize] = useState(() => {
     const stored = Number(localStorage.getItem('dashboard_pageSize'));
     return [25, 50, 100].includes(stored) ? stored : 50;
@@ -285,9 +287,13 @@ export default function Dashboard() {
                 >
                   <div className="flex justify-between items-start">
                     <div className="flex-1 min-w-0">
-                      <div className="font-medium text-gray-900 dark:text-white truncate">
+                      <button
+                        onClick={() => setClassifyTarget(query.domain)}
+                        title={query.domain}
+                        className="block w-full text-left font-medium text-gray-900 dark:text-white truncate hover:underline"
+                      >
                         {query.domain}
-                      </div>
+                      </button>
                       <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                         {format(new Date(query.timestamp), 'MMM dd, HH:mm:ss')}
                       </div>
@@ -395,8 +401,14 @@ export default function Dashboard() {
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-300">
                           {format(new Date(query.timestamp), 'MMM dd, HH:mm:ss')}
                         </td>
-                        <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-300 max-w-xs truncate" title={query.domain}>
-                          {query.domain}
+                        <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-300 max-w-xs">
+                          <button
+                            onClick={() => setClassifyTarget(query.domain)}
+                            title={query.domain}
+                            className="block max-w-full text-left truncate hover:underline"
+                          >
+                            {query.domain}
+                          </button>
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-300">
                           <div className="truncate">{query.client_hostname || query.client_ip}</div>
@@ -497,6 +509,14 @@ export default function Dashboard() {
           )}
         </div>
       </div>
+
+      {classifyTarget && (
+        <ClassifyDomainModal
+          domain={classifyTarget}
+          onClose={() => setClassifyTarget(null)}
+          onClassified={() => setClassifyTarget(null)}
+        />
+      )}
     </div>
   );
 }
