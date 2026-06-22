@@ -16,10 +16,9 @@ export default function AutocompleteInput({ value, onChange, options, placeholde
   const wrapRef = useRef<HTMLDivElement>(null);
 
   const query = value.trim().toLowerCase();
-  const filtered = (query
+  const filtered = query
     ? options.filter((o) => o.toLowerCase().includes(query) && o.toLowerCase() !== query)
-    : options
-  ).slice(0, 8);
+    : options;
 
   useEffect(() => {
     const onDocMouseDown = (e: MouseEvent) => {
