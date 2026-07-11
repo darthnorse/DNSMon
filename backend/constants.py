@@ -59,7 +59,8 @@ V2FLY_FEED_URL = (
 # Higher number wins when more than one source claims a domain.
 SOURCE_PRECEDENCE = {'blocklist': 0, 'v2fly': 1, 'adguard': 2, 'dnsmon': 3, 'manual': 4}
 
-# Sources a user/admin may set on a manual app definition. 'blocklist' is engine-only.
+# Sources a user/admin may set on a manual app definition. 'blocklist' and
+# 'v2fly' are engine-only.
 VALID_SOURCES = frozenset({'adguard', 'dnsmon', 'manual'})
 
 # Insight-source kinds that have at most one row each, keyed on `kind`.

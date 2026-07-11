@@ -140,8 +140,8 @@ class MatchResult:
 
 class DomainMatcher:
     """In-memory suffix matcher. Resolution: any app match > any category-only
-    bucket, then source precedence (manual > dnsmon > adguard > blocklist),
-    then most-specific suffix."""
+    bucket, then source precedence (manual > dnsmon > adguard > v2fly >
+    blocklist), then most-specific suffix."""
 
     def __init__(self):
         self._entries: dict[str, MatchResult] = {}

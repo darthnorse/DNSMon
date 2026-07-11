@@ -195,6 +195,18 @@ class ClassificationService:
         logger.info(f"Loaded {n} DNSMon definitions from bundled file")
         return n
 
+    async def _safe_fetch(self, url: str, what: str) -> Optional[str]:
+        """SSRF-validate then fetch `url`; None on any failure (already logged)."""
+        unsafe = await async_validate_url_safety(url)
+        if unsafe:
+            logger.error(f"Refusing to fetch {what}: {unsafe}")
+            return None
+        try:
+            return await self._fetch_capped_text(url)
+        except (httpx.HTTPError, ValueError) as e:
+            logger.error(f"Failed to fetch {what}: {e}")
+            return None
+
     async def load_dnsmon(self, db: AsyncSession, url: str) -> int:
         """Fetch the remote DNSMon curated list and replace the 'dnsmon' source.
 
@@ -202,18 +214,15 @@ class ClassificationService:
         if any (don't regress a known-good fetch to the older bundled copy on a
         transient blip), else fall back to the bundled dnsmon.json (first boot)."""
         raw = None
-        unsafe = await async_validate_url_safety(url)
-        if unsafe:
-            logger.error(f"Refusing to fetch DNSMon list: {unsafe}")
-        else:
+        text = await self._safe_fetch(url, 'DNSMon list')
+        if text is not None:
             try:
-                text = await self._fetch_capped_text(url)
                 parsed = json.loads(text)
                 if not isinstance(parsed, list):
                     raise ValueError("DNSMon list is not a JSON array")
                 raw = parsed
-            except (httpx.HTTPError, ValueError, json.JSONDecodeError) as e:
-                logger.error(f"Failed to fetch DNSMon list: {e}")
+            except (ValueError, json.JSONDecodeError) as e:
+                logger.error(f"Failed to parse DNSMon list: {e}")
 
         if raw is not None:
             defs = parse_dnsmon_entries(raw)
@@ -239,14 +248,8 @@ class ClassificationService:
         mapping = _load_v2fly_map()
         if not mapping:
             return -1
-        unsafe = await async_validate_url_safety(url)
-        if unsafe:
-            logger.error(f"Refusing to fetch v2fly list: {unsafe}")
-            return -1
-        try:
-            text = await self._fetch_capped_text(url)
-        except (httpx.HTTPError, ValueError) as e:
-            logger.error(f"Failed to fetch v2fly list: {e}")
+        text = await self._safe_fetch(url, 'v2fly list')
+        if text is None:
             return -1
         defs = parse_v2fly_entries(text, mapping)
         if not defs:
@@ -347,15 +350,8 @@ class ClassificationService:
         # so src.format is advisory metadata today (no per-format branching needed).
         fetched: list[tuple[str, set[str]]] = []
         for src in sources:
-            unsafe = await async_validate_url_safety(src.url)
-            if unsafe:
-                logger.error(f"Refusing to fetch blocklist {src.name}: {unsafe}")
-                src.last_status = 'error'
-                continue
-            try:
-                text = await self._fetch_capped_text(src.url)
-            except (httpx.HTTPError, ValueError) as e:
-                logger.error(f"Failed to fetch blocklist {src.name}: {e}")
+            text = await self._safe_fetch(src.url, f"blocklist {src.name}")
+            if text is None:
                 src.last_status = 'error'
                 continue
             domains = parse_blocklist_text(text)
@@ -448,14 +444,13 @@ class ClassificationService:
                 if kind == 'hosts':
                     await self.refresh_blocklists(db)
                 else:
-                    source_tag = kind
                     row = (await db.execute(select(InsightSource).where(
                         InsightSource.enabled == True, InsightSource.kind == kind))).scalars().first()
                     if row:
-                        await self._refresh_singleton_row(db, row, source_tag)
+                        await self._refresh_singleton_row(db, row)
                         await db.commit()
                     else:
-                        await self._replace_source(db, source_tag, [])
+                        await self._replace_source(db, kind, [])
                 await self._do_reclassify(db)
 
     async def _source_domain_count(self, db: AsyncSession, source: str) -> int:
@@ -464,7 +459,7 @@ class ClassificationService:
             .join(AppDefinition, AppDomain.app_id == AppDefinition.id)
             .where(AppDefinition.source == source)) or 0
 
-    async def _refresh_singleton_row(self, db: AsyncSession, row, source_tag: str) -> None:
+    async def _refresh_singleton_row(self, db: AsyncSession, row) -> None:
         """Fetch one enabled singleton-kind row and record its status + real domain count."""
         from .models import utcnow
         loaders = {'adguard': self.refresh_feed, 'dnsmon': self.load_dnsmon,
@@ -474,7 +469,7 @@ class ClassificationService:
         row.last_status = 'ok' if n >= 0 else 'error'
         if n >= 0:
             row.last_fetched_at = utcnow()
-            row.domain_count = await self._source_domain_count(db, source_tag)
+            row.domain_count = await self._source_domain_count(db, row.kind)
 
     async def _refresh_all_sources(self, db: AsyncSession) -> None:
         """Fetch every enabled insight_sources row, dispatch by kind, replace each
@@ -485,7 +480,7 @@ class ClassificationService:
         for kind in SINGLETON_SOURCE_KINDS:
             row = next((s for s in sources if s.kind == kind), None)
             if row:
-                await self._refresh_singleton_row(db, row, kind)
+                await self._refresh_singleton_row(db, row)
             else:
                 await self._replace_source(db, kind, [])
         await self.refresh_blocklists(db)

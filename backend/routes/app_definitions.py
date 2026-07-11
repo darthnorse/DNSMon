@@ -15,6 +15,11 @@ from ._background import run_in_background as _run_in_background
 
 router = APIRouter(prefix="/api/app-definitions", tags=["app-definitions"])
 
+# Sources listable via ?source= — VALID_SOURCES plus engine-only 'v2fly', whose
+# rows appear in the list and should be filterable. 'blocklist' stays excluded:
+# its pseudo-app carries ~546k domains.
+LISTABLE_SOURCES = VALID_SOURCES | {'v2fly'}
+
 
 async def _domains_for(db: AsyncSession, app_id: int) -> List[str]:
     rows = await db.execute(select(AppDomain.domain).where(AppDomain.app_id == app_id))
@@ -44,9 +49,9 @@ async def _reclassify_async():
 async def list_definitions(source: Optional[str] = None,
                            db: AsyncSession = Depends(get_db),
                            _: User = Depends(get_current_user)):
-    if source and source not in VALID_SOURCES:
-        raise HTTPException(status_code=400, detail=f"Invalid source. Must be one of: {sorted(VALID_SOURCES)}")
-    # 'blocklist' is engine-only (absent from VALID_SOURCES, so ?source=blocklist is
+    if source and source not in LISTABLE_SOURCES:
+        raise HTTPException(status_code=400, detail=f"Invalid source. Must be one of: {sorted(LISTABLE_SOURCES)}")
+    # 'blocklist' is engine-only (absent from LISTABLE_SOURCES, so ?source=blocklist is
     # rejected above) and its pseudo-app carries ~546k domains — keep it out of this list.
     stmt = select(AppDefinition).where(AppDefinition.source != 'blocklist').order_by(AppDefinition.name)
     if source:
@@ -99,7 +104,7 @@ async def update_definition(def_id: int, payload: AppDefinitionUpdate,
     # `enabled` can be toggled on any source; other edits are manual-only.
     if ad.source != 'manual' and (set(data.keys()) - {'enabled'}):
         raise HTTPException(status_code=400,
-                            detail="Only the 'enabled' flag can be changed on feed apps (AdGuard, DNSMon)")
+                            detail="Only the 'enabled' flag can be changed on feed-sourced apps")
 
     if 'name' in data and data['name'] is not None:
         ad.name = data['name']

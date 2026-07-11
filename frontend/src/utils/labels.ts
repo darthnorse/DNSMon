@@ -26,6 +26,7 @@ export function sourceLabel(source: string | null): string {
   const labels: Record<string, string> = {
     adguard: 'AdGuard',
     dnsmon: 'DNSMon',
+    v2fly: 'v2fly Community',
     manual: 'Manual',
     blocklist: 'Blocklist',
   };

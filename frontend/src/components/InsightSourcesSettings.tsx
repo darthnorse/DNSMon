@@ -103,7 +103,7 @@ export default function InsightSourcesSettings({ onError, onSuccess }: Props) {
       </div>
 
       <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
-        The feeds that power the Insights page. App feeds (AdGuard, DNSMon) name apps
+        The feeds that power the Insights page. App feeds (AdGuard, DNSMon, v2fly) name apps
         and tint categories; category feeds only tint categories. A real app match always
         wins over a category bucket.
       </p>

@@ -71,3 +71,16 @@ async def test_app_definitions_list_excludes_blocklist(async_admin_client: Async
     names = [d["name"] for d in r.json()]
     assert "Acme" in names
     assert "Ads & Tracking" not in names
+
+
+async def test_app_definitions_source_filter_accepts_v2fly(async_admin_client: AsyncClient, db_session):
+    db_session.add(AppDefinition(slug="netflix", name="Netflix", category="Streaming",
+                                 source="v2fly", enabled=True))
+    db_session.add(AppDefinition(slug="acme", name="Acme", category="Software",
+                                 source="manual", enabled=True))
+    await db_session.commit()
+    r = await async_admin_client.get("/api/app-definitions", params={"source": "v2fly"})
+    assert r.status_code == 200, r.text
+    assert [d["slug"] for d in r.json()] == ["netflix"]
+    r = await async_admin_client.get("/api/app-definitions", params={"source": "blocklist"})
+    assert r.status_code == 400

@@ -4,7 +4,7 @@ import { getErrorMessage } from '../utils/errors';
 import { sourceLabel } from '../utils/labels';
 import type { AppDefinition, AppDefinitionCreate, FeedStatus } from '../types';
 
-type SourceFilter = 'all' | 'adguard' | 'dnsmon' | 'manual';
+type SourceFilter = 'all' | 'adguard' | 'dnsmon' | 'v2fly' | 'manual';
 
 interface Props {
   onError: (error: string | null) => void;
@@ -123,6 +123,7 @@ export default function AppDefinitionsSettings({ onError, onSuccess }: Props) {
   const SOURCE_BADGE: Record<AppDefinition['source'], string> = {
     adguard: 'bg-teal-100 dark:bg-teal-900/30 text-teal-800 dark:text-teal-300',
     dnsmon: 'bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300',
+    v2fly: 'bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300',
     manual: 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300',
   };
 
@@ -144,7 +145,7 @@ export default function AppDefinitionsSettings({ onError, onSuccess }: Props) {
       <h2 className="text-lg font-medium text-gray-900 dark:text-white mb-2">App Definitions</h2>
 
       <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
-        Manage runtime feeds (AdGuard, DNSMon, blocklists) under <span className="font-medium">Insight Sources</span>.
+        Manage runtime feeds (AdGuard, DNSMon, v2fly, blocklists) under <span className="font-medium">Insight Sources</span>.
       </p>
 
       {/* Slim status summary */}
@@ -256,6 +257,7 @@ export default function AppDefinitionsSettings({ onError, onSuccess }: Props) {
             <option value="all">All sources</option>
             <option value="adguard">AdGuard</option>
             <option value="dnsmon">DNSMon</option>
+            <option value="v2fly">v2fly Community</option>
             <option value="manual">Manual</option>
           </select>
         </div>
