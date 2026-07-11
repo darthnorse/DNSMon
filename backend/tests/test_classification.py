@@ -353,7 +353,7 @@ SAMPLE_V2FLY = '''lists:
       - "domain:netflix.com"
       - "full:netflix.ca"
       - "regexp:^nflx[0-9]+\\\\.com$"
-      - "domain:doubleclick.net @ads"
+      - "domain:doubleclick.net:@ads"
   - name: unmapped-service
     length: 1
     rules:
@@ -366,7 +366,7 @@ SAMPLE_V2FLY = '''lists:
   - name: attrcarrier
     length: 1
     rules:
-      - "domain:CnOnly.Example.com @cn"
+      - "domain:CnOnly.Example.com:@!cn"
 '''
 
 V2FLY_TEST_MAPPING = {
@@ -411,3 +411,18 @@ def test_v2fly_garbage_input_yields_nothing():
     assert parse_v2fly_entries('', V2FLY_TEST_MAPPING) == []
     assert parse_v2fly_entries('<html>error page</html>', V2FLY_TEST_MAPPING) == []
     assert parse_v2fly_entries(SAMPLE_V2FLY, {}) == []
+
+
+def test_v2fly_colon_form_attrs_real_artifact_shape():
+    text = '''lists:
+  - name: attrcarrier
+    length: 3
+    rules:
+      - "domain:keep-me.example.com:@!cn"
+      - "domain:multi.example.com:@!cn:@dummy"
+      - "domain:ads.example.com:@ads"
+'''
+    defs = parse_v2fly_entries(text, V2FLY_TEST_MAPPING)
+    carrier = next(d for d in defs if d['slug'] == 'attrcarrier')
+    assert carrier['domains'] == [('keep-me.example.com', False),
+                                  ('multi.example.com', False)]

@@ -81,8 +81,10 @@ def parse_v2fly_entries(text: str, mapping: dict) -> list[dict]:
     shape, and a real YAML parse of ~110k scalars would stall the event loop.
     Only lists named in `mapping` are imported. `domain:` and `full:` rules are
     both stored non-wildcard (the matcher's suffix walk supplies subdomain
-    semantics); `regexp:`/`keyword:` rules are skipped; rules tagged `@ads` are
-    dropped so ad domains inside app lists stay with the Ads & Tracking tier.
+    semantics); `regexp:`/`keyword:` rules are skipped; rules tagged `@ads`
+    (attributes are colon-attached in the artifact, e.g.
+    `domain:example.com:@ads`) are dropped so ad domains inside app lists
+    stay with the Ads & Tracking tier.
     """
     domains_by_list: dict[str, set[str]] = {}
     current: Optional[str] = None
@@ -99,7 +101,7 @@ def parse_v2fly_entries(text: str, mapping: dict) -> list[dict]:
         rtype, value = m.group(1), m.group(2)
         if rtype in ('regexp', 'keyword'):
             continue
-        parts = value.split()
+        parts = value.replace(':@', ' @').split()
         if not parts:
             continue
         domain, attrs = parts[0], parts[1:]
