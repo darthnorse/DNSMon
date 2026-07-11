@@ -29,6 +29,16 @@ _DOMAIN_INSERT_BATCH = 5000
 # Cap the fetched blocklist body to bound memory (pro.plus is ~13 MiB today).
 _MAX_BLOCKLIST_BYTES = 64 * 1024 * 1024
 
+# GitHub release-asset URLs 302 to objects.githubusercontent.com; follow a
+# bounded number of hops, re-validating each target against the SSRF guard.
+_MAX_REDIRECTS = 3
+_REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+
+
+def resolve_redirect_target(base_url: str, location: str) -> str:
+    """Absolute URL for a Location header value relative to the requested URL."""
+    return str(httpx.URL(base_url).join(location))
+
 
 def parse_blocklist_text(text: str) -> set[str]:
     """Parse raw blocklist text to a set of bare domains."""
@@ -249,20 +259,34 @@ class ClassificationService:
     async def _fetch_capped_text(self, url: str) -> str:
         """GET a body, streaming with a byte cap to bound memory.
 
-        Raises ValueError if the body exceeds the cap, httpx.HTTPError on
-        transport/status failures."""
-        chunks: list[bytes] = []
-        total = 0
+        Follows up to _MAX_REDIRECTS redirects, re-validating every hop with
+        the SSRF guard. Raises ValueError if the body exceeds the cap or a
+        redirect is unsafe/looping, httpx.HTTPError on transport/status
+        failures."""
         async with httpx.AsyncClient(timeout=30.0) as client:
-            async with client.stream("GET", url) as resp:
-                resp.raise_for_status()
-                async for chunk in resp.aiter_bytes():
-                    total += len(chunk)
-                    if total > _MAX_BLOCKLIST_BYTES:
-                        raise ValueError(
-                            f"blocklist body exceeds {_MAX_BLOCKLIST_BYTES} byte cap")
-                    chunks.append(chunk)
-        return b''.join(chunks).decode('utf-8', errors='replace')
+            for _ in range(_MAX_REDIRECTS + 1):
+                async with client.stream("GET", url) as resp:
+                    if resp.status_code in _REDIRECT_STATUSES:
+                        location = resp.headers.get('location')
+                        if not location:
+                            raise ValueError("redirect without a Location header")
+                        target = resolve_redirect_target(url, location)
+                        unsafe = await async_validate_url_safety(target)
+                        if unsafe:
+                            raise ValueError(f"unsafe redirect target: {unsafe}")
+                        url = target
+                        continue
+                    resp.raise_for_status()
+                    chunks: list[bytes] = []
+                    total = 0
+                    async for chunk in resp.aiter_bytes():
+                        total += len(chunk)
+                        if total > _MAX_BLOCKLIST_BYTES:
+                            raise ValueError(
+                                f"blocklist body exceeds {_MAX_BLOCKLIST_BYTES} byte cap")
+                        chunks.append(chunk)
+                    return b''.join(chunks).decode('utf-8', errors='replace')
+        raise ValueError(f"too many redirects (>{_MAX_REDIRECTS})")
 
     async def refresh_blocklists(self, db: AsyncSession) -> int:
         """Fetch each enabled blocklist source and replace the 'blocklist' tier.

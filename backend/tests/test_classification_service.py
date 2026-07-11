@@ -1,9 +1,10 @@
 import json
 import httpx
+import pytest
 from datetime import datetime, timezone
 
 from sqlalchemy import select, func, delete
-from backend.classification_service import ClassificationService
+from backend.classification_service import ClassificationService, resolve_redirect_target
 from backend.models import AppDefinition, AppDomain, DomainLabel, DomainStatsHourly, Query, InsightSource
 
 
@@ -203,3 +204,61 @@ async def test_refresh_and_reclassify_kind_only_touches_that_kind(db_session, mo
     a1 = await db_session.scalar(select(AppDefinition).where(
         AppDefinition.source == 'adguard', AppDefinition.slug == 'a1'))
     assert a1 is not None
+
+
+def test_resolve_redirect_target_absolute():
+    assert resolve_redirect_target(
+        "https://github.com/a/releases/latest/download/f.yml",
+        "https://objects.githubusercontent.com/x/y",
+    ) == "https://objects.githubusercontent.com/x/y"
+
+
+def test_resolve_redirect_target_relative():
+    assert resolve_redirect_target(
+        "https://example.com/a/b?x=1", "/c/d") == "https://example.com/c/d"
+
+
+def _mock_http(monkeypatch, handler):
+    real_client = httpx.AsyncClient
+    def factory(**kwargs):
+        kwargs['transport'] = httpx.MockTransport(handler)
+        return real_client(**kwargs)
+    monkeypatch.setattr("backend.classification_service.httpx.AsyncClient", factory)
+
+
+async def test_fetch_follows_redirect(monkeypatch):
+    await _allow_ssrf(monkeypatch)
+    calls = []
+    def handler(request):
+        calls.append(str(request.url))
+        if str(request.url) == "https://a.example/file":
+            return httpx.Response(302, headers={"location": "https://b.example/real"})
+        return httpx.Response(200, text="hello")
+    _mock_http(monkeypatch, handler)
+
+    text = await ClassificationService()._fetch_capped_text("https://a.example/file")
+    assert text == "hello"
+    assert calls == ["https://a.example/file", "https://b.example/real"]
+
+
+async def test_fetch_rejects_unsafe_redirect_hop(monkeypatch):
+    def handler(request):
+        return httpx.Response(302, headers={"location": "http://169.254.169.254/meta"})
+    _mock_http(monkeypatch, handler)
+    async def unsafe(url):
+        return "link-local address"
+    monkeypatch.setattr(
+        "backend.classification_service.async_validate_url_safety", unsafe)
+
+    with pytest.raises(ValueError, match="unsafe redirect"):
+        await ClassificationService()._fetch_capped_text("https://a.example/file")
+
+
+async def test_fetch_caps_redirect_hops(monkeypatch):
+    await _allow_ssrf(monkeypatch)
+    def handler(request):
+        return httpx.Response(302, headers={"location": "https://a.example/loop"})
+    _mock_http(monkeypatch, handler)
+
+    with pytest.raises(ValueError, match="too many redirects"):
+        await ClassificationService()._fetch_capped_text("https://a.example/file")
