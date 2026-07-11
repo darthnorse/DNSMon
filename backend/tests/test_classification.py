@@ -1,6 +1,6 @@
 import pytest
 from sqlalchemy import select, func, delete
-from backend.classification import parse_adguard_rule, parse_blocklist_line, DomainMatcher, MatchResult
+from backend.classification import parse_adguard_rule, parse_blocklist_line, parse_v2fly_entries, DomainMatcher, MatchResult
 from backend.classification_service import (
     ClassificationService, _blocklist_slug, build_blocklist_defs,
     parse_blocklist_text, parse_dnsmon_entries,
@@ -331,3 +331,70 @@ def test_parse_dnsmon_skips_malformed_entries():
     assert len(defs) == 1
     assert defs[0]["name"] == "X"
     assert defs[0]["domains"] == [("ok.com", False)]
+
+
+SAMPLE_V2FLY = '''lists:
+  - name: netflix
+    length: 4
+    rules:
+      - "domain:netflix.com"
+      - "full:netflix.ca"
+      - "regexp:^nflx[0-9]+\\\\.com$"
+      - "domain:doubleclick.net @ads"
+  - name: unmapped-service
+    length: 1
+    rules:
+      - "domain:unmapped.com"
+  - name: category-porn
+    length: 2
+    rules:
+      - "domain:example-adult.com"
+      - "domain:BAD_CHARS!!.com"
+  - name: attrcarrier
+    length: 1
+    rules:
+      - "domain:CnOnly.Example.com @cn"
+'''
+
+V2FLY_TEST_MAPPING = {
+    'netflix': {'name': 'Netflix', 'category': 'Streaming'},
+    'category-porn': {'category': 'Adult', 'category_only': True},
+    'attrcarrier': {'name': 'AttrCarrier', 'category': 'Software'},
+    'never-in-text': {'name': 'Ghost', 'category': 'Software'},
+}
+
+
+def test_v2fly_keeps_domain_and_full_skips_regexp_and_ads():
+    defs = parse_v2fly_entries(SAMPLE_V2FLY, V2FLY_TEST_MAPPING)
+    netflix = next(d for d in defs if d['slug'] == 'netflix')
+    assert netflix['name'] == 'Netflix'
+    assert netflix['category'] == 'Streaming'
+    assert netflix['is_category_only'] is False
+    assert netflix['domains'] == [('netflix.ca', False), ('netflix.com', False)]
+
+
+def test_v2fly_skips_unmapped_lists():
+    defs = parse_v2fly_entries(SAMPLE_V2FLY, V2FLY_TEST_MAPPING)
+    assert not any(d['slug'] == 'unmapped-service' for d in defs)
+    assert not any(d['slug'] == 'never-in-text' for d in defs)
+
+
+def test_v2fly_category_only_entry():
+    defs = parse_v2fly_entries(SAMPLE_V2FLY, V2FLY_TEST_MAPPING)
+    porn = next(d for d in defs if d['slug'] == 'category-porn')
+    assert porn['is_category_only'] is True
+    assert porn['name'] == 'Adult'
+    assert porn['category'] == 'Adult'
+    assert porn['domains'] == [('example-adult.com', False)]  # invalid domain dropped
+
+
+def test_v2fly_strips_non_ads_attrs_and_lowercases():
+    defs = parse_v2fly_entries(SAMPLE_V2FLY, V2FLY_TEST_MAPPING)
+    carrier = next(d for d in defs if d['slug'] == 'attrcarrier')
+    assert carrier['domains'] == [('cnonly.example.com', False)]
+
+
+def test_v2fly_garbage_input_yields_nothing():
+    assert parse_v2fly_entries('', V2FLY_TEST_MAPPING) == []
+    assert parse_v2fly_entries('<html>error page</html>', V2FLY_TEST_MAPPING) == []
+    assert parse_v2fly_entries(SAMPLE_V2FLY, {}) == []

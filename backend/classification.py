@@ -70,6 +70,64 @@ def parse_blocklist_line(line: str) -> Optional[str]:
     return tok
 
 
+_V2FLY_NAME_RE = re.compile(r'^  - name: (\S+)$')
+_V2FLY_RULE_RE = re.compile(r'^      - "(domain|full|regexp|keyword):([^"]*)"$')
+
+
+def parse_v2fly_entries(text: str, mapping: dict) -> list[dict]:
+    """Build _replace_source defs from v2fly's dlc.dat_plain.yml text.
+
+    Line-oriented on purpose: the artifact is machine-generated with a rigid
+    shape, and a real YAML parse of ~110k scalars would stall the event loop.
+    Only lists named in `mapping` are imported. `domain:` and `full:` rules are
+    both stored non-wildcard (the matcher's suffix walk supplies subdomain
+    semantics); `regexp:`/`keyword:` rules are skipped; rules tagged `@ads` are
+    dropped so ad domains inside app lists stay with the Ads & Tracking tier.
+    """
+    domains_by_list: dict[str, set[str]] = {}
+    current: Optional[str] = None
+    for line in text.splitlines():
+        m = _V2FLY_NAME_RE.match(line)
+        if m:
+            current = m.group(1) if m.group(1) in mapping else None
+            continue
+        if current is None:
+            continue
+        m = _V2FLY_RULE_RE.match(line)
+        if not m:
+            continue
+        rtype, value = m.group(1), m.group(2)
+        if rtype in ('regexp', 'keyword'):
+            continue
+        parts = value.split()
+        if not parts:
+            continue
+        domain, attrs = parts[0], parts[1:]
+        if '@ads' in attrs:
+            continue
+        domain = domain.strip('.').lower()
+        if '.' not in domain or '*' in domain or not _DOMAIN_RE.match(domain):
+            continue
+        domains_by_list.setdefault(current, set()).add(domain)
+
+    defs = []
+    for list_name in sorted(domains_by_list):
+        entry = mapping[list_name]
+        category = entry.get('category')
+        if entry.get('category_only'):
+            name, is_cat = category, True
+        else:
+            name, is_cat = entry.get('name'), False
+        if not name:
+            continue
+        defs.append({
+            'slug': list_name, 'name': name, 'category': category,
+            'is_category_only': is_cat,
+            'domains': [(d, False) for d in sorted(domains_by_list[list_name])],
+        })
+    return defs
+
+
 @dataclass
 class MatchResult:
     app_id: int
