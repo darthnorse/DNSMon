@@ -7,6 +7,7 @@ from backend.utils import (
     async_validate_url_safety,
     ensure_utc,
     registrable_domain,
+    resolve_url_safety,
     validate_url_safety,
 )
 
@@ -96,3 +97,15 @@ def test_registrable_domain_normalizes_and_falls_back():
     # Unknown/internal TLD -> safe fallback to the cleaned input
     assert registrable_domain("host.runald.lan") == "host.runald.lan"
     assert registrable_domain("") == ""
+
+
+def test_resolve_url_safety_blocked_returns_no_ip():
+    reason, ip = resolve_url_safety("http://127.0.0.1/x")
+    assert reason is not None
+    assert ip is None
+
+
+def test_resolve_url_safety_safe_returns_pinned_ip():
+    reason, ip = resolve_url_safety("http://8.8.8.8/x")
+    assert reason is None
+    assert ip == "8.8.8.8"

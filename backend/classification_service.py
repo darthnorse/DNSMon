@@ -17,7 +17,7 @@ from .constants import (
 )
 from .database import async_session_maker
 from .models import AppDefinition, AppDomain, InsightSource, DomainLabel, DomainStatsHourly, Query
-from .utils import async_validate_url_safety
+from .utils import async_resolve_url_safety
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +50,20 @@ _REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 def resolve_redirect_target(base_url: str, location: str) -> str:
     """Absolute URL for a Location header value relative to the requested URL."""
     return str(httpx.URL(base_url).join(location))
+
+
+def pin_url_to_ip(url: str, ip: Optional[str]) -> tuple[str, dict, dict]:
+    """Rewrite `url`'s host to the already-validated IP so the connection cannot
+    be re-routed by a second DNS resolution (rebinding TOCTOU); the real
+    hostname still travels in the Host header and, for https, TLS SNI — so
+    certificate verification is unaffected. Returns (request_url, headers,
+    extensions); a None ip is a passthrough (used when resolution is mocked)."""
+    if not ip:
+        return url, {}, {}
+    u = httpx.URL(url)
+    host_header = u.host if u.port is None else f"{u.host}:{u.port}"
+    extensions = {'sni_hostname': u.host} if u.scheme == 'https' else {}
+    return str(u.copy_with(host=ip)), {'Host': host_header}, extensions
 
 
 def parse_blocklist_text(text: str) -> set[str]:
@@ -196,11 +210,8 @@ class ClassificationService:
         return n
 
     async def _safe_fetch(self, url: str, what: str) -> Optional[str]:
-        """SSRF-validate then fetch `url`; None on any failure (already logged)."""
-        unsafe = await async_validate_url_safety(url)
-        if unsafe:
-            logger.error(f"Refusing to fetch {what}: {unsafe}")
-            return None
+        """Fetch `url` (SSRF-validated and IP-pinned per hop by
+        _fetch_capped_text); None on any failure (already logged)."""
         try:
             return await self._fetch_capped_text(url)
         except (httpx.HTTPError, ValueError) as e:
@@ -264,17 +275,13 @@ class ClassificationService:
 
         Skips wildcard rules (a handful of infra domains). Returns app count,
         or -1 on fetch/parse failure (leaves existing data untouched)."""
-        unsafe = await async_validate_url_safety(url)
-        if unsafe:
-            logger.error(f"Refusing to fetch classification feed: {unsafe}")
+        text = await self._safe_fetch(url, 'classification feed')
+        if text is None:
             return -1
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.get(url)
-                resp.raise_for_status()
-                payload = resp.json()
-        except (httpx.HTTPError, json.JSONDecodeError) as e:
-            logger.error(f"Failed to fetch classification feed: {e}")
+            payload = json.loads(text)
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse classification feed: {e}")
             return -1
 
         defs = []
@@ -300,22 +307,23 @@ class ClassificationService:
     async def _fetch_capped_text(self, url: str) -> str:
         """GET a body, streaming with a byte cap to bound memory.
 
-        Follows up to _MAX_REDIRECTS redirects, re-validating every hop with
-        the SSRF guard. Raises ValueError if the body exceeds the cap or a
-        redirect is unsafe/looping, httpx.HTTPError on transport/status
-        failures."""
+        Every hop (initial URL and each redirect target) is SSRF-validated and
+        the connection pinned to the validated IP via pin_url_to_ip. Raises
+        ValueError if the body exceeds the cap or a hop is unsafe/looping,
+        httpx.HTTPError on transport/status failures."""
         async with httpx.AsyncClient(timeout=30.0) as client:
             for _ in range(_MAX_REDIRECTS + 1):
-                async with client.stream("GET", url) as resp:
+                unsafe, ip = await async_resolve_url_safety(url)
+                if unsafe:
+                    raise ValueError(f"unsafe fetch target: {unsafe}")
+                req_url, headers, extensions = pin_url_to_ip(url, ip)
+                async with client.stream("GET", req_url, headers=headers,
+                                         extensions=extensions) as resp:
                     if resp.status_code in _REDIRECT_STATUSES:
                         location = resp.headers.get('location')
                         if not location:
                             raise ValueError("redirect without a Location header")
-                        target = resolve_redirect_target(url, location)
-                        unsafe = await async_validate_url_safety(target)
-                        if unsafe:
-                            raise ValueError(f"unsafe redirect target: {unsafe}")
-                        url = target
+                        url = resolve_redirect_target(url, location)
                         continue
                     resp.raise_for_status()
                     chunks: list[bytes] = []

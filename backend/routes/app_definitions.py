@@ -20,6 +20,11 @@ router = APIRouter(prefix="/api/app-definitions", tags=["app-definitions"])
 # its pseudo-app carries ~546k domains.
 LISTABLE_SOURCES = VALID_SOURCES | {'v2fly'}
 
+# Feed tiers (v2fly especially) can carry thousands of domains per app; the list
+# response previews a few and reports the true total in domain_count. Manual
+# apps keep their full domain list — the UI edits them from this response.
+_DOMAIN_PREVIEW_LIMIT = 5
+
 
 async def _domains_for(db: AsyncSession, app_id: int) -> List[str]:
     rows = await db.execute(select(AppDomain.domain).where(AppDomain.app_id == app_id))
@@ -57,13 +62,31 @@ async def list_definitions(source: Optional[str] = None,
     if source:
         stmt = stmt.where(AppDefinition.source == source)
     defs = (await db.execute(stmt)).scalars().all()
-    ids = [d.id for d in defs]
+    manual_ids = [d.id for d in defs if d.source == 'manual']
+    feed_ids = [d.id for d in defs if d.source != 'manual']
     domain_map: dict[int, list[str]] = {}
-    if ids:
-        rows = await db.execute(select(AppDomain.app_id, AppDomain.domain).where(AppDomain.app_id.in_(ids)))
+    count_map: dict[int, int] = {}
+    if manual_ids:
+        rows = await db.execute(select(AppDomain.app_id, AppDomain.domain)
+                                .where(AppDomain.app_id.in_(manual_ids)))
         for app_id, domain in rows:
             domain_map.setdefault(app_id, []).append(domain)
-    out = [AppDefinitionResponse.model_validate(d.to_dict(domains=domain_map.get(d.id, []))) for d in defs]
+    if feed_ids:
+        rn = func.row_number().over(partition_by=AppDomain.app_id,
+                                    order_by=AppDomain.id).label('rn')
+        sub = (select(AppDomain.app_id, AppDomain.domain, rn)
+               .where(AppDomain.app_id.in_(feed_ids)).subquery())
+        rows = await db.execute(select(sub.c.app_id, sub.c.domain)
+                                .where(sub.c.rn <= _DOMAIN_PREVIEW_LIMIT))
+        for app_id, domain in rows:
+            domain_map.setdefault(app_id, []).append(domain)
+        counts = await db.execute(select(AppDomain.app_id, func.count())
+                                  .where(AppDomain.app_id.in_(feed_ids))
+                                  .group_by(AppDomain.app_id))
+        count_map = dict(counts.all())
+    out = [AppDefinitionResponse.model_validate(
+        d.to_dict(domains=domain_map.get(d.id, []), domain_count=count_map.get(d.id)))
+        for d in defs]
     return out
 
 

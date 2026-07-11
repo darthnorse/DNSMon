@@ -4,7 +4,7 @@ import pytest
 from datetime import datetime, timezone
 
 from sqlalchemy import select, func, delete
-from backend.classification_service import ClassificationService, resolve_redirect_target
+from backend.classification_service import ClassificationService, resolve_redirect_target, pin_url_to_ip
 from backend.models import AppDefinition, AppDomain, DomainLabel, DomainStatsHourly, Query, InsightSource
 
 
@@ -132,8 +132,8 @@ async def test_run_full_dispatches_dnsmon_row(db_session, monkeypatch):
 
 async def _allow_ssrf(monkeypatch):
     async def ok(url):
-        return None
-    monkeypatch.setattr("backend.classification_service.async_validate_url_safety", ok)
+        return None, None
+    monkeypatch.setattr("backend.classification_service.async_resolve_url_safety", ok)
 
 
 async def test_load_dnsmon_remote_success(db_session, monkeypatch):
@@ -242,16 +242,55 @@ async def test_fetch_follows_redirect(monkeypatch):
 
 
 async def test_fetch_rejects_unsafe_redirect_hop(monkeypatch):
+    calls = []
     def handler(request):
+        calls.append(str(request.url))
         return httpx.Response(302, headers={"location": "http://169.254.169.254/meta"})
     _mock_http(monkeypatch, handler)
-    async def unsafe(url):
-        return "link-local address"
+    async def resolver(url):
+        if "169.254" in url:
+            return "link-local address", None
+        return None, None
     monkeypatch.setattr(
-        "backend.classification_service.async_validate_url_safety", unsafe)
+        "backend.classification_service.async_resolve_url_safety", resolver)
 
-    with pytest.raises(ValueError, match="unsafe redirect"):
+    with pytest.raises(ValueError, match="unsafe fetch target"):
         await ClassificationService()._fetch_capped_text("https://a.example/file")
+    assert calls == ["https://a.example/file"]  # the unsafe hop is never requested
+
+
+def test_pin_url_to_ip_https():
+    url, headers, ext = pin_url_to_ip("https://example.com/a/b?x=1", "93.184.216.34")
+    assert url == "https://93.184.216.34/a/b?x=1"
+    assert headers == {"Host": "example.com"}
+    assert ext == {"sni_hostname": "example.com"}
+
+
+def test_pin_url_to_ip_http_port_and_ipv6():
+    url, headers, ext = pin_url_to_ip("http://example.com:8080/x", "2606:2800::1946")
+    assert url == "http://[2606:2800::1946]:8080/x"
+    assert headers == {"Host": "example.com:8080"}
+    assert ext == {}
+
+
+def test_pin_url_to_ip_none_is_passthrough():
+    assert pin_url_to_ip("https://example.com/", None) == ("https://example.com/", {}, {})
+
+
+async def test_fetch_connects_to_pinned_ip(monkeypatch):
+    seen = []
+    def handler(request):
+        seen.append((request.url.host, request.headers.get("host")))
+        return httpx.Response(200, text="pinned")
+    _mock_http(monkeypatch, handler)
+    async def resolver(url):
+        return None, "93.184.216.34"
+    monkeypatch.setattr(
+        "backend.classification_service.async_resolve_url_safety", resolver)
+
+    text = await ClassificationService()._fetch_capped_text("https://a.example/file")
+    assert text == "pinned"
+    assert seen == [("93.184.216.34", "a.example")]
 
 
 async def test_fetch_caps_redirect_hops(monkeypatch):

@@ -447,6 +447,7 @@ export interface AppDefinition {
   icon_svg: string | null;
   enabled: boolean;
   domains: string[];
+  domain_count: number;
   created_at: string;
   updated_at: string;
 }

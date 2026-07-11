@@ -316,11 +316,11 @@ export default function AppDefinitionsSettings({ onError, onSuccess }: Props) {
                       </span>
                     </td>
                     <td className="px-3 py-2 text-gray-600 dark:text-gray-400">
-                      {def.domains.length > 2 ? (
+                      {def.domain_count > 2 ? (
                         <span title={def.domains.join(', ')}>
                           {def.domains.slice(0, 2).join(', ')}
                           <span className="text-gray-400 dark:text-gray-500">
-                            {' '}+{def.domains.length - 2} more
+                            {' '}+{def.domain_count - 2} more
                           </span>
                         </span>
                       ) : (

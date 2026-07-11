@@ -617,7 +617,7 @@ class AppDefinition(Base):
         Index('idx_app_def_source_slug', 'source', 'slug', unique=True),
     )
 
-    def to_dict(self, domains=None):
+    def to_dict(self, domains=None, domain_count=None):
         return {
             'id': self.id,
             'slug': self.slug,
@@ -628,6 +628,7 @@ class AppDefinition(Base):
             'enabled': self.enabled,
             'is_category_only': self.is_category_only,
             'domains': domains if domains is not None else [],
+            'domain_count': domain_count if domain_count is not None else len(domains or []),
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }

@@ -564,6 +564,7 @@ class AppDefinitionResponse(BaseModel):
     icon_svg: Optional[str]
     enabled: bool
     domains: List[str]
+    domain_count: int = 0
     created_at: datetime
     updated_at: datetime
 

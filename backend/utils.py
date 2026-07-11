@@ -31,29 +31,47 @@ _BLOCKED_NETWORKS = [
 ]
 
 
+def resolve_url_safety(url: str) -> tuple[Optional[str], Optional[str]]:
+    """Check that a URL does not resolve to a blocked address range, and return
+    one validated IP so callers can pin the connection to it (a second DNS
+    resolution at connect time could otherwise be rebound to a blocked range).
+
+    Returns (unsafe_reason, pinned_ip): reason is None when safe; the pinned
+    IP prefers IPv4 when both families resolve."""
+    parsed = urlparse(url)
+    hostname = parsed.hostname
+    if not hostname:
+        return "Invalid URL: no hostname", None
+
+    try:
+        addr_infos = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        return f"Cannot resolve hostname: {hostname}", None
+
+    ips = []
+    for info in addr_infos:
+        ip = ipaddress.ip_address(info[4][0])
+        for network in _BLOCKED_NETWORKS:
+            if ip in network:
+                return "URL resolves to a blocked address (loopback or link-local)", None
+        ips.append(ip)
+
+    ips.sort(key=lambda ip: ip.version)
+    return None, (str(ips[0]) if ips else None)
+
+
+async def async_resolve_url_safety(url: str) -> tuple[Optional[str], Optional[str]]:
+    """Async resolve_url_safety — DNS resolution runs in a thread pool."""
+    return await asyncio.get_running_loop().run_in_executor(None, resolve_url_safety, url)
+
+
 def validate_url_safety(url: str) -> Optional[str]:
     """Sync version — check that a URL does not resolve to a blocked address range.
 
     Use this in synchronous contexts (e.g., Pydantic validators, validate_config).
     For async contexts (send methods, OIDC flows), use async_validate_url_safety.
     """
-    parsed = urlparse(url)
-    hostname = parsed.hostname
-    if not hostname:
-        return "Invalid URL: no hostname"
-
-    try:
-        addr_infos = socket.getaddrinfo(hostname, None)
-    except socket.gaierror:
-        return f"Cannot resolve hostname: {hostname}"
-
-    for info in addr_infos:
-        ip = ipaddress.ip_address(info[4][0])
-        for network in _BLOCKED_NETWORKS:
-            if ip in network:
-                return "URL resolves to a blocked address (loopback or link-local)"
-
-    return None
+    return resolve_url_safety(url)[0]
 
 
 async def async_validate_url_safety(url: str) -> Optional[str]:

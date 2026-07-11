@@ -84,3 +84,25 @@ async def test_app_definitions_source_filter_accepts_v2fly(async_admin_client: A
     assert [d["slug"] for d in r.json()] == ["netflix"]
     r = await async_admin_client.get("/api/app-definitions", params={"source": "blocklist"})
     assert r.status_code == 400
+
+
+async def test_app_definitions_feed_domains_previewed_with_count(async_admin_client: AsyncClient, db_session):
+    from sqlalchemy import insert as sa_insert
+    from backend.models import AppDomain
+    feed = AppDefinition(slug="bigapp", name="BigApp", category="X", source="v2fly", enabled=True)
+    manual = AppDefinition(slug="manapp", name="ManApp", category="X", source="manual", enabled=True)
+    db_session.add_all([feed, manual])
+    await db_session.flush()
+    await db_session.execute(sa_insert(AppDomain), [
+        {"domain": f"d{i}.example.com", "app_id": feed.id, "is_wildcard": False} for i in range(8)])
+    await db_session.execute(sa_insert(AppDomain), [
+        {"domain": f"m{i}.example.com", "app_id": manual.id, "is_wildcard": False} for i in range(8)])
+    await db_session.commit()
+
+    r = await async_admin_client.get("/api/app-definitions")
+    assert r.status_code == 200, r.text
+    by_slug = {d["slug"]: d for d in r.json()}
+    assert by_slug["bigapp"]["domain_count"] == 8
+    assert len(by_slug["bigapp"]["domains"]) == 5  # previewed, not the full tier
+    assert by_slug["manapp"]["domain_count"] == 8
+    assert len(by_slug["manapp"]["domains"]) == 8  # manual apps keep full lists
