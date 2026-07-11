@@ -144,7 +144,7 @@ async def ensure_insight_sources() -> int:
     Owns its own session (matches cleanup_old_queries)."""
     from sqlalchemy import select
     from .models import InsightSource, AppSetting
-    from .constants import DEFAULT_INSIGHT_SOURCES
+    from .constants import DEFAULT_INSIGHT_SOURCES, SINGLETON_SOURCE_KINDS
 
     added = 0
     async with async_session_maker() as db:
@@ -165,7 +165,7 @@ async def ensure_insight_sources() -> int:
             elif row['kind'] == 'dnsmon':
                 row['enabled'] = bool(settings.get('classification_supplement_enabled', True))
 
-            if row['kind'] in ('adguard', 'dnsmon'):
+            if row['kind'] in SINGLETON_SOURCE_KINDS:
                 if row['kind'] in existing_kinds:
                     continue
             elif row['url'] in existing_urls:

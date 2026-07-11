@@ -122,7 +122,7 @@ async def test_ensure_insight_sources_idempotent(db_session):
     cnt = await db_session.scalar(select(func.count()).select_from(InsightSource))
     assert cnt == expected
     kinds = set((await db_session.execute(select(InsightSource.kind))).scalars())
-    assert kinds == {"adguard", "dnsmon", "hosts"}
+    assert kinds == {"adguard", "dnsmon", "hosts", "v2fly"}
 
 
 async def test_ensure_insight_sources_no_duplicate_singleton_on_url_change(db_session):
@@ -142,3 +142,18 @@ async def test_ensure_insight_sources_no_duplicate_singleton_on_url_change(db_se
     cnt = await db_session.scalar(select(func.count()).select_from(InsightSource)
                                   .where(InsightSource.kind == 'adguard'))
     assert cnt == 1
+
+
+async def test_ensure_insight_sources_seeds_v2fly_once(db_session):
+    from sqlalchemy import select
+    from backend.database import ensure_insight_sources
+    from backend.models import InsightSource
+
+    await ensure_insight_sources()
+    await ensure_insight_sources()  # second run must not duplicate the singleton
+
+    rows = (await db_session.execute(
+        select(InsightSource).where(InsightSource.kind == 'v2fly'))).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].enabled is True
+    assert rows[0].license == 'MIT'

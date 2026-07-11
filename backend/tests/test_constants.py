@@ -6,6 +6,7 @@ from backend.constants import (
     CACHE_STATUSES,
     CACHE_SQL_IN,
     DEFAULT_INSIGHT_SOURCES,
+    SINGLETON_SOURCE_KINDS,
     SOURCE_PRECEDENCE,
     VALID_SOURCES,
 )
@@ -55,7 +56,7 @@ def test_valid_sources_excludes_blocklist():
 
 def test_default_insight_sources_cover_all_kinds():
     kinds = {src["kind"] for src in DEFAULT_INSIGHT_SOURCES}
-    assert kinds == {"adguard", "dnsmon", "hosts"}
+    assert kinds == {"adguard", "dnsmon", "hosts", "v2fly"}
 
 
 def test_default_insight_seed_includes_hagezi_pro_plus():
@@ -65,3 +66,24 @@ def test_default_insight_seed_includes_hagezi_pro_plus():
     assert src["format"] == "domains"
     assert src["license"] == "GPL-3.0"
     assert src["url"].endswith("/domains/pro.plus.txt")
+
+
+def test_precedence_order_is_blocklist_v2fly_adguard_dnsmon_manual():
+    assert (SOURCE_PRECEDENCE["blocklist"] < SOURCE_PRECEDENCE["v2fly"]
+            < SOURCE_PRECEDENCE["adguard"] < SOURCE_PRECEDENCE["dnsmon"]
+            < SOURCE_PRECEDENCE["manual"])
+
+
+def test_default_insight_seed_includes_v2fly():
+    src = next(s for s in DEFAULT_INSIGHT_SOURCES if s["kind"] == "v2fly")
+    assert src["name"] == "v2fly Community"
+    assert src["url"] == ("https://github.com/v2fly/domain-list-community"
+                          "/releases/latest/download/dlc.dat_plain.yml")
+    assert src["format"] == "yaml"
+    assert src["license"] == "MIT"
+    assert src["category"] is None
+
+
+def test_singleton_kinds_are_the_non_hosts_kinds():
+    assert set(SINGLETON_SOURCE_KINDS) == {"adguard", "dnsmon", "v2fly"}
+    assert "hosts" not in SINGLETON_SOURCE_KINDS

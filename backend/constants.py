@@ -48,11 +48,23 @@ DNSMON_LIST_URL = (
     "/main/backend/data/dnsmon.json"
 )
 
+# Community domain->service lists (MIT), one release artifact, fetched at
+# runtime and never bundled. Only slugs present in backend/data/v2fly_map.json
+# are imported. The URL 302s to objects.githubusercontent.com.
+V2FLY_FEED_URL = (
+    "https://github.com/v2fly/domain-list-community"
+    "/releases/latest/download/dlc.dat_plain.yml"
+)
+
 # Higher number wins when more than one source claims a domain.
-SOURCE_PRECEDENCE = {'blocklist': 0, 'adguard': 1, 'dnsmon': 2, 'manual': 3}
+SOURCE_PRECEDENCE = {'blocklist': 0, 'v2fly': 1, 'adguard': 2, 'dnsmon': 3, 'manual': 4}
 
 # Sources a user/admin may set on a manual app definition. 'blocklist' is engine-only.
 VALID_SOURCES = frozenset({'adguard', 'dnsmon', 'manual'})
+
+# Insight-source kinds that have at most one row each, keyed on `kind`.
+# 'hosts' rows may be many and key on url instead.
+SINGLETON_SOURCE_KINDS = ('adguard', 'dnsmon', 'v2fly')
 
 DEFAULT_INSIGHT_SOURCES = [
     {'name': 'AdGuard', 'url': CLASSIFICATION_FEED_URL, 'kind': 'adguard',
@@ -62,6 +74,8 @@ DEFAULT_INSIGHT_SOURCES = [
     {'name': 'Hagezi Pro.Plus',
      'url': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/pro.plus.txt',
      'kind': 'hosts', 'category': 'Ads & Tracking', 'format': 'domains', 'license': 'GPL-3.0'},
+    {'name': 'v2fly Community', 'url': V2FLY_FEED_URL, 'kind': 'v2fly',
+     'category': None, 'format': 'yaml', 'license': 'MIT'},
 ]
 
 # AdGuard's `group` values remapped to DNSMon's display taxonomy.
