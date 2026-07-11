@@ -9,10 +9,11 @@ import httpx
 from sqlalchemy import select, delete, insert, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .classification import parse_adguard_rule, parse_blocklist_line, DomainMatcher
+from .classification import parse_adguard_rule, parse_blocklist_line, parse_v2fly_entries, DomainMatcher
 from .constants import (
     CLASSIFICATION_FEED_URL,
     ADGUARD_GROUP_TO_CATEGORY,
+    SINGLETON_SOURCE_KINDS,
 )
 from .database import async_session_maker
 from .models import AppDefinition, AppDomain, InsightSource, DomainLabel, DomainStatsHourly, Query
@@ -21,6 +22,17 @@ from .utils import async_validate_url_safety
 logger = logging.getLogger(__name__)
 
 _DNSMON_BUNDLED_PATH = Path(__file__).parent / 'data' / 'dnsmon.json'
+
+_V2FLY_MAP_PATH = Path(__file__).parent / 'data' / 'v2fly_map.json'
+
+
+def _load_v2fly_map() -> dict:
+    try:
+        return json.loads(_V2FLY_MAP_PATH.read_text())
+    except (OSError, json.JSONDecodeError) as e:
+        logger.error(f"Could not read v2fly mapping: {e}")
+        return {}
+
 
 # Chunk app_domains inserts so a large blocklist (pro.plus ~546k rows) stays well
 # under PostgreSQL's ~32k bind-parameter cap (3 cols * 5000 = 15k params/statement).
@@ -218,6 +230,32 @@ class ClassificationService:
             return -1
         return await self.load_dnsmon_bundled(db)
 
+    async def load_v2fly(self, db: AsyncSession, url: str) -> int:
+        """Fetch the v2fly community list and replace the 'v2fly' source.
+
+        Only slugs present in the bundled v2fly_map.json are imported. Any
+        failure (unsafe URL, fetch error, unparseable/empty body, missing
+        mapping) keeps the existing tier and returns -1."""
+        mapping = _load_v2fly_map()
+        if not mapping:
+            return -1
+        unsafe = await async_validate_url_safety(url)
+        if unsafe:
+            logger.error(f"Refusing to fetch v2fly list: {unsafe}")
+            return -1
+        try:
+            text = await self._fetch_capped_text(url)
+        except (httpx.HTTPError, ValueError) as e:
+            logger.error(f"Failed to fetch v2fly list: {e}")
+            return -1
+        defs = parse_v2fly_entries(text, mapping)
+        if not defs:
+            logger.error("v2fly list yielded 0 definitions; keeping existing tier")
+            return -1
+        n = await self._replace_source(db, 'v2fly', defs)
+        logger.info(f"Loaded {n} v2fly definitions")
+        return n
+
     async def refresh_feed(self, db: AsyncSession, url: str = CLASSIFICATION_FEED_URL) -> int:
         """Fetch AdGuard services.json and replace the 'adguard' definitions.
 
@@ -410,7 +448,7 @@ class ClassificationService:
                 if kind == 'hosts':
                     await self.refresh_blocklists(db)
                 else:
-                    source_tag = 'adguard' if kind == 'adguard' else 'dnsmon'
+                    source_tag = kind
                     row = (await db.execute(select(InsightSource).where(
                         InsightSource.enabled == True, InsightSource.kind == kind))).scalars().first()
                     if row:
@@ -427,9 +465,11 @@ class ClassificationService:
             .where(AppDefinition.source == source)) or 0
 
     async def _refresh_singleton_row(self, db: AsyncSession, row, source_tag: str) -> None:
-        """Fetch one enabled adguard/dnsmon row and record its status + real domain count."""
+        """Fetch one enabled singleton-kind row and record its status + real domain count."""
         from .models import utcnow
-        refresh = self.refresh_feed if row.kind == 'adguard' else self.load_dnsmon
+        loaders = {'adguard': self.refresh_feed, 'dnsmon': self.load_dnsmon,
+                   'v2fly': self.load_v2fly}
+        refresh = loaders[row.kind]
         n = await refresh(db, row.url)
         row.last_status = 'ok' if n >= 0 else 'error'
         if n >= 0:
@@ -442,12 +482,12 @@ class ClassificationService:
         sources = (await db.execute(
             select(InsightSource).where(InsightSource.enabled == True)
         )).scalars().all()
-        for kind, source_tag in (('adguard', 'adguard'), ('dnsmon', 'dnsmon')):
+        for kind in SINGLETON_SOURCE_KINDS:
             row = next((s for s in sources if s.kind == kind), None)
             if row:
-                await self._refresh_singleton_row(db, row, source_tag)
+                await self._refresh_singleton_row(db, row, kind)
             else:
-                await self._replace_source(db, source_tag, [])
+                await self._replace_source(db, kind, [])
         await self.refresh_blocklists(db)
         await db.commit()
 

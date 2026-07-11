@@ -262,3 +262,85 @@ async def test_fetch_caps_redirect_hops(monkeypatch):
 
     with pytest.raises(ValueError, match="too many redirects"):
         await ClassificationService()._fetch_capped_text("https://a.example/file")
+
+
+V2FLY_SAMPLE_TEXT = '''lists:
+  - name: netflix
+    length: 2
+    rules:
+      - "domain:netflix.com"
+      - "domain:nflxvideo.net"
+  - name: not-in-map
+    length: 1
+    rules:
+      - "domain:ignored.example"
+'''
+
+
+async def test_load_v2fly_remote_success(db_session, monkeypatch):
+    await _allow_ssrf(monkeypatch)
+    async def fake(self, url):
+        return V2FLY_SAMPLE_TEXT
+    monkeypatch.setattr(ClassificationService, "_fetch_capped_text", fake)
+
+    svc = ClassificationService()
+    n = await svc.load_v2fly(db_session, "https://example.com/dlc.yml")
+    assert n == 1  # only 'netflix' is in the real bundled mapping
+    netflix = await db_session.scalar(select(AppDefinition).where(
+        AppDefinition.slug == "netflix", AppDefinition.source == "v2fly"))
+    assert netflix.name == "Netflix"
+    assert netflix.category == "Streaming"
+    assert netflix.is_category_only is False
+    dom_count = await db_session.scalar(select(func.count()).select_from(AppDomain)
+                                        .where(AppDomain.app_id == netflix.id))
+    assert dom_count == 2
+
+
+async def test_load_v2fly_fetch_fail_keeps_existing(db_session, monkeypatch):
+    await _allow_ssrf(monkeypatch)
+    svc = ClassificationService()
+    await svc._replace_source(db_session, "v2fly", [
+        {"slug": "old", "name": "Old", "category": "X", "domains": [("old.com", False)]}])
+    async def boom(self, url):
+        raise httpx.ConnectError("down")
+    monkeypatch.setattr(ClassificationService, "_fetch_capped_text", boom)
+
+    n = await svc.load_v2fly(db_session, "https://example.com/dlc.yml")
+    assert n == -1
+    cnt = await db_session.scalar(select(func.count()).select_from(AppDefinition).where(
+        AppDefinition.source == "v2fly"))
+    assert cnt == 1
+
+
+async def test_load_v2fly_garbage_body_keeps_existing(db_session, monkeypatch):
+    await _allow_ssrf(monkeypatch)
+    svc = ClassificationService()
+    await svc._replace_source(db_session, "v2fly", [
+        {"slug": "old", "name": "Old", "category": "X", "domains": [("old.com", False)]}])
+    async def fake(self, url):
+        return "<html>rate limited</html>"
+    monkeypatch.setattr(ClassificationService, "_fetch_capped_text", fake)
+
+    n = await svc.load_v2fly(db_session, "https://example.com/dlc.yml")
+    assert n == -1
+    cnt = await db_session.scalar(select(func.count()).select_from(AppDefinition).where(
+        AppDefinition.source == "v2fly"))
+    assert cnt == 1
+
+
+async def test_run_full_dispatches_v2fly_row(db_session, monkeypatch):
+    await _allow_ssrf(monkeypatch)
+    async def fake(self, url):
+        return V2FLY_SAMPLE_TEXT
+    monkeypatch.setattr(ClassificationService, "_fetch_capped_text", fake)
+    db_session.add(InsightSource(name="v2fly Community", url="https://example.com/dlc.yml",
+                                 kind="v2fly", format="yaml", enabled=True))
+    await db_session.commit()
+
+    await ClassificationService().run_full()
+    netflix = await db_session.scalar(select(AppDefinition).where(
+        AppDefinition.slug == "netflix", AppDefinition.source == "v2fly"))
+    assert netflix is not None
+    src = await db_session.scalar(select(InsightSource).where(InsightSource.kind == "v2fly"))
+    assert src.last_status == "ok"
+    assert src.domain_count == 2

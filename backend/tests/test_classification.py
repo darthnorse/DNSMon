@@ -265,6 +265,19 @@ def test_category_bucket_higher_source_wins_over_lower_bucket():
     assert m.match('bar.com').category == 'Telemetry'
 
 
+def test_v2fly_loses_to_adguard_but_beats_blocklist():
+    m = DomainMatcher()
+    m.add('shared.com', app_id=1, app_name='FromV2fly', category='X', source='v2fly')
+    m.add('shared.com', app_id=2, app_name='FromAdGuard', category='Y', source='adguard')
+    m.add('only-v2fly.com', app_id=3, app_name='OnlyV2fly', category='X', source='v2fly')
+    m.add('bucket.com', app_id=4, app_name=None, category='Ads & Tracking', source='blocklist')
+    m.add('bucket.com', app_id=5, app_name='V2flyApp', category='X', source='v2fly')
+
+    assert m.match('shared.com').app_name == 'FromAdGuard'
+    assert m.match('sub.only-v2fly.com').app_name == 'OnlyV2fly'
+    assert m.match('bucket.com').app_name == 'V2flyApp'  # app beats category bucket
+
+
 async def test_refresh_blocklists_empty_body_keeps_tier(db_session, monkeypatch):
     """A 200 that parses to 0 domains must NOT wipe the existing tier."""
     svc = ClassificationService()
