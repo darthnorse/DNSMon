@@ -172,10 +172,10 @@ class AlertEngine:
 
         return IPExcludeMatcher(exact, wildcards, cidr)
 
-    async def _get_cached_patterns(self, rule: AlertRule) -> Dict[str, List[re.Pattern]]:
+    async def _get_cached_patterns(self, rule: AlertRule) -> Dict[str, object]:
         """
         Get or compile patterns for a rule.
-        Returns dict with 'domain', 'client_ip', 'client_hostname' keys.
+        Returns dict with 'domain', 'client_ip', 'client_hostname', 'exclude_client_ips' keys.
         Uses LRU eviction to prevent unbounded memory growth.
         """
         async with self._cache_lock:
@@ -188,6 +188,7 @@ class AlertEngine:
                 'domain': self._compile_patterns(rule.domain_pattern),
                 'client_ip': self._compile_patterns(rule.client_ip_pattern),
                 'client_hostname': self._compile_patterns(rule.client_hostname_pattern),
+                'exclude_client_ips': self._compile_ip_excludes(rule.exclude_client_ips),
             }
             self._pattern_cache[rule.id] = cached
 
@@ -242,7 +243,7 @@ class AlertEngine:
         self,
         query: Query,
         rules: List[AlertRule],
-        cached_patterns: Dict[int, Dict[str, List[re.Pattern]]]
+        cached_patterns: Dict[int, Dict[str, object]]
     ) -> List[int]:
         """
         Evaluate a query against a list of alert rules (no DB access).
@@ -265,6 +266,10 @@ class AlertEngine:
 
             # Get cached patterns for this rule
             patterns = cached_patterns.get(rule.id, {})
+
+            ip_excludes = patterns.get('exclude_client_ips')
+            if ip_excludes is not None and ip_excludes.matches(query.client_ip):
+                continue
 
             # Check if query matches rule patterns
             matches = True

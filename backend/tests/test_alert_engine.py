@@ -26,6 +26,7 @@ def _q(domain="example.com", status="OK", client_ip="192.168.1.10",
 
 def _rule(id=1, name="r", domain_pattern=None, client_ip_pattern=None,
           client_hostname_pattern=None, exclude_domains=None,
+          exclude_client_ips=None,
           match_status="any", cooldown_minutes=5, enabled=True) -> AlertRule:
     return AlertRule(
         id=id, name=name,
@@ -33,6 +34,7 @@ def _rule(id=1, name="r", domain_pattern=None, client_ip_pattern=None,
         client_ip_pattern=client_ip_pattern,
         client_hostname_pattern=client_hostname_pattern,
         exclude_domains=exclude_domains,
+        exclude_client_ips=exclude_client_ips,
         cooldown_minutes=cooldown_minutes,
         match_status=match_status,
         enabled=enabled,
@@ -355,3 +357,47 @@ def test_ip_exclude_unparseable_client_ip_no_match():
     assert not m.matches("not-an-ip")
     assert not m.matches(None)
     assert not m.matches("")
+
+
+# ---------------------------------------------------------------------------
+# Client-IP exclusion — engine integration
+# ---------------------------------------------------------------------------
+
+async def test_exclude_client_ip_suppresses_match():
+    e = AlertEngine()
+    rule = _rule(domain_pattern="ads", exclude_client_ips="10.0.0.5")
+    cached = {rule.id: await e._get_cached_patterns(rule)}
+    assert e._evaluate_query_against_rules(
+        _q(domain="ads.example.com", client_ip="10.0.0.5"), [rule], cached) == []
+    assert e._evaluate_query_against_rules(
+        _q(domain="ads.example.com", client_ip="10.0.0.6"), [rule], cached) == [rule.id]
+
+
+async def test_exclude_client_ip_cidr_suppresses():
+    e = AlertEngine()
+    rule = _rule(domain_pattern="ads", exclude_client_ips="192.168.1.0/24")
+    cached = {rule.id: await e._get_cached_patterns(rule)}
+    assert e._evaluate_query_against_rules(
+        _q(domain="ads.x.com", client_ip="192.168.1.99"), [rule], cached) == []
+    assert e._evaluate_query_against_rules(
+        _q(domain="ads.x.com", client_ip="192.168.2.99"), [rule], cached) == [rule.id]
+
+
+async def test_exclude_client_ip_overrides_include_pattern():
+    # Include client_ip_pattern matches, but the exclusion wins.
+    e = AlertEngine()
+    rule = _rule(domain_pattern=None, client_ip_pattern="10.0.0.*",
+                 exclude_client_ips="10.0.0.5")
+    cached = {rule.id: await e._get_cached_patterns(rule)}
+    assert e._evaluate_query_against_rules(
+        _q(client_ip="10.0.0.5"), [rule], cached) == []
+    assert e._evaluate_query_against_rules(
+        _q(client_ip="10.0.0.9"), [rule], cached) == [rule.id]
+
+
+async def test_exclude_client_ip_none_is_noop():
+    e = AlertEngine()
+    rule = _rule(domain_pattern="ads", exclude_client_ips=None)
+    cached = {rule.id: await e._get_cached_patterns(rule)}
+    assert e._evaluate_query_against_rules(
+        _q(domain="ads.example.com", client_ip="10.0.0.5"), [rule], cached) == [rule.id]
