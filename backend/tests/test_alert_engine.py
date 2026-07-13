@@ -326,6 +326,17 @@ def test_ip_exclude_ipv6_exact_and_cidr():
     assert not m.matches("2001:db8::1")
 
 
+def test_ip_exclude_ipv6_equivalent_textual_forms_match():
+    # An exact IPv6 entry and the client IP may use different valid spellings of
+    # the same address; both are canonicalized so they still match either way.
+    e = AlertEngine()
+    m = e._compile_ip_excludes("2001:0db8:0:0:0:0:0:1")  # expanded entry
+    assert m.matches("2001:db8::1")                      # compressed client IP
+    m2 = e._compile_ip_excludes("2001:db8::1")           # compressed entry
+    assert m2.matches("2001:0db8:0:0:0:0:0:1")           # expanded client IP
+    assert not m2.matches("2001:db8::2")                 # different address
+
+
 def test_ip_exclude_mixed_list():
     e = AlertEngine()
     m = e._compile_ip_excludes("192.168.1.0/24, 10.0.0.5, 172.16.*")

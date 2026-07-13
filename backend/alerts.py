@@ -36,8 +36,17 @@ class IPExcludeMatcher:
     def matches(self, client_ip: Optional[str]) -> bool:
         if not client_ip:
             return False
-        if client_ip.lower() in self.exact:
-            return True
+        if self.exact:
+            if client_ip.lower() in self.exact:
+                return True
+            # Entries are stored canonicalized; compare the client IP's
+            # canonical form too so equivalent IPv6 spellings still match.
+            try:
+                canonical = ipaddress.ip_address(client_ip).compressed.lower()
+            except ValueError:
+                canonical = None
+            if canonical is not None and canonical in self.exact:
+                return True
         for pattern in self.wildcards:
             if pattern.fullmatch(client_ip):
                 return True
@@ -64,7 +73,7 @@ class AlertEngine:
 
         # Regex pattern cache: rule_id -> {field: compiled_patterns}
         # Using OrderedDict with LRU eviction to prevent unbounded memory growth
-        self._pattern_cache: OrderedDict[int, Dict[str, List[re.Pattern]]] = OrderedDict()
+        self._pattern_cache: OrderedDict[int, Dict[str, object]] = OrderedDict()
         self._cache_lock = asyncio.Lock()  # Protects pattern cache
         self._max_pattern_cache = 500  # Max number of rules to cache patterns for
 
@@ -168,7 +177,13 @@ class AlertEngine:
             elif '*' in entry or '?' in entry:
                 wildcards.extend(self._compile_patterns(entry))
             else:
-                exact.add(entry.lower())
+                # Store IPs canonicalized so equivalent IPv6 textual forms
+                # (e.g. 2001:0db8::1 vs 2001:db8::1) compare equal. Non-IP
+                # tokens fall back to the raw lowercased literal.
+                try:
+                    exact.add(ipaddress.ip_address(entry).compressed.lower())
+                except ValueError:
+                    exact.add(entry.lower())
 
         return IPExcludeMatcher(exact, wildcards, cidr)
 
@@ -268,7 +283,7 @@ class AlertEngine:
             patterns = cached_patterns.get(rule.id, {})
 
             ip_excludes = patterns.get('exclude_client_ips')
-            if ip_excludes is not None and ip_excludes.matches(query.client_ip):
+            if ip_excludes is not None and not ip_excludes.is_empty and ip_excludes.matches(query.client_ip):
                 continue
 
             # Check if query matches rule patterns
