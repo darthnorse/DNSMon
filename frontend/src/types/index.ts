@@ -21,6 +21,7 @@ export interface AlertRule {
   client_ip_pattern: string | null;
   client_hostname_pattern: string | null;
   exclude_domains: string | null;
+  exclude_client_ips: string | null;
   cooldown_minutes: number;
   match_status: MatchStatus;
   enabled: boolean;
@@ -35,6 +36,7 @@ export interface AlertRuleCreate {
   client_ip_pattern?: string;
   client_hostname_pattern?: string;
   exclude_domains?: string;
+  exclude_client_ips?: string;
   cooldown_minutes?: number;
   match_status: MatchStatus;
   enabled?: boolean;

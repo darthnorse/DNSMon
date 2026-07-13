@@ -42,6 +42,7 @@ export default function AlertRules() {
     client_ip_pattern: '',
     client_hostname_pattern: '',
     exclude_domains: '',
+    exclude_client_ips: '',
     cooldown_minutes: 5,
     match_status: 'any',
     enabled: true,
@@ -96,6 +97,10 @@ export default function AlertRules() {
       errors.push('Exclude domains must be 5000 characters or less');
     }
 
+    if (formData.exclude_client_ips && formData.exclude_client_ips.length > 5000) {
+      errors.push('Exclude client IPs must be 5000 characters or less');
+    }
+
     const cooldown = formData.cooldown_minutes ?? 5;
     if (cooldown < 0 || cooldown > 10080) {
       errors.push('Cooldown must be between 0 and 10080 minutes (7 days)');
@@ -133,6 +138,7 @@ export default function AlertRules() {
       client_ip_pattern: rule.client_ip_pattern || '',
       client_hostname_pattern: rule.client_hostname_pattern || '',
       exclude_domains: rule.exclude_domains || '',
+      exclude_client_ips: rule.exclude_client_ips || '',
       cooldown_minutes: rule.cooldown_minutes,
       match_status: rule.match_status,
       enabled: rule.enabled,
@@ -162,6 +168,7 @@ export default function AlertRules() {
       client_ip_pattern: '',
       client_hostname_pattern: '',
       exclude_domains: '',
+      exclude_client_ips: '',
       cooldown_minutes: 5,
       match_status: 'any',
       enabled: true,
@@ -304,6 +311,28 @@ export default function AlertRules() {
               </p>
             </div>
 
+            <div>
+              <label htmlFor="exclude_client_ips" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Exclude Client IPs
+              </label>
+              <input
+                type="text"
+                id="exclude_client_ips"
+                placeholder="192.168.1.0/24, 10.0.0.5, 172.16.*"
+                value={formData.exclude_client_ips}
+                onChange={(e) => setFormData({ ...formData, exclude_client_ips: e.target.value })}
+                className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm px-3 py-2 border"
+              />
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Comma-separated: exact IP, wildcard (172.16.*), or CIDR (10.0.0.0/8). Matching clients are never alerted.
+                {formData.exclude_client_ips && (
+                  <span className={formData.exclude_client_ips.length > 5000 ? 'text-red-600 dark:text-red-400' : ''}>
+                    {' '}({formData.exclude_client_ips.length}/5000)
+                  </span>
+                )}
+              </p>
+            </div>
+
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Select
                 label="Match Status"
@@ -382,6 +411,7 @@ export default function AlertRules() {
                       <div className="mt-2 flex flex-wrap gap-2 text-sm text-gray-500 dark:text-gray-400">
                         {rule.domain_pattern && <Badge color="blue">Domain: {rule.domain_pattern}</Badge>}
                         {rule.client_ip_pattern && <Badge color="green">IP: {rule.client_ip_pattern}</Badge>}
+                        {rule.exclude_client_ips && <Badge color="purple">Exclude IP: {rule.exclude_client_ips}</Badge>}
                         {rule.client_hostname_pattern && <Badge color="purple">Hostname: {rule.client_hostname_pattern}</Badge>}
                         {rule.match_status !== 'any' && (
                           <Badge color={rule.match_status === 'blocked' ? 'red' : 'emerald'}>
