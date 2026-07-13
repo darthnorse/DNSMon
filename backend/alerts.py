@@ -2,6 +2,7 @@ import logging
 import json
 import re
 import asyncio
+import ipaddress
 from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict
@@ -11,6 +12,44 @@ from .database import async_session_maker
 from .constants import BLOCKED_STATUSES
 
 logger = logging.getLogger(__name__)
+
+
+class IPExcludeMatcher:
+    """Tests a client IP against a rule's exclude_client_ips list.
+
+    Entries are pre-classified once (at compile time) into three buckets so the
+    per-query check is cheap: exact lookups hit a set, CIDR entries only force an
+    ip_address parse when at least one CIDR entry exists.
+    """
+
+    __slots__ = ("exact", "wildcards", "cidr")
+
+    def __init__(self, exact, wildcards, cidr):
+        self.exact = exact          # set[str] of lowercased literal IPs
+        self.wildcards = wildcards  # list[re.Pattern]
+        self.cidr = cidr            # list[ipaddress.IPv4Network | IPv6Network]
+
+    @property
+    def is_empty(self) -> bool:
+        return not (self.exact or self.wildcards or self.cidr)
+
+    def matches(self, client_ip: Optional[str]) -> bool:
+        if not client_ip:
+            return False
+        if client_ip.lower() in self.exact:
+            return True
+        for pattern in self.wildcards:
+            if pattern.fullmatch(client_ip):
+                return True
+        if self.cidr:
+            try:
+                addr = ipaddress.ip_address(client_ip)
+            except ValueError:
+                return False
+            for net in self.cidr:
+                if addr in net:
+                    return True
+        return False
 
 
 class AlertEngine:
@@ -103,6 +142,35 @@ class AlertEngine:
                 continue
 
         return patterns
+
+    def _compile_ip_excludes(self, pattern_string: Optional[str]) -> IPExcludeMatcher:
+        """Classify a comma-separated exclude list into exact / wildcard / CIDR.
+
+        Bare tokens are EXACT (no auto-wildcard). Malformed entries are logged
+        and skipped so a single typo cannot disable the rule.
+        """
+        exact: set = set()
+        wildcards: List[re.Pattern] = []
+        cidr: List = []
+
+        if not pattern_string:
+            return IPExcludeMatcher(exact, wildcards, cidr)
+
+        for raw in pattern_string.split(','):
+            entry = raw.strip()
+            if not entry:
+                continue
+            if '/' in entry:
+                try:
+                    cidr.append(ipaddress.ip_network(entry, strict=False))
+                except ValueError as exc:
+                    logger.warning(f"Skipping invalid CIDR exclude entry '{entry}': {exc}")
+            elif '*' in entry or '?' in entry:
+                wildcards.extend(self._compile_patterns(entry))
+            else:
+                exact.add(entry.lower())
+
+        return IPExcludeMatcher(exact, wildcards, cidr)
 
     async def _get_cached_patterns(self, rule: AlertRule) -> Dict[str, List[re.Pattern]]:
         """

@@ -288,3 +288,70 @@ async def test_try_record_alert_no_cooldown_always_records(db_session: AsyncSess
 async def test_evaluate_queries_empty_list():
     e = AlertEngine()
     assert await e.evaluate_queries([]) == []
+
+
+# ---------------------------------------------------------------------------
+# Client-IP exclusion matcher (pure)
+# ---------------------------------------------------------------------------
+
+def test_ip_exclude_exact_match_only():
+    e = AlertEngine()
+    m = e._compile_ip_excludes("10.0.0.5")
+    assert m.matches("10.0.0.5")
+    assert not m.matches("10.0.0.55")   # bare IP is exact, not substring
+    assert not m.matches("110.0.0.5")
+
+
+def test_ip_exclude_wildcard_match():
+    e = AlertEngine()
+    m = e._compile_ip_excludes("172.16.*")
+    assert m.matches("172.16.4.9")
+    assert not m.matches("172.17.0.1")
+
+
+def test_ip_exclude_cidr_match():
+    e = AlertEngine()
+    m = e._compile_ip_excludes("192.168.1.0/24")
+    assert m.matches("192.168.1.42")
+    assert not m.matches("192.168.2.42")
+
+
+def test_ip_exclude_ipv6_exact_and_cidr():
+    e = AlertEngine()
+    m = e._compile_ip_excludes("::1, fd00::/8")
+    assert m.matches("::1")
+    assert m.matches("fd12:3456::1")
+    assert not m.matches("2001:db8::1")
+
+
+def test_ip_exclude_mixed_list():
+    e = AlertEngine()
+    m = e._compile_ip_excludes("192.168.1.0/24, 10.0.0.5, 172.16.*")
+    assert m.matches("192.168.1.7")
+    assert m.matches("10.0.0.5")
+    assert m.matches("172.16.9.9")
+    assert not m.matches("8.8.8.8")
+
+
+def test_ip_exclude_empty_is_noop():
+    e = AlertEngine()
+    assert e._compile_ip_excludes(None).is_empty
+    assert e._compile_ip_excludes("").is_empty
+    assert e._compile_ip_excludes("  ,  ").is_empty
+    assert not e._compile_ip_excludes(None).matches("1.2.3.4")
+
+
+def test_ip_exclude_malformed_entry_skipped_not_fatal():
+    e = AlertEngine()
+    # Bad CIDR is skipped; the valid exact entry still works (rule not disabled).
+    m = e._compile_ip_excludes("not-an-ip/33, 10.0.0.5")
+    assert m.matches("10.0.0.5")
+    assert not m.matches("0.0.0.0")
+
+
+def test_ip_exclude_unparseable_client_ip_no_match():
+    e = AlertEngine()
+    m = e._compile_ip_excludes("192.168.1.0/24")
+    assert not m.matches("not-an-ip")
+    assert not m.matches(None)
+    assert not m.matches("")
