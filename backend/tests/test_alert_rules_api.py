@@ -132,3 +132,30 @@ async def test_create_returns_iso_datetime_strings(async_admin_client: AsyncClie
     assert r.status_code == 200, r.text
     payload = r.json()
     assert payload["created_at"].endswith("Z") or "+00:00" in payload["created_at"]
+
+
+# ---------------------------------------------------------------------------
+# exclude_client_ips
+# ---------------------------------------------------------------------------
+
+async def test_exclude_client_ips_roundtrip_and_clear(async_admin_client: AsyncClient):
+    r = await async_admin_client.post("/api/alert-rules", json={
+        "name": "exclude-ips",
+        "domain_pattern": "ads",
+        "exclude_client_ips": "192.168.1.0/24, 10.0.0.5",
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["exclude_client_ips"] == "192.168.1.0/24, 10.0.0.5"
+    rule_id = body["id"]
+
+    # GET reflects the stored value.
+    r = await async_admin_client.get("/api/alert-rules")
+    stored = next(x for x in r.json() if x["id"] == rule_id)
+    assert stored["exclude_client_ips"] == "192.168.1.0/24, 10.0.0.5"
+
+    # PUT null clears it (field is Optional in the response schema).
+    r = await async_admin_client.put(f"/api/alert-rules/{rule_id}",
+                                     json={"exclude_client_ips": None})
+    assert r.status_code == 200, r.text
+    assert r.json()["exclude_client_ips"] is None
