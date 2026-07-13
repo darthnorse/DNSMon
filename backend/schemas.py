@@ -75,6 +75,7 @@ class AlertRuleCreate(BaseModel):
     client_ip_pattern: Optional[str] = PydanticField(default=None, max_length=500)
     client_hostname_pattern: Optional[str] = PydanticField(default=None, max_length=500)
     exclude_domains: Optional[str] = PydanticField(default=None, max_length=5000)
+    exclude_client_ips: Optional[str] = PydanticField(default=None, max_length=5000)
     cooldown_minutes: int = PydanticField(default=5, ge=0, le=10080)  # 0 to 7 days
     match_status: MatchStatus = 'any'
     enabled: bool = True
@@ -87,6 +88,7 @@ class AlertRuleUpdate(BaseModel):
     client_ip_pattern: Optional[str] = PydanticField(default=None, max_length=500)
     client_hostname_pattern: Optional[str] = PydanticField(default=None, max_length=500)
     exclude_domains: Optional[str] = PydanticField(default=None, max_length=5000)
+    exclude_client_ips: Optional[str] = PydanticField(default=None, max_length=5000)
     cooldown_minutes: Optional[int] = PydanticField(default=None, ge=0, le=10080)
     match_status: Optional[MatchStatus] = None
     enabled: Optional[bool] = None
@@ -114,6 +116,7 @@ class AlertRuleResponse(BaseModel):
     client_ip_pattern: Optional[str]
     client_hostname_pattern: Optional[str]
     exclude_domains: Optional[str]
+    exclude_client_ips: Optional[str]
     cooldown_minutes: int
     match_status: MatchStatus
     enabled: bool

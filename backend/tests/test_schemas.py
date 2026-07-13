@@ -78,8 +78,8 @@ def _base_response_kwargs(**overrides):
     base = dict(
         id=1, name="x", description=None, domain_pattern=None,
         client_ip_pattern=None, client_hostname_pattern=None,
-        exclude_domains=None, cooldown_minutes=5, match_status="any",
-        enabled=True,
+        exclude_domains=None, exclude_client_ips=None, cooldown_minutes=5,
+        match_status="any", enabled=True,
         created_at=datetime(2026, 5, 17, 12, 0, 0, tzinfo=timezone.utc),
         updated_at=datetime(2026, 5, 17, 12, 0, 0, tzinfo=timezone.utc),
     )
@@ -144,3 +144,25 @@ def test_create_rejects_unknown_field():
     # accidentally allow unexpected fields to corrupt state if that changes.
     m = AlertRuleCreate.model_validate({"name": "r", "unknown_field": "x"})
     assert not hasattr(m, "unknown_field")
+
+
+def test_alert_rule_create_accepts_exclude_client_ips():
+    from backend.schemas import AlertRuleCreate
+    m = AlertRuleCreate(name="r", exclude_client_ips="192.168.1.0/24, 10.0.0.5")
+    assert m.exclude_client_ips == "192.168.1.0/24, 10.0.0.5"
+
+
+def test_alert_rule_create_rejects_overlong_exclude_client_ips():
+    import pytest
+    from pydantic import ValidationError
+    from backend.schemas import AlertRuleCreate
+    with pytest.raises(ValidationError):
+        AlertRuleCreate(name="r", exclude_client_ips="x" * 5001)
+
+
+def test_alert_rule_update_allows_null_exclude_client_ips():
+    # Optional in the response schema => not in _NOT_NULL_FIELDS => null clears it.
+    from backend.schemas import AlertRuleUpdate
+    m = AlertRuleUpdate(exclude_client_ips=None)
+    assert m.exclude_client_ips is None
+    assert "exclude_client_ips" not in AlertRuleUpdate._NOT_NULL_FIELDS
