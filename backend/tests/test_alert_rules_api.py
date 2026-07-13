@@ -159,3 +159,13 @@ async def test_exclude_client_ips_roundtrip_and_clear(async_admin_client: AsyncC
                                      json={"exclude_client_ips": None})
     assert r.status_code == 200, r.text
     assert r.json()["exclude_client_ips"] is None
+
+
+async def test_exclude_client_ips_rejects_malformed_entry(async_admin_client: AsyncClient):
+    r = await async_admin_client.post("/api/alert-rules", json={
+        "name": "bad-exclude",
+        "domain_pattern": "ads",
+        "exclude_client_ips": "192.168.1.0/999",
+    })
+    assert r.status_code == 422, r.text
+    assert "exclude_client_ips" in r.text

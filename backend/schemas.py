@@ -3,6 +3,7 @@ Pydantic schemas for DNSMon API.
 Shared across all route modules.
 """
 
+import ipaddress
 import re
 from datetime import datetime, timedelta, timezone
 from typing import ClassVar, Literal, Optional, List, Tuple, Union, get_args, get_origin
@@ -28,6 +29,35 @@ def _validate_domain_list(domains):
             raise ValueError(f"invalid domain: {raw!r}")
         cleaned.append(d)
     return cleaned
+
+
+def _validate_exclude_client_ips(value: Optional[str]) -> Optional[str]:
+    """Reject exclude entries that would silently never match.
+
+    Mirrors the AlertEngine matcher's classification: a `/` entry must be a
+    valid CIDR and a bare token must be a valid IP; wildcard patterns
+    (containing `*`/`?`) are accepted as-is. Raises so a malformed entry is
+    surfaced at save time instead of being persisted as a dead exclusion.
+    """
+    if not value:
+        return value
+    for raw in value.split(','):
+        entry = raw.strip()
+        if not entry:
+            continue
+        if '/' in entry:
+            try:
+                ipaddress.ip_network(entry, strict=False)
+            except ValueError:
+                raise ValueError(f"invalid CIDR in exclude_client_ips: {entry!r}")
+        elif '*' in entry or '?' in entry:
+            continue
+        else:
+            try:
+                ipaddress.ip_address(entry)
+            except ValueError:
+                raise ValueError(f"invalid IP in exclude_client_ips: {entry!r}")
+    return value
 
 
 MatchStatus = Literal['any', 'blocked', 'allowed']
@@ -80,6 +110,11 @@ class AlertRuleCreate(BaseModel):
     match_status: MatchStatus = 'any'
     enabled: bool = True
 
+    @field_validator('exclude_client_ips')
+    @classmethod
+    def check_exclude_client_ips(cls, v):
+        return _validate_exclude_client_ips(v)
+
 
 class AlertRuleUpdate(BaseModel):
     name: Optional[str] = PydanticField(default=None, max_length=100)
@@ -97,6 +132,11 @@ class AlertRuleUpdate(BaseModel):
     # response declares as non-Optional cannot be set to JSON null on update
     # without breaking serialization downstream.
     _NOT_NULL_FIELDS: ClassVar[Tuple[str, ...]] = ()
+
+    @field_validator('exclude_client_ips')
+    @classmethod
+    def check_exclude_client_ips(cls, v):
+        return _validate_exclude_client_ips(v)
 
     @model_validator(mode='before')
     @classmethod

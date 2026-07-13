@@ -166,3 +166,33 @@ def test_alert_rule_update_allows_null_exclude_client_ips():
     m = AlertRuleUpdate(exclude_client_ips=None)
     assert m.exclude_client_ips is None
     assert "exclude_client_ips" not in AlertRuleUpdate._NOT_NULL_FIELDS
+
+
+def test_alert_rule_accepts_valid_exclude_entry_shapes():
+    from backend.schemas import AlertRuleCreate, AlertRuleUpdate
+    good = "192.168.1.0/24, 10.0.0.5, 172.16.*, ::1, fd00::/8"
+    assert AlertRuleCreate(name="r", exclude_client_ips=good).exclude_client_ips == good
+    assert AlertRuleUpdate(exclude_client_ips=good).exclude_client_ips == good
+    # Empty / whitespace-only entries are ignored, not rejected.
+    assert AlertRuleCreate(name="r", exclude_client_ips="  ,  ").exclude_client_ips == "  ,  "
+
+
+def test_alert_rule_rejects_invalid_cidr_exclude_entry():
+    import pytest
+    from pydantic import ValidationError
+    from backend.schemas import AlertRuleCreate, AlertRuleUpdate
+    with pytest.raises(ValidationError, match="invalid CIDR"):
+        AlertRuleCreate(name="r", exclude_client_ips="192.168.1.0/999")
+    with pytest.raises(ValidationError, match="invalid CIDR"):
+        AlertRuleUpdate(exclude_client_ips="10.0.0.5, 192.168.1.0/999")
+
+
+def test_alert_rule_rejects_invalid_ip_exclude_entry():
+    import pytest
+    from pydantic import ValidationError
+    from backend.schemas import AlertRuleCreate
+    with pytest.raises(ValidationError, match="invalid IP"):
+        AlertRuleCreate(name="r", exclude_client_ips="not-an-ip")
+    # A valid entry alongside an invalid one still rejects the whole value.
+    with pytest.raises(ValidationError, match="invalid IP"):
+        AlertRuleCreate(name="r", exclude_client_ips="10.0.0.5, nonsense")
