@@ -105,6 +105,7 @@ class AlertRule(Base):
 
     # Exclusion patterns
     exclude_domains = Column(Text, nullable=True)  # JSON array of domains to exclude
+    exclude_client_ips = Column(Text, nullable=True)  # comma-separated exact IP / wildcard / CIDR; matching clients are never alerted
 
     # Alert throttling
     cooldown_minutes = Column(Integer, default=5)  # Min time between batch alerts for same rule
@@ -124,6 +125,7 @@ class AlertRule(Base):
             'client_ip_pattern': self.client_ip_pattern,
             'client_hostname_pattern': self.client_hostname_pattern,
             'exclude_domains': self.exclude_domains,
+            'exclude_client_ips': self.exclude_client_ips,
             'cooldown_minutes': self.cooldown_minutes,
             'match_status': self.match_status,
             'enabled': self.enabled,
