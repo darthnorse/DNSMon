@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
-from ..models import User, InsightSource
+from ..models import User, InsightSource, SettingsChangelog
 from ..schemas import InsightSourceResponse, InsightSourceUpdate
 from ..auth import get_current_user, require_admin
 from ..constants import THREAT_SOURCES
@@ -50,6 +50,15 @@ async def update_source(source_id: int, payload: InsightSourceUpdate,
         if new_key and len(new_key) > MAX_API_KEY_LENGTH:
             raise HTTPException(status_code=400, detail="API key is too long")
         key_changed = src.api_key != new_key
+        if key_changed:
+            # Presence only, never the value. Nothing surfaces this table today;
+            # it is queryable via psql, matching how server changes are recorded.
+            db.add(SettingsChangelog(
+                setting_key=f"insight_source.{src.kind}.api_key",
+                old_value='set' if src.api_key else 'unset',
+                new_value='set' if new_key else 'unset',
+                change_type='insight_source',
+                requires_restart=False))
         src.api_key = new_key
 
     enabled = fields.get('enabled', src.enabled)

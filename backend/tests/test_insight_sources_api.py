@@ -271,3 +271,48 @@ async def test_requires_api_key_is_server_driven(
     rows = {s["kind"]: s for s in (await async_admin_client.get("/api/insight-sources")).json()}
     assert rows["qfeeds"]["requires_api_key"] is True
     assert rows["hosts"]["requires_api_key"] is False
+
+
+async def test_api_key_change_is_audited_without_the_value(
+        async_admin_client: AsyncClient, db_session, no_refresh):
+    from sqlalchemy import select
+    from backend.models import SettingsChangelog
+
+    row = await _qfeeds_row(db_session)
+    secret = "tip_supersecret"
+    await async_admin_client.patch(
+        f"/api/insight-sources/{row.id}", json={"api_key": secret})
+
+    entries = (await db_session.execute(select(SettingsChangelog).where(
+        SettingsChangelog.change_type == 'insight_source'))).scalars().all()
+    assert len(entries) == 1
+    assert entries[0].new_value == 'set'
+    assert entries[0].old_value == 'unset'
+    assert secret not in str(entries[0].to_dict())
+
+
+async def test_clearing_the_api_key_is_audited(
+        async_admin_client: AsyncClient, db_session, no_refresh):
+    from sqlalchemy import select
+    from backend.models import SettingsChangelog
+
+    row = await _qfeeds_row(db_session, api_key="tip_abc")
+    await async_admin_client.patch(
+        f"/api/insight-sources/{row.id}", json={"api_key": ""})
+
+    entry = (await db_session.execute(select(SettingsChangelog).where(
+        SettingsChangelog.change_type == 'insight_source'))).scalars().one()
+    assert (entry.old_value, entry.new_value) == ('set', 'unset')
+
+
+async def test_an_unchanged_key_is_not_audited(
+        async_admin_client: AsyncClient, db_session, no_refresh):
+    from sqlalchemy import select, func
+    from backend.models import SettingsChangelog
+
+    row = await _qfeeds_row(db_session, api_key="tip_abc")
+    await async_admin_client.patch(
+        f"/api/insight-sources/{row.id}", json={"api_key": "tip_abc"})
+
+    assert await db_session.scalar(select(func.count()).select_from(
+        SettingsChangelog).where(SettingsChangelog.change_type == 'insight_source')) == 0
