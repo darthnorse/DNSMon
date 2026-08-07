@@ -9,11 +9,15 @@ import httpx
 from sqlalchemy import select, delete, insert, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .classification import parse_adguard_rule, parse_blocklist_line, parse_v2fly_entries, DomainMatcher
+from .classification import (
+    parse_adguard_rule, parse_blocklist_line, parse_v2fly_entries,
+    DomainMatcher, ThreatMatcher,
+)
 from .constants import (
     CLASSIFICATION_FEED_URL,
     ADGUARD_GROUP_TO_CATEGORY,
     SINGLETON_SOURCE_KINDS,
+    THREAT_SOURCES,
 )
 from .database import async_session_maker
 from .models import AppDefinition, AppDomain, InsightSource, DomainLabel, DomainStatsHourly, Query
@@ -398,12 +402,29 @@ class ClassificationService:
                    AppDefinition.category, AppDefinition.source,
                    AppDefinition.is_category_only)
             .join(AppDefinition, AppDomain.app_id == AppDefinition.id)
-            .where(AppDefinition.enabled == True, AppDomain.is_wildcard == False)
+            .where(AppDefinition.enabled == True, AppDomain.is_wildcard == False,
+                   AppDefinition.source.notin_(THREAT_SOURCES))
         )
         matcher = DomainMatcher()
         for domain, app_id, name, category, source, is_category_only in rows:
             app_name = None if is_category_only else name
             matcher.add(domain, app_id=app_id, app_name=app_name, category=category, source=source)
+        return matcher
+
+    async def build_threat_matcher(self, db: AsyncSession) -> ThreatMatcher:
+        """Build the threat-only matcher — the complement of build_matcher.
+
+        The definition's slug is the threat type, which is what generalises if a
+        paid feed tier later adds phishing alongside malware."""
+        rows = await db.execute(
+            select(AppDomain.domain, AppDefinition.slug, AppDefinition.source)
+            .join(AppDefinition, AppDomain.app_id == AppDefinition.id)
+            .where(AppDefinition.enabled == True, AppDomain.is_wildcard == False,
+                   AppDefinition.source.in_(THREAT_SOURCES))
+        )
+        matcher = ThreatMatcher()
+        for domain, slug, source in rows:
+            matcher.add(domain, threat_type=slug, threat_source=source)
         return matcher
 
     async def _do_reclassify(self, db: AsyncSession) -> int:

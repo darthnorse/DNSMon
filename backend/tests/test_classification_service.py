@@ -383,3 +383,75 @@ async def test_run_full_dispatches_v2fly_row(db_session, monkeypatch):
     src = await db_session.scalar(select(InsightSource).where(InsightSource.kind == "v2fly"))
     assert src.last_status == "ok"
     assert src.domain_count == 2
+
+
+def _threat_def(enabled=True):
+    from backend.models import AppDefinition
+    return AppDefinition(slug='malware', name='Malware', category=None,
+                         source='qfeeds', enabled=enabled, is_category_only=False)
+
+
+async def test_threat_defs_are_excluded_from_the_app_matcher(db_session):
+    from backend.models import AppDomain
+    from backend.classification_service import ClassificationService
+
+    ad = _threat_def()
+    db_session.add(ad)
+    await db_session.flush()
+    db_session.add(AppDomain(domain='evil.com', app_id=ad.id, is_wildcard=False))
+    await db_session.commit()
+
+    matcher = await ClassificationService().build_matcher(db_session)
+    assert matcher.match('evil.com') is None
+
+
+async def test_build_threat_matcher_finds_threat_defs(db_session):
+    from backend.models import AppDomain
+    from backend.classification_service import ClassificationService
+
+    ad = _threat_def()
+    db_session.add(ad)
+    await db_session.flush()
+    db_session.add(AppDomain(domain='evil.com', app_id=ad.id, is_wildcard=False))
+    await db_session.commit()
+
+    tm = await ClassificationService().build_threat_matcher(db_session)
+    assert tm.match('cdn.evil.com') == ('malware', 'qfeeds')
+
+
+async def test_app_and_threat_labels_coexist(db_session):
+    """The central regression this design exists to prevent: a domain that is
+    both a known app and known-malicious must keep BOTH."""
+    from backend.models import AppDefinition, AppDomain
+    from backend.classification_service import ClassificationService
+
+    app = AppDefinition(slug='netflix', name='Netflix', category='Streaming',
+                        source='adguard', enabled=True, is_category_only=False)
+    threat = _threat_def()
+    db_session.add_all([app, threat])
+    await db_session.flush()
+    db_session.add_all([
+        AppDomain(domain='shared.example', app_id=app.id, is_wildcard=False),
+        AppDomain(domain='shared.example', app_id=threat.id, is_wildcard=False),
+    ])
+    await db_session.commit()
+
+    svc = ClassificationService()
+    hit = (await svc.build_matcher(db_session)).match('shared.example')
+    assert hit is not None and hit.app_name == 'Netflix'
+    assert hit.category == 'Streaming'
+    tm = await svc.build_threat_matcher(db_session)
+    assert tm.match('shared.example') == ('malware', 'qfeeds')
+
+
+async def test_build_threat_matcher_skips_disabled_defs(db_session):
+    from backend.models import AppDomain
+    from backend.classification_service import ClassificationService
+
+    ad = _threat_def(enabled=False)
+    db_session.add(ad)
+    await db_session.flush()
+    db_session.add(AppDomain(domain='evil.com', app_id=ad.id, is_wildcard=False))
+    await db_session.commit()
+
+    assert len(await ClassificationService().build_threat_matcher(db_session)) == 0
