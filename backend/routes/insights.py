@@ -183,13 +183,16 @@ async def get_threats(
             stmt = stmt.where(Query.client_ip.in_(client_list))
         return stmt
 
-    total = await db.scalar(base(func.count(Query.id))) or 0
-
+    # One grouped pass yields both the total and the ranking. The number of
+    # distinct flagged domains in a window is small, so summing here is cheaper
+    # than a second aggregate over the same join — and keeps the total exact,
+    # matching the raw-query basis of the Queries/Blocks tiles beside it.
     domain_rows = (await db.execute(
         base(Query.domain, DomainLabel.threat_type, func.count(Query.id).label('c'))
         .group_by(Query.domain, DomainLabel.threat_type)
-        .order_by(func.count(Query.id).desc()).limit(10)
+        .order_by(func.count(Query.id).desc())
     )).all()
+    total = sum(int(r[2]) for r in domain_rows)
 
     client_rows = (await db.execute(
         base(Query.client_ip, func.max(Query.client_hostname).label('hostname'),
@@ -201,7 +204,7 @@ async def get_threats(
     return {
         'total': int(total),
         'top_domains': [{'domain': d, 'threat_type': t, 'count': int(c)}
-                        for d, t, c in domain_rows],
+                        for d, t, c in domain_rows[:10]],
         'top_clients': [{'client_ip': ip, 'client_hostname': host, 'count': int(c)}
                         for ip, host, c in client_rows],
     }

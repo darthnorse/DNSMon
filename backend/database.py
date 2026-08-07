@@ -135,6 +135,12 @@ async def _run_migrations(conn):
         "WHERE source = 'blocklist' AND is_category_only = false"
     ))
 
+    # create_all only builds indexes for NEW tables, so an upgraded install needs
+    # this explicitly. IF NOT EXISTS keeps it idempotent.
+    await conn.execute(text(
+        "CREATE INDEX IF NOT EXISTS idx_domain_labels_threat "
+        "ON domain_labels (threat_type) WHERE threat_type IS NOT NULL"))
+
     # Drop redundant indexes that are covered by composite indexes
     redundant_indexes = [
         'idx_queries_client_ip_timestamp',  # covered by idx_queries_timestamp_client

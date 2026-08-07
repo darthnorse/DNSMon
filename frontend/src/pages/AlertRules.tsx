@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Select, type SelectOption } from '../components/Select';
-import { alertRuleApi } from '../utils/api';
+import { alertRuleApi, insightSourceApi } from '../utils/api';
 import type { AlertRule, AlertRuleCreate, MatchStatus } from '../types';
 
 const MATCH_STATUS_OPTIONS: SelectOption<MatchStatus>[] = [
@@ -18,6 +18,7 @@ const BADGE_COLORS = {
   purple: 'bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300',
   red: 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300',
   emerald: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-300',
+  amber: 'bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300',
 } as const;
 
 function Badge({ color, children }: { color: keyof typeof BADGE_COLORS; children: React.ReactNode }) {
@@ -53,11 +54,24 @@ export default function AlertRules() {
     loadRules();
   }, []);
 
+  const [threatFeedReady, setThreatFeedReady] = useState(true);
+
+  const loadThreatFeedState = async () => {
+    try {
+      const sources = await insightSourceApi.getAll();
+      setThreatFeedReady(sources.some(
+        (s) => s.requires_api_key && s.enabled && s.last_status === 'ok'));
+    } catch {
+      // Non-blocking: a failed probe must not hide the rules themselves.
+    }
+  };
+
   const loadRules = async () => {
     try {
       setLoading(true);
       const data = await alertRuleApi.getAll();
       setRules(data);
+      await loadThreatFeedState();
       setError(null);
     } catch (err) {
       setError('Failed to load alert rules');
@@ -360,6 +374,12 @@ export default function AlertRules() {
                   Fires on any query to a domain flagged by a threat feed. Needs no
                   pattern; combine with the fields above to narrow it further.
                 </p>
+                {!threatFeedReady && (
+                  <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                    No threat feed is active — a rule using this cannot match yet.
+                    Enable one in Settings → Insight Sources.
+                  </p>
+                )}
               </div>
 
               <div>
@@ -439,6 +459,9 @@ export default function AlertRules() {
                           </Badge>
                         )}
                         {rule.match_threat && <Badge color="red">Malicious only</Badge>}
+                        {rule.match_threat && !threatFeedReady && (
+                          <Badge color="amber">No threat feed active</Badge>
+                        )}
                       </div>
                       <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                         Cooldown: {rule.cooldown_minutes} min

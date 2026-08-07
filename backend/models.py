@@ -1,6 +1,6 @@
 import hashlib
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Index, BigInteger, ForeignKey, JSON
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Index, BigInteger, ForeignKey, JSON, text
 from sqlalchemy.orm import declarative_base
 
 from .constants import THREAT_SOURCES
@@ -671,6 +671,13 @@ class DomainLabel(Base):
     threat_type = Column(String(20), nullable=True)
     threat_source = Column(String(20), nullable=True)
     classified_at = Column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        # Flagged domains are a tiny fraction of the table; the partial index lets
+        # the threats endpoint drive from them instead of scanning every label.
+        Index('idx_domain_labels_threat', 'threat_type',
+              postgresql_where=text('threat_type IS NOT NULL')),
+    )
 
     def to_dict(self):
         return {
