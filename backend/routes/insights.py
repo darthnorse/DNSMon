@@ -115,7 +115,8 @@ async def get_app_domains(
     server_list = _server_list(servers)
     T = DomainStatsHourly
     stmt = (
-        select(T.domain, func.sum(T.total).label('total'), func.sum(T.blocked).label('blocked'))
+        select(T.domain, func.sum(T.total).label('total'), func.sum(T.blocked).label('blocked'),
+               func.max(DomainLabel.threat_type).label('threat_type'))
         .join(DomainLabel, DomainLabel.domain == T.domain)
         .where(T.hour >= start, DomainLabel.app_name == app_name)
         .group_by(T.domain).order_by(func.sum(T.total).desc()).limit(100)
@@ -125,7 +126,8 @@ async def get_app_domains(
     if server_list:
         stmt = stmt.where(T.server.in_(server_list))
     rows = await db.execute(stmt)
-    return [DomainUsage(domain=r[0], total=int(r[1] or 0), blocked=int(r[2] or 0)) for r in rows]
+    return [DomainUsage(domain=r[0], total=int(r[1] or 0), blocked=int(r[2] or 0),
+                        threat_type=r[3]) for r in rows]
 
 
 @router.get("/uncategorized-domains", response_model=List[DomainUsage])
@@ -139,7 +141,8 @@ async def get_uncategorized_domains(
     start, end = _resolve_period(period, from_date, to_date)
     T = DomainStatsHourly
     stmt = (
-        select(T.domain, func.sum(T.total).label('total'), func.sum(T.blocked).label('blocked'))
+        select(T.domain, func.sum(T.total).label('total'), func.sum(T.blocked).label('blocked'),
+               func.max(DomainLabel.threat_type).label('threat_type'))
         .join(DomainLabel, DomainLabel.domain == T.domain, isouter=True)
         .where(T.hour >= start, DomainLabel.category.is_(None))
         .group_by(T.domain).order_by(func.sum(T.total).desc()).limit(limit)
@@ -150,4 +153,5 @@ async def get_uncategorized_domains(
     if server_list:
         stmt = stmt.where(T.server.in_(server_list))
     rows = await db.execute(stmt)
-    return [DomainUsage(domain=r[0], total=int(r[1] or 0), blocked=int(r[2] or 0)) for r in rows]
+    return [DomainUsage(domain=r[0], total=int(r[1] or 0), blocked=int(r[2] or 0),
+                        threat_type=r[3]) for r in rows]

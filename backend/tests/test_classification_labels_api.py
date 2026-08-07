@@ -85,3 +85,56 @@ async def test_statistics_top_domains_raw_path_includes_labels(db_session, async
     top = {d["domain"]: d for d in r.json()["top_domains"]}
     assert top["i.instagram.com"]["app_name"] == "Instagram"
     assert top["i.instagram.com"]["category"] == "Social"
+
+
+async def _threat_query(db, domain='evil.com', threat='malware'):
+    from datetime import datetime, timezone
+    from backend.models import Query, DomainLabel
+    db.add(Query(domain=domain, client_ip='10.0.0.5',
+                 timestamp=datetime.now(timezone.utc), query_type='A',
+                 status='OK', server='pihole1'))
+    db.add(DomainLabel(domain=domain, threat_type=threat, threat_source='qfeeds'))
+    await db.commit()
+
+
+async def test_queries_endpoint_exposes_threat_type(async_admin_client, db_session):
+    await _threat_query(db_session)
+    r = await async_admin_client.get("/api/queries")
+    assert r.status_code == 200
+    assert next(q for q in r.json() if q['domain'] == 'evil.com')['threat_type'] == 'malware'
+
+
+async def test_clean_domain_has_null_threat_type(async_admin_client, db_session):
+    from datetime import datetime, timezone
+    from backend.models import Query, DomainLabel
+    db_session.add(Query(domain='good.com', client_ip='10.0.0.5',
+                         timestamp=datetime.now(timezone.utc), query_type='A',
+                         status='OK', server='pihole1'))
+    db_session.add(DomainLabel(domain='good.com', app_name='Good', category='Software'))
+    await db_session.commit()
+
+    r = await async_admin_client.get("/api/queries")
+    row = next(q for q in r.json() if q['domain'] == 'good.com')
+    assert row['threat_type'] is None
+    assert row['app_name'] == 'Good'
+
+
+async def test_classify_label_exposes_threat_type(async_admin_client, db_session):
+    """The route hand-builds its response, so this does not come for free."""
+    await _threat_query(db_session, domain='bad.example')
+    r = await async_admin_client.get("/api/classify/label?domain=bad.example")
+    assert r.status_code == 200
+    assert r.json()['threat_type'] == 'malware'
+
+
+async def test_uncategorized_domains_expose_threat_type(async_admin_client, db_session):
+    from backend.models import DomainLabel, DomainStatsHourly, utcnow
+    db_session.add(DomainStatsHourly(hour=utcnow(), server='pihole1',
+                                     domain='evil2.example', total=5, blocked=0))
+    db_session.add(DomainLabel(domain='evil2.example', threat_type='malware',
+                               threat_source='qfeeds'))
+    await db_session.commit()
+
+    r = await async_admin_client.get("/api/insights/uncategorized-domains?period=24h")
+    assert r.status_code == 200
+    assert next(d for d in r.json() if d['domain'] == 'evil2.example')['threat_type'] == 'malware'

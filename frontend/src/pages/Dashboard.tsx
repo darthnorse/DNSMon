@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { statsApi, queryApi, domainApi } from '../utils/api';
 import { getErrorMessage } from '../utils/errors';
 import { formatDomainLabel } from '../utils/labels';
+import ThreatBadge from '../components/ThreatBadge';
 import ClassifyDomainModal from '../components/ClassifyDomainModal';
 import type { Stats, Query } from '../types';
 import { format } from 'date-fns';
@@ -290,8 +291,11 @@ export default function Dashboard() {
                   <div className="flex justify-between items-start">
                     <div className="flex-1 min-w-0">
                       <div className="font-medium text-gray-900 dark:text-white truncate" title={query.domain}>{query.domain}</div>
-                      {appLabel && (
-                        <div className="text-xs text-gray-500 dark:text-gray-400 truncate" title={appLabel}>{appLabel}</div>
+                      {(appLabel || query.threat_type) && (
+                        <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 truncate" title={appLabel}>
+                          {appLabel && <span className="truncate">{appLabel}</span>}
+                          <ThreatBadge threatType={query.threat_type} />
+                        </div>
                       )}
                       <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                         {format(new Date(query.timestamp), 'MMM dd, HH:mm:ss')}
@@ -413,8 +417,11 @@ export default function Dashboard() {
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-300 max-w-xs">
                           <div className="truncate" title={query.domain}>{query.domain}</div>
-                          {appLabel && (
-                            <div className="text-xs text-gray-500 dark:text-gray-400 truncate" title={appLabel}>{appLabel}</div>
+                          {(appLabel || query.threat_type) && (
+                            <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 truncate" title={appLabel}>
+                              {appLabel && <span className="truncate">{appLabel}</span>}
+                              <ThreatBadge threatType={query.threat_type} />
+                            </div>
                           )}
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-300">

@@ -41,7 +41,8 @@ async def search_queries(
     - search: searches across domain, client_ip, and client_hostname (OR)
     - domain/client_ip/client_hostname: specific field filters (AND)
     """
-    stmt = select(Query, DomainLabel.app_name, DomainLabel.category).outerjoin(
+    stmt = select(Query, DomainLabel.app_name, DomainLabel.category,
+                  DomainLabel.threat_type).outerjoin(
         DomainLabel, Query.domain == DomainLabel.domain
     )
     conditions = []
@@ -114,7 +115,8 @@ async def search_queries(
         server=q.server,
         app_name=app_name,
         category=category,
-    ) for q, app_name, category in rows]
+        threat_type=threat_type,
+    ) for q, app_name, category, threat_type in rows]
 
 
 @router.get("/queries/count")

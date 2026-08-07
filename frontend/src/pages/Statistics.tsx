@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { statisticsApi, settingsApi } from '../utils/api';
 import { getErrorMessage } from '../utils/errors';
 import { formatDomainLabel } from '../utils/labels';
+import ThreatBadge from '../components/ThreatBadge';
 import ClassifyDomainModal from '../components/ClassifyDomainModal';
 import type { Statistics, PiholeServer, ClientInfo } from '../types';
 import { format } from 'date-fns';
@@ -670,6 +671,7 @@ export default function StatisticsPage() {
               rank: i + 1,
               label: d.domain,
               sublabel: formatDomainLabel(d.app_name, d.category) || undefined,
+              threatType: d.threat_type,
               value: d.count,
             }))}
             onItemClick={setClassifyTarget}
@@ -685,6 +687,7 @@ export default function StatisticsPage() {
               rank: i + 1,
               label: d.domain,
               sublabel: formatDomainLabel(d.app_name, d.category) || undefined,
+              threatType: d.threat_type,
               value: d.count,
             }))}
             highlight="red"
@@ -829,6 +832,7 @@ interface TopListItem {
   rank: number;
   label: string;
   sublabel?: string;
+  threatType?: string | null;
   value: number;
 }
 
@@ -876,9 +880,10 @@ function TopList({ items, highlight, onItemClick }: { items: TopListItem[]; high
                 {item.value.toLocaleString()}
               </span>
             </div>
-            {item.sublabel && (
-              <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                {item.sublabel}
+            {(item.sublabel || item.threatType) && (
+              <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 truncate">
+                {item.sublabel && <span className="truncate">{item.sublabel}</span>}
+                <ThreatBadge threatType={item.threatType ?? null} />
               </div>
             )}
             <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5">

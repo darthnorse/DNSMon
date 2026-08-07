@@ -12,6 +12,7 @@ import {
 } from 'recharts';
 import { insightsApi } from '../utils/api';
 import type { AppUsage, CategoryUsage, DomainUsage } from '../types';
+import ThreatBadge from '../components/ThreatBadge';
 import ClassifyDomainModal from '../components/ClassifyDomainModal';
 
 const COLORS = [
@@ -238,7 +239,10 @@ export default function Insights() {
                 <ul className="divide-y divide-gray-100 dark:divide-gray-700">
                   {uncat.map((d) => (
                     <li key={d.domain} className="flex items-center justify-between py-1.5 text-sm">
-                      <span className="font-mono text-gray-800 dark:text-gray-200 break-all">{d.domain}</span>
+                      <span className="flex items-center gap-1.5 min-w-0">
+                        <span className="font-mono text-gray-800 dark:text-gray-200 break-all">{d.domain}</span>
+                        <ThreatBadge threatType={d.threat_type} />
+                      </span>
                       <span className="flex items-center gap-3 shrink-0">
                         <span className="text-gray-500 dark:text-gray-400">{d.total.toLocaleString()}</span>
                         <button
@@ -309,7 +313,10 @@ export default function Insights() {
                             className="hover:bg-gray-50 dark:hover:bg-gray-700/50"
                           >
                             <td className="px-4 py-3 text-sm font-mono text-gray-900 dark:text-white">
-                              {row.domain}
+                              <span className="flex items-center gap-1.5">
+                                {row.domain}
+                                <ThreatBadge threatType={row.threat_type} />
+                              </span>
                             </td>
                             <td className="px-4 py-3 text-sm text-right text-gray-700 dark:text-gray-300">
                               {row.total.toLocaleString()}

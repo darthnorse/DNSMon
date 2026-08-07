@@ -124,6 +124,7 @@ async def get_label(domain: str = Query(..., min_length=1, max_length=255),
         "app_name": label.app_name if label else None,
         "category": label.category if label else None,
         "matched_source": label.matched_source if label else None,
+        "threat_type": label.threat_type if label else None,
     }
 
 

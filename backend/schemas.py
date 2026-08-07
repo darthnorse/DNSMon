@@ -78,6 +78,7 @@ class QueryResponse(BaseModel):
     server: str
     app_name: Optional[str] = None
     category: Optional[str] = None
+    threat_type: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -557,6 +558,7 @@ class DomainUsage(BaseModel):
     domain: str
     total: int
     blocked: int
+    threat_type: Optional[str] = None
 
 
 class ClassifySuggestions(BaseModel):

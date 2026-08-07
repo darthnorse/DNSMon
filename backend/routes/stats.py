@@ -25,16 +25,18 @@ def _select_top_domains_with_labels(agg):
     subquery's LIMIT selected — a bare subquery select has no guaranteed order."""
     sub = agg.subquery()
     return (
-        select(sub.c.domain, sub.c.count, DomainLabel.app_name, DomainLabel.category)
+        select(sub.c.domain, sub.c.count, DomainLabel.app_name, DomainLabel.category,
+               DomainLabel.threat_type)
         .outerjoin(DomainLabel, sub.c.domain == DomainLabel.domain)
         .order_by(sub.c.count.desc())
     )
 
 
 def _top_domain_rows(result):
-    """Serialize labeled top-domain rows as (domain, count, app_name, category) dicts."""
+    """Serialize labeled top-domain rows as dicts."""
     return [
-        {"domain": row[0], "count": row[1], "app_name": row[2], "category": row[3]}
+        {"domain": row[0], "count": row[1], "app_name": row[2], "category": row[3],
+         "threat_type": row[4]}
         for row in result
     ]
 
