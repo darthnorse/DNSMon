@@ -39,6 +39,7 @@ import type {
   AppUsage,
   CategoryUsage,
   DomainUsage,
+  ThreatSummary,
   InsightsParams,
   AppDefinition,
   AppDefinitionCreate,
@@ -439,6 +440,10 @@ export const insightsApi = {
   },
   categories: async (params?: InsightsParams): Promise<CategoryUsage[]> => {
     const response = await api.get<CategoryUsage[]>('/insights/categories', { params });
+    return response.data;
+  },
+  threats: async (period: string = '24h'): Promise<ThreatSummary> => {
+    const response = await api.get<ThreatSummary>('/insights/threats', { params: { period } });
     return response.data;
   },
   appDomains: async (app_name: string, params?: InsightsParams): Promise<DomainUsage[]> => {

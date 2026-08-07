@@ -406,6 +406,12 @@ export interface CategoryUsage {
   blocked: number;
 }
 
+export interface ThreatSummary {
+  total: number;
+  top_domains: Array<{ domain: string; threat_type: string; count: number }>;
+  top_clients: Array<{ client_ip: string; client_hostname: string | null; count: number }>;
+}
+
 export interface DomainUsage {
   domain: string;
   total: number;

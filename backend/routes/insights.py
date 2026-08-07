@@ -155,3 +155,53 @@ async def get_uncategorized_domains(
     rows = await db.execute(stmt)
     return [DomainUsage(domain=r[0], total=int(r[1] or 0), blocked=int(r[2] or 0),
                         threat_type=r[3]) for r in rows]
+
+
+@router.get("/threats")
+async def get_threats(
+    period: str = "24h", servers: Optional[str] = None, clients: Optional[str] = None,
+    from_date: Optional[str] = None, to_date: Optional[str] = None,
+    db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user),
+):
+    """Malicious-query summary: total, top flagged domains, top clients hitting them.
+
+    Reads raw queries rather than the hourly rollup because the rollup carries no
+    client_ip and this breaks down by client."""
+    start, end = _resolve_period(period, from_date, to_date)
+    server_list = _server_list(servers)
+    client_list = _server_list(clients)
+
+    def base(*columns):
+        stmt = (select(*columns)
+                .join(DomainLabel, DomainLabel.domain == Query.domain)
+                .where(Query.timestamp >= start, DomainLabel.threat_type.isnot(None)))
+        if end:
+            stmt = stmt.where(Query.timestamp <= end)
+        if server_list:
+            stmt = stmt.where(Query.server.in_(server_list))
+        if client_list:
+            stmt = stmt.where(Query.client_ip.in_(client_list))
+        return stmt
+
+    total = await db.scalar(base(func.count(Query.id))) or 0
+
+    domain_rows = (await db.execute(
+        base(Query.domain, DomainLabel.threat_type, func.count(Query.id).label('c'))
+        .group_by(Query.domain, DomainLabel.threat_type)
+        .order_by(func.count(Query.id).desc()).limit(10)
+    )).all()
+
+    client_rows = (await db.execute(
+        base(Query.client_ip, func.max(Query.client_hostname).label('hostname'),
+             func.count(Query.id).label('c'))
+        .group_by(Query.client_ip)
+        .order_by(func.count(Query.id).desc()).limit(10)
+    )).all()
+
+    return {
+        'total': int(total),
+        'top_domains': [{'domain': d, 'threat_type': t, 'count': int(c)}
+                        for d, t, c in domain_rows],
+        'top_clients': [{'client_ip': ip, 'client_hostname': host, 'count': int(c)}
+                        for ip, host, c in client_rows],
+    }

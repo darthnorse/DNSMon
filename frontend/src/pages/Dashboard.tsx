@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { statsApi, queryApi, domainApi } from '../utils/api';
+import { statsApi, queryApi, domainApi, insightsApi } from '../utils/api';
 import { getErrorMessage } from '../utils/errors';
 import { formatDomainLabel } from '../utils/labels';
 import ThreatBadge from '../components/ThreatBadge';
 import ClassifyDomainModal from '../components/ClassifyDomainModal';
-import type { Stats, Query } from '../types';
+import type { Stats, Query, ThreatSummary } from '../types';
 import { format } from 'date-fns';
 
 function isBlocked(query: Query): boolean {
@@ -23,6 +23,7 @@ function Spinner({ className }: { className: string }) {
 
 export default function Dashboard() {
   const [stats, setStats] = useState<Stats | null>(null);
+  const [threats, setThreats] = useState<ThreatSummary | null>(null);
   const [queries, setQueries] = useState<Query[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [hideSystemQueries, setHideSystemQueries] = useState(() => {
@@ -90,12 +91,14 @@ export default function Dashboard() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [statsData, queriesData] = await Promise.all([
+      const [statsData, queriesData, threatData] = await Promise.all([
         statsApi.get(),
-        queryApi.search({ limit: 1000 })
+        queryApi.search({ limit: 1000 }),
+        insightsApi.threats().catch(() => null),
       ]);
       setStats(statsData);
       setQueries(queriesData);
+      setThreats(threatData);
       setError(null);
     } catch (err) {
       setError('Failed to load data');
@@ -197,7 +200,7 @@ export default function Dashboard() {
     <div className="space-y-6">
       <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
 
-      <div className="grid grid-cols-1 gap-4 sm:gap-5 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:gap-5 sm:grid-cols-3">
         <div className="bg-white dark:bg-gray-800 overflow-hidden shadow rounded-lg">
           <div className="px-4 py-5 sm:p-6">
             <dt className="text-sm font-medium text-gray-500 dark:text-gray-400 truncate">Queries (24h)</dt>
@@ -213,6 +216,51 @@ export default function Dashboard() {
             <dd className="mt-1 text-3xl font-semibold text-red-600 dark:text-red-500">
               {stats.blocks_last_24h.toLocaleString()}
             </dd>
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-gray-800 overflow-hidden shadow rounded-lg">
+          <div className="px-4 py-5 sm:p-6">
+            <dt className="text-sm font-medium text-gray-500 dark:text-gray-400 truncate">
+              Malicious queries (24h)
+            </dt>
+            <dd className={`mt-1 text-3xl font-semibold ${
+              threats && threats.total > 0
+                ? 'text-red-600 dark:text-red-500'
+                : 'text-gray-900 dark:text-white'
+            }`}>
+              {threats ? threats.total.toLocaleString() : '—'}
+            </dd>
+            {threats && threats.total === 0 && (
+              <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                No queries to flagged domains.
+              </p>
+            )}
+            {threats && threats.total > 0 && (
+              <div className="mt-3 space-y-1">
+                {threats.top_domains.slice(0, 3).map((d) => (
+                  <div key={d.domain} className="flex justify-between gap-2 text-xs">
+                    <span className="truncate font-mono text-gray-700 dark:text-gray-300" title={d.domain}>
+                      {d.domain}
+                    </span>
+                    <span className="shrink-0 text-gray-500 dark:text-gray-400">
+                      {d.count.toLocaleString()}
+                    </span>
+                  </div>
+                ))}
+                {threats.top_clients.slice(0, 2).map((c) => (
+                  <div key={c.client_ip} className="flex justify-between gap-2 text-xs">
+                    <span className="truncate text-gray-500 dark:text-gray-400"
+                          title={c.client_hostname ?? c.client_ip}>
+                      {c.client_hostname || c.client_ip}
+                    </span>
+                    <span className="shrink-0 text-gray-500 dark:text-gray-400">
+                      {c.count.toLocaleString()}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>

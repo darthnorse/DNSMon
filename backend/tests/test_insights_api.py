@@ -96,3 +96,66 @@ async def test_uncategorized_domains_respects_custom_range_upper_bound(async_adm
     domains = [row["domain"] for row in r.json()]
     assert "inrange-uncat.com" in domains
     assert "today-uncat.com" not in domains   # excluded by the to_date upper bound
+
+
+async def _flag(db, domain, threat='malware'):
+    from backend.models import DomainLabel
+    db.add(DomainLabel(domain=domain, threat_type=threat, threat_source='qfeeds'))
+
+
+async def test_threats_endpoint_counts_malicious_queries(async_admin_client, db_session):
+    from datetime import datetime, timezone, timedelta
+    from backend.models import Query, DomainLabel
+
+    now = datetime.now(timezone.utc)
+    # idx_queries_unique is (timestamp, domain, client_ip, server) — vary the time.
+    for i in range(3):
+        db_session.add(Query(domain='evil.com', client_ip='10.0.0.5',
+                             client_hostname='laptop', timestamp=now - timedelta(seconds=i),
+                             query_type='A', status='OK', server='pihole1'))
+    db_session.add(Query(domain='good.com', client_ip='10.0.0.6', timestamp=now,
+                         query_type='A', status='OK', server='pihole1'))
+    await _flag(db_session, 'evil.com')
+    db_session.add(DomainLabel(domain='good.com'))
+    await db_session.commit()
+
+    r = await async_admin_client.get("/api/insights/threats?period=24h")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body['total'] == 3
+    assert body['top_domains'][0] == {'domain': 'evil.com', 'threat_type': 'malware', 'count': 3}
+    assert body['top_clients'][0]['client_ip'] == '10.0.0.5'
+    assert body['top_clients'][0]['client_hostname'] == 'laptop'
+    assert body['top_clients'][0]['count'] == 3
+
+
+async def test_threats_endpoint_empty_when_nothing_flagged(async_admin_client):
+    r = await async_admin_client.get("/api/insights/threats?period=24h")
+    assert r.status_code == 200
+    assert r.json() == {'total': 0, 'top_domains': [], 'top_clients': []}
+
+
+async def test_threats_endpoint_honours_the_period(async_admin_client, db_session):
+    from datetime import datetime, timezone, timedelta
+    from backend.models import Query
+
+    old = datetime.now(timezone.utc) - timedelta(days=10)
+    db_session.add(Query(domain='evil.com', client_ip='10.0.0.5', timestamp=old,
+                         query_type='A', status='OK', server='pihole1'))
+    await _flag(db_session, 'evil.com')
+    await db_session.commit()
+
+    assert (await async_admin_client.get(
+        "/api/insights/threats?period=24h")).json()['total'] == 0
+    assert (await async_admin_client.get(
+        "/api/insights/threats?period=30d")).json()['total'] == 1
+
+
+async def test_threats_endpoint_requires_auth(async_client):
+    r = await async_client.get("/api/insights/threats?period=24h")
+    assert r.status_code == 401
+
+
+async def test_threats_endpoint_allows_readonly(async_readonly_client):
+    r = await async_readonly_client.get("/api/insights/threats?period=24h")
+    assert r.status_code == 200
