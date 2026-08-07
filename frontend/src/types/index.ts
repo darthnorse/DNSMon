@@ -526,6 +526,7 @@ export interface InsightSource {
   license: string | null;
   enabled: boolean;
   has_api_key: boolean;
+  requires_api_key: boolean;
   last_fetched_at: string | null;
   last_status: 'ok' | 'error' | null;
   last_error: string | null;

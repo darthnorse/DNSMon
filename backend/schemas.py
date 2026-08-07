@@ -116,7 +116,29 @@ class AlertRuleCreate(BaseModel):
         return _validate_exclude_client_ips(v)
 
 
-class AlertRuleUpdate(BaseModel):
+class RejectsExplicitNulls(BaseModel):
+    """Partial-update base that refuses JSON null for response-required fields.
+
+    Persisting a null for a field the response declares non-Optional writes a
+    row the list endpoint can no longer serialise, taking down every caller —
+    not just the one that sent it. _NOT_NULL_FIELDS is populated from the paired
+    response model, so a new non-Optional response field is protected
+    automatically.
+    """
+
+    _NOT_NULL_FIELDS: ClassVar[Tuple[str, ...]] = ()
+
+    @model_validator(mode='before')
+    @classmethod
+    def reject_explicit_null_for_required(cls, data):
+        if isinstance(data, dict):
+            for key in cls._NOT_NULL_FIELDS:
+                if key in data and data[key] is None:
+                    raise ValueError(f"{key} cannot be null; omit the field to leave it unchanged")
+        return data
+
+
+class AlertRuleUpdate(RejectsExplicitNulls):
     name: Optional[str] = PydanticField(default=None, max_length=100)
     description: Optional[str] = PydanticField(default=None, max_length=500)
     domain_pattern: Optional[str] = PydanticField(default=None, max_length=5000)
@@ -128,24 +150,10 @@ class AlertRuleUpdate(BaseModel):
     match_status: Optional[MatchStatus] = None
     enabled: Optional[bool] = None
 
-    # Populated below from AlertRuleResponse.model_fields. Any field that the
-    # response declares as non-Optional cannot be set to JSON null on update
-    # without breaking serialization downstream.
-    _NOT_NULL_FIELDS: ClassVar[Tuple[str, ...]] = ()
-
     @field_validator('exclude_client_ips')
     @classmethod
     def check_exclude_client_ips(cls, v):
         return _validate_exclude_client_ips(v)
-
-    @model_validator(mode='before')
-    @classmethod
-    def reject_explicit_null_for_required(cls, data):
-        if isinstance(data, dict):
-            for key in cls._NOT_NULL_FIELDS:
-                if key in data and data[key] is None:
-                    raise ValueError(f"{key} cannot be null; omit the field to leave it unchanged")
-        return data
 
 
 class AlertRuleResponse(BaseModel):
@@ -188,12 +196,14 @@ def _response_required_field_names(response_cls: type) -> Tuple[str, ...]:
     return tuple(out)
 
 
-# Auto-sync the null-rejection set with whatever AlertRuleResponse considers
-# required, intersected with what AlertRuleUpdate accepts. Adding a new
-# non-Optional field to the response automatically extends protection.
-_RESPONSE_REQUIRED = set(_response_required_field_names(AlertRuleResponse))
-_UPDATE_FIELDS = set(AlertRuleUpdate.model_fields.keys())
-AlertRuleUpdate._NOT_NULL_FIELDS = tuple(sorted(_RESPONSE_REQUIRED & _UPDATE_FIELDS))
+def _bind_not_null_fields(update_cls, response_cls) -> None:
+    """Protect every field the response declares non-Optional and the update accepts,
+    so adding a non-Optional response field extends the guard automatically."""
+    required = set(_response_required_field_names(response_cls))
+    update_cls._NOT_NULL_FIELDS = tuple(sorted(required & set(update_cls.model_fields.keys())))
+
+
+_bind_not_null_fields(AlertRuleUpdate, AlertRuleResponse)
 
 
 # ============================================================================
@@ -637,10 +647,11 @@ class InsightSourceResponse(BaseModel):
     format: str
     license: Optional[str]
     enabled: bool
-    has_api_key: bool = False
+    has_api_key: bool
+    requires_api_key: bool
     last_fetched_at: Optional[datetime]
     last_status: Optional[str]
-    last_error: Optional[str] = None
+    last_error: Optional[str]
     domain_count: Optional[int]
     created_at: datetime
     updated_at: datetime
@@ -656,6 +667,11 @@ class InsightSourceResponse(BaseModel):
         return v
 
 
-class InsightSourceUpdate(BaseModel):
+class InsightSourceUpdate(RejectsExplicitNulls):
     enabled: Optional[bool] = None
-    api_key: Optional[str] = PydanticField(default=None, max_length=512)
+    # No max_length: pydantic's 422 echoes the rejected input, and this one
+    # is a secret. The route bounds it instead.
+    api_key: Optional[str] = None
+
+
+_bind_not_null_fields(InsightSourceUpdate, InsightSourceResponse)

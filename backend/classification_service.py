@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import re
+from http import HTTPStatus
 from pathlib import Path
 from typing import Optional
 
@@ -51,6 +52,12 @@ _THREAT_TYPE_MAX = 20
 # The real feed carries ~127k domains; anything near this is an error page.
 _QFEEDS_MIN_DOMAINS = 100
 
+# A halving guard would still admit an upstream serving exactly half each
+# time; 80% leaves no such step, while tolerating real feed churn.
+_QFEEDS_MIN_RETAINED_PCT = 80
+
+_NO_DOMAINS_ERROR = 'Feed returned no usable domains'
+
 # httpx errors stringify with the full request URL, so an API-key query param
 # would otherwise land in the logs verbatim on any fetch failure.
 _SECRET_PARAM_RE = re.compile(r'(api_token=)[^&\s]+')
@@ -68,7 +75,14 @@ def _describe_fetch_error(e: Exception) -> str:
     noise in a 200-char column an admin reads to fix their config.
     """
     if isinstance(e, httpx.HTTPStatusError):
-        return f"HTTP {e.response.status_code} {e.response.reason_phrase}".strip()
+        # Canonical phrase, not e.response.reason_phrase: that is upstream-
+        # controlled text landing in a column readonly users can read.
+        code = e.response.status_code
+        try:
+            return f"HTTP {code} {HTTPStatus(code).phrase}"
+        except ValueError:
+            return f"HTTP {code}"
+
     if isinstance(e, httpx.TimeoutException):
         return "Timed out contacting the feed"
     if isinstance(e, httpx.TransportError):
@@ -312,6 +326,7 @@ class ClassificationService:
         mapping) keeps the existing tier and returns -1."""
         mapping = _load_v2fly_map()
         if not mapping:
+            self._last_fetch_error = "Bundled v2fly mapping is missing or unreadable"
             return -1
         text = await self._safe_fetch(row.url, 'v2fly list')
         if text is None:
@@ -340,24 +355,29 @@ class ClassificationService:
         domains = parse_blocklist_text(text)
         if not domains:
             logger.error("Q-Feeds list yielded 0 domains; keeping existing tier")
-            self._last_fetch_error = "Feed returned no usable domains"
+            self._last_fetch_error = _NO_DOMAINS_ERROR
             return -1
         # A 200 maintenance page can still contain one domain-shaped token; without
-        # this floor it would replace the whole tier and still report ok.
+        # this floor it would replace the whole tier and still report ok. Anchored
+        # to the high-water mark, not the current count, so an upstream serving
+        # half each time cannot walk the tier down one accepted refresh at a time.
         existing = await self._source_domain_count(db, 'qfeeds')
+        anchor = max(existing, row.domain_count_high_water or 0)
         if len(domains) < _QFEEDS_MIN_DOMAINS or (
-                existing and len(domains) < existing // 2):
+                len(domains) * 100 < anchor * _QFEEDS_MIN_RETAINED_PCT):
             logger.error(
-                f"Q-Feeds returned {len(domains)} domains (had {existing}); "
+                f"Q-Feeds returned {len(domains)} domains (peak {anchor}); "
                 "implausible, keeping existing tier")
             self._last_fetch_error = (
-                f"Feed returned only {len(domains)} domains; refused as implausible")
+                f"Feed returned {len(domains)} domains vs a peak of {anchor}; "
+                "refused as implausible. Disable and re-enable to accept a new baseline.")
             return -1
         n = await self._replace_source(db, 'qfeeds', [{
             'slug': 'malware', 'name': 'Malware', 'category': None,
             'is_category_only': False,
             'domains': [(d, False) for d in sorted(domains)],
         }])
+        row.domain_count_high_water = max(anchor, len(domains))
         logger.info(f"Loaded {len(domains)} Q-Feeds malware domains")
         return n
 
@@ -449,6 +469,7 @@ class ClassificationService:
         # so src.format is advisory metadata today (no per-format branching needed).
         fetched: list[tuple[str, set[str]]] = []
         for src in sources:
+            self._last_fetch_error = None
             text = await self._safe_fetch(src.url, f"blocklist {src.name}")
             if text is None:
                 src.last_status = 'error'
@@ -460,7 +481,7 @@ class ClassificationService:
                 # must not wipe the tier — mark it an error and keep prior data.
                 logger.error(f"Blocklist {src.name} yielded 0 domains; treating as error")
                 src.last_status = 'error'
-                src.last_error = 'Feed returned no usable domains'
+                src.last_error = _NO_DOMAINS_ERROR
                 continue
             src.last_status = 'ok'
             src.last_error = None
@@ -606,6 +627,7 @@ class ClassificationService:
         loaders = {'adguard': self.refresh_feed, 'dnsmon': self.load_dnsmon,
                    'v2fly': self.load_v2fly, 'qfeeds': self.load_qfeeds}
         refresh = loaders[row.kind]
+        self._last_fetch_error = None
         n = await refresh(db, row)
         row.last_status = 'ok' if n >= 0 else 'error'
         if n >= 0:

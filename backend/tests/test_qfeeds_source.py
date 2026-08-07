@@ -8,6 +8,7 @@ from backend.classification_service import (
     _scrub_secrets,
 )
 from backend.constants import QFEEDS_FEED_URL
+from backend.models import InsightSource
 
 
 def test_scrubs_token_in_url():
@@ -75,6 +76,7 @@ class _Row:
         self.api_key = api_key
         self.kind = 'qfeeds'
         self.name = 'Q-Feeds Malware Domains'
+        self.domain_count_high_water = None
 
 
 async def _returns(value):
@@ -201,3 +203,156 @@ def test_describe_fetch_error_passes_through_value_errors():
     from backend.classification_service import _describe_fetch_error
     assert _describe_fetch_error(ValueError('unsafe fetch target: loopback')) == \
         'unsafe fetch target: loopback'
+
+
+async def test_singleton_refresh_records_a_scrubbed_last_error(db_session, monkeypatch):
+    row = InsightSource(name='Q-Feeds', url=QFEEDS_FEED_URL, kind='qfeeds',
+                        format='domains', enabled=True, api_key='tip_abc')
+    db_session.add(row)
+    await db_session.commit()
+
+    svc = ClassificationService()
+
+    async def failing_fetch(url, what):
+        svc._last_fetch_error = f"403 for {url}"
+        return None
+
+    monkeypatch.setattr(svc, '_safe_fetch', failing_fetch)
+    await svc._refresh_singleton_row(db_session, row)
+
+    assert row.last_status == 'error'
+    assert row.last_error
+    assert 'tip_abc' not in row.last_error
+    assert 'api_token=***' in row.last_error
+
+
+async def test_successful_refresh_clears_last_error(db_session, monkeypatch):
+    row = InsightSource(name='Q-Feeds', url=QFEEDS_FEED_URL, kind='qfeeds',
+                        format='domains', enabled=True, api_key='tip_abc',
+                        last_error='stale failure')
+    db_session.add(row)
+    await db_session.commit()
+
+    svc = ClassificationService()
+    feed = "\n".join(f"evil{i}.example" for i in range(150))
+    monkeypatch.setattr(svc, '_safe_fetch', lambda url, what: _returns(feed))
+    await svc._refresh_singleton_row(db_session, row)
+
+    assert row.last_status == 'ok'
+    assert row.last_error is None
+
+
+async def test_last_error_is_bounded_to_the_column_width(db_session, monkeypatch):
+    """last_error is VARCHAR(200); an unbounded httpx string would abort the commit."""
+    row = InsightSource(name='Q-Feeds', url=QFEEDS_FEED_URL, kind='qfeeds',
+                        format='domains', enabled=True, api_key='tip_abc')
+    db_session.add(row)
+    await db_session.commit()
+
+    svc = ClassificationService()
+
+    async def failing_fetch(url, what):
+        svc._last_fetch_error = 'x' * 5000
+        return None
+
+    monkeypatch.setattr(svc, '_safe_fetch', failing_fetch)
+    await svc._refresh_singleton_row(db_session, row)
+    await db_session.commit()
+
+    assert len(row.last_error) == 200
+
+
+def test_describe_fetch_error_ignores_the_upstream_reason_phrase():
+    """reason_phrase is attacker-influenced text bound for a column readonly
+    users can read, and _scrub_secrets only masks `api_token=`-prefixed values."""
+    from backend.classification_service import _describe_fetch_error
+    resp = httpx.Response(401, request=httpx.Request('GET', 'https://x/y'))
+    resp.extensions['reason_phrase'] = b'leaked tip_fake_leaked_token'
+    e = httpx.HTTPStatusError('boom', request=resp.request, response=resp)
+    out = _describe_fetch_error(e)
+    assert out == 'HTTP 401 Unauthorized'
+    assert 'tip_fake_leaked' not in out
+
+
+def test_describe_fetch_error_handles_an_unknown_status_code():
+    from backend.classification_service import _describe_fetch_error
+    resp = httpx.Response(599, request=httpx.Request('GET', 'https://x/y'))
+    e = httpx.HTTPStatusError('boom', request=resp.request, response=resp)
+    assert _describe_fetch_error(e) == 'HTTP 599'
+
+
+async def test_v2fly_missing_map_does_not_inherit_another_sources_error(
+        db_session, monkeypatch):
+    """load_v2fly returns -1 without calling _safe_fetch, so a per-fetch reset
+    alone would stamp it with the previous source's failure."""
+    from backend.classification_service import ClassificationService
+    from backend.constants import V2FLY_FEED_URL
+
+    row = InsightSource(name='v2fly', url=V2FLY_FEED_URL, kind='v2fly',
+                        format='yaml', enabled=True)
+    db_session.add(row)
+    await db_session.commit()
+
+    svc = ClassificationService()
+    svc._last_fetch_error = "HTTP 401 Unauthorized"
+    monkeypatch.setattr('backend.classification_service._load_v2fly_map', lambda: {})
+
+    await svc._refresh_singleton_row(db_session, row)
+    assert row.last_status == 'error'
+    assert '401' not in (row.last_error or '')
+    assert 'v2fly mapping' in row.last_error
+
+
+async def test_repeated_halving_cannot_drain_the_tier(db_session, monkeypatch):
+    """Anchoring the guard to the current count makes it a ratchet: each accepted
+    refresh lowers the bar for the next, so serving exactly the maximum tolerated
+    shrink every time walks the tier to nothing while every step reports ok."""
+    from sqlalchemy import select, func
+    from backend.models import AppDomain
+    from backend.classification_service import ClassificationService
+
+    row = InsightSource(name='Q-Feeds', url=QFEEDS_FEED_URL + '&t=ratchet',
+                        kind='qfeeds', format='domains', enabled=True,
+                        api_key='tip_abc')
+    db_session.add(row)
+    await db_session.commit()
+
+    svc = ClassificationService()
+
+    def feed(n):
+        return "\n".join(f"evil{i}.example" for i in range(n))
+
+    monkeypatch.setattr(svc, '_safe_fetch', lambda url, what: _returns(feed(4000)))
+    assert await svc.load_qfeeds(db_session, row) == 1
+    assert row.domain_count_high_water == 4000
+
+    monkeypatch.setattr(svc, '_safe_fetch', lambda url, what: _returns(feed(2000)))
+    assert await svc.load_qfeeds(db_session, row) == -1
+
+    monkeypatch.setattr(svc, '_safe_fetch', lambda url, what: _returns(feed(1000)))
+    assert await svc.load_qfeeds(db_session, row) == -1
+
+    assert await db_session.scalar(
+        select(func.count()).select_from(AppDomain)) == 4000
+
+
+async def test_a_modest_shrink_is_still_accepted(db_session, monkeypatch):
+    from backend.classification_service import ClassificationService
+
+    row = InsightSource(name='Q-Feeds', url=QFEEDS_FEED_URL + '&t=shrink',
+                        kind='qfeeds', format='domains', enabled=True,
+                        api_key='tip_abc')
+    db_session.add(row)
+    await db_session.commit()
+
+    svc = ClassificationService()
+
+    def feed(n):
+        return "\n".join(f"evil{i}.example" for i in range(n))
+
+    monkeypatch.setattr(svc, '_safe_fetch', lambda url, what: _returns(feed(4000)))
+    await svc.load_qfeeds(db_session, row)
+
+    monkeypatch.setattr(svc, '_safe_fetch', lambda url, what: _returns(feed(3600)))
+    assert await svc.load_qfeeds(db_session, row) == 1
+    assert row.domain_count_high_water == 4000

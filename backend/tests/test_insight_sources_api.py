@@ -1,7 +1,16 @@
 """End-to-end tests for /api/insight-sources and blocklist exclusion."""
+import pytest
 from httpx import AsyncClient
 
+from backend.constants import QFEEDS_FEED_URL
 from backend.models import InsightSource, AppDefinition
+
+
+@pytest.fixture
+def no_refresh(monkeypatch):
+    """PATCH would otherwise spawn a real fetch against the live feed."""
+    monkeypatch.setattr(
+        "backend.routes.insight_sources._trigger_kind_refresh", lambda kind: None)
 
 
 async def _seed_source(db):
@@ -34,10 +43,7 @@ async def test_toggle_requires_admin(async_readonly_client: AsyncClient, db_sess
     assert r.status_code == 403
 
 
-async def test_toggle_updates_enabled(async_admin_client: AsyncClient, db_session, monkeypatch):
-    # Keep the test hermetic: the toggle would otherwise spawn a fire-and-forget
-    # refresh that opens its own session and fetches list URLs.
-    monkeypatch.setattr("backend.routes.insight_sources._trigger_kind_refresh", lambda kind: None)
+async def test_toggle_updates_enabled(async_admin_client: AsyncClient, db_session, no_refresh):
     src = await _seed_source(db_session)
     r = await async_admin_client.patch(
         f"/api/insight-sources/{src.id}", json={"enabled": False})
@@ -106,18 +112,6 @@ async def test_app_definitions_feed_domains_previewed_with_count(async_admin_cli
     assert len(by_slug["bigapp"]["domains"]) == 5  # previewed, not the full tier
     assert by_slug["manapp"]["domain_count"] == 8
     assert len(by_slug["manapp"]["domains"]) == 8  # manual apps keep full lists
-
-
-import pytest
-
-from backend.constants import QFEEDS_FEED_URL
-
-
-@pytest.fixture
-def no_refresh(monkeypatch):
-    """PATCH would otherwise spawn a real fetch against the live Q-Feeds API."""
-    monkeypatch.setattr(
-        "backend.routes.insight_sources._trigger_kind_refresh", lambda kind: None)
 
 
 async def _qfeeds_row(db, api_key=None, enabled=False):
@@ -218,3 +212,62 @@ async def test_last_error_is_exposed(async_admin_client: AsyncClient, db_session
 
     r = await async_admin_client.get("/api/insight-sources")
     assert next(s for s in r.json() if s["kind"] == "qfeeds")["last_error"] == "HTTP 403 from feed"
+
+
+async def test_explicit_null_enabled_is_rejected(
+        async_admin_client: AsyncClient, db_session, no_refresh):
+    """Persisting NULL would make the LIST endpoint 500 for every user, not
+    just the caller — the row can no longer satisfy `enabled: bool`."""
+    src = await _seed_source(db_session)
+    r = await async_admin_client.patch(
+        f"/api/insight-sources/{src.id}", json={"enabled": None})
+    assert r.status_code == 422
+
+    await db_session.refresh(src)
+    assert src.enabled is True
+
+    assert (await async_admin_client.get("/api/insight-sources")).status_code == 200
+
+
+async def test_overlong_api_key_is_not_echoed_back(
+        async_admin_client: AsyncClient, db_session, no_refresh):
+    row = await _qfeeds_row(db_session)
+    secret = "S3CRET" * 200
+    r = await async_admin_client.patch(
+        f"/api/insight-sources/{row.id}", json={"api_key": secret})
+    assert r.status_code == 400
+    assert secret not in r.text
+    assert "S3CRET" not in r.text
+
+
+async def test_clearing_a_key_on_an_enabled_source_explains_itself(
+        async_admin_client: AsyncClient, db_session, no_refresh):
+    row = await _qfeeds_row(db_session, api_key="tip_abc", enabled=True)
+    r = await async_admin_client.patch(
+        f"/api/insight-sources/{row.id}", json={"api_key": ""})
+    assert r.status_code == 400
+    assert "Disable this source" in r.json()["detail"]
+
+
+async def test_disabling_clears_the_stale_diagnostic(
+        async_admin_client: AsyncClient, db_session, no_refresh):
+    row = await _qfeeds_row(db_session, api_key="tip_abc", enabled=True)
+    row.last_status = "error"
+    row.last_error = "HTTP 401 Unauthorized"
+    db_session.add(row)
+    await db_session.commit()
+
+    r = await async_admin_client.patch(
+        f"/api/insight-sources/{row.id}", json={"enabled": False})
+    assert r.status_code == 200
+    assert r.json()["last_error"] is None
+    assert r.json()["last_status"] is None
+
+
+async def test_requires_api_key_is_server_driven(
+        async_admin_client: AsyncClient, db_session):
+    await _qfeeds_row(db_session)
+    await _seed_source(db_session)
+    rows = {s["kind"]: s for s in (await async_admin_client.get("/api/insight-sources")).json()}
+    assert rows["qfeeds"]["requires_api_key"] is True
+    assert rows["hosts"]["requires_api_key"] is False

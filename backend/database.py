@@ -110,6 +110,8 @@ async def _run_migrations(conn):
                   col_type='TEXT', default=None, nullable=True),
         Migration(table='insight_sources', column='last_error',
                   col_type='VARCHAR(200)', default=None, nullable=True),
+        Migration(table='insight_sources', column='domain_count_high_water',
+                  col_type='INTEGER', default=None, nullable=True),
     ]
     for m in migrations:
         result = await conn.execute(text(

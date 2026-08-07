@@ -103,8 +103,6 @@ export default function InsightSourcesSettings({ onError, onSuccess }: Props) {
     return kind === 'hosts' ? 'Categories' : 'Apps + Categories';
   };
 
-  const needsApiKey = (kind: string): boolean => kind === 'qfeeds';
-
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -189,10 +187,10 @@ export default function InsightSourcesSettings({ onError, onSuccess }: Props) {
                     </button>
                   </td>
                 </tr>
-                {(needsApiKey(src.kind) || src.last_error) && (
-                  <tr className="bg-gray-50 dark:bg-gray-900/40">
+                {(src.requires_api_key || src.last_error) && (
+                  <tr className={`bg-gray-50 dark:bg-gray-900/40 ${src.enabled ? '' : 'opacity-50'}`}>
                     <td colSpan={8} className="px-3 py-2">
-                      {needsApiKey(src.kind) && (
+                      {src.requires_api_key && (
                         <div className="flex items-center gap-2">
                           <label
                             htmlFor={`api-key-${src.id}`}
@@ -205,9 +203,10 @@ export default function InsightSourcesSettings({ onError, onSuccess }: Props) {
                             type="password"
                             autoComplete="off"
                             value={keyDrafts[src.id] ?? ''}
-                            onChange={(e) =>
-                              setKeyDrafts({ ...keyDrafts, [src.id]: e.target.value })
-                            }
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              setKeyDrafts((prev) => ({ ...prev, [src.id]: value }));
+                            }}
                             placeholder={
                               src.has_api_key
                                 ? '•••••••• (saved — type to replace)'

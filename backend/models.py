@@ -699,12 +699,22 @@ class InsightSource(Base):
     last_status = Column(String(20), nullable=True)  # ok|error
     last_error = Column(String(200), nullable=True)
     domain_count = Column(Integer, nullable=True)
+    # Anchors the shrink guard. Without it the guard ratchets: each accepted
+    # refresh lowers the bar for the next one, so repeated halving drains a
+    # feed to nothing while every step still reports ok.
+    domain_count_high_water = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     __table_args__ = (
         Index('idx_insight_sources_url', 'url', unique=True),
     )
+
+    @property
+    def requires_api_key(self) -> bool:
+        """Mirrors THREAT_SOURCES so the frontend need not duplicate that set."""
+        from .constants import THREAT_SOURCES
+        return self.kind in THREAT_SOURCES
 
     @property
     def has_api_key(self) -> bool:
@@ -724,6 +734,7 @@ class InsightSource(Base):
             'license': self.license,
             'enabled': self.enabled,
             'has_api_key': self.has_api_key,
+            'requires_api_key': self.requires_api_key,
             'last_fetched_at': self.last_fetched_at.isoformat() if self.last_fetched_at else None,
             'last_status': self.last_status,
             'last_error': self.last_error,

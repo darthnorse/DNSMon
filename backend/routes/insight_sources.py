@@ -14,6 +14,8 @@ from ._background import run_in_background
 
 router = APIRouter(prefix="/api/insight-sources", tags=["insight-sources"])
 
+MAX_API_KEY_LENGTH = 512
+
 
 def _trigger_full_refresh():
     svc = get_service().classification_service
@@ -45,16 +47,28 @@ async def update_source(source_id: int, payload: InsightSourceUpdate,
     key_changed = False
     if 'api_key' in fields:
         new_key = (fields['api_key'] or '').strip() or None
+        if new_key and len(new_key) > MAX_API_KEY_LENGTH:
+            raise HTTPException(status_code=400, detail="API key is too long")
         key_changed = src.api_key != new_key
         src.api_key = new_key
 
     enabled = fields.get('enabled', src.enabled)
-    if enabled and src.kind in THREAT_SOURCES and not src.api_key:
-        raise HTTPException(status_code=400,
-                            detail="API key required before enabling this source")
-
     toggled = src.enabled != enabled
+
+    if enabled and src.kind in THREAT_SOURCES and not src.api_key:
+        raise HTTPException(
+            status_code=400,
+            detail=("API key required before enabling this source" if toggled
+                    else "Disable this source before clearing its API key"))
+
     src.enabled = enabled
+    if toggled and not enabled:
+        # Otherwise the panel keeps showing the last failure of a feed the admin
+        # has deliberately turned off. Dropping the high-water mark also gives
+        # them the only way to accept a legitimately smaller feed.
+        src.last_status = None
+        src.last_error = None
+        src.domain_count_high_water = None
 
     await db.commit()
     await db.refresh(src)
