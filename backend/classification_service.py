@@ -45,6 +45,12 @@ _DOMAIN_INSERT_BATCH = 5000
 # Cap the fetched blocklist body to bound memory (pro.plus is ~13 MiB today).
 _MAX_BLOCKLIST_BYTES = 64 * 1024 * 1024
 
+# threat_type is VARCHAR(20) but its source, slug, is VARCHAR(100).
+_THREAT_TYPE_MAX = 20
+
+# The real feed carries ~127k domains; anything near this is an error page.
+_QFEEDS_MIN_DOMAINS = 100
+
 # httpx errors stringify with the full request URL, so an API-key query param
 # would otherwise land in the logs verbatim on any fetch failure.
 _SECRET_PARAM_RE = re.compile(r'(api_token=)[^&\s]+')
@@ -178,11 +184,8 @@ class ClassificationService:
 
     def __init__(self):
         self._lock = asyncio.Lock()
-        # Held resident so the alert engine can match newly-seen malware domains
-        # without a DB read; rebuilt and swapped on every refresh/reclassify.
+        # Resident so the alert engine can match newly-seen domains with no DB read.
         self._threat_matcher = ThreatMatcher()
-        # Last failure reason, consumed by the caller to populate
-        # InsightSource.last_error so a misconfigured feed says why.
         self._last_fetch_error: Optional[str] = None
 
     async def _replace_source(self, db: AsyncSession, source: str, defs: list[dict]) -> int:
@@ -301,11 +304,10 @@ class ClassificationService:
         return n
 
     async def load_qfeeds(self, db: AsyncSession, row) -> int:
-        """Fetch the Q-Feeds malware-domain list and replace the 'qfeeds' source.
+        """Fetch the Q-Feeds malware list and replace the 'qfeeds' source.
 
-        The feed is a plain newline-separated domain list, so parse_blocklist_text
-        handles it unchanged. Any failure (no key, fetch error, empty/unparseable
-        body) keeps the existing tier and returns -1."""
+        Any failure — no key, fetch error, empty or implausible body — keeps the
+        existing tier and returns -1."""
         if not row.api_key:
             logger.error("Q-Feeds source has no API key; skipping refresh")
             self._last_fetch_error = "API key required"
@@ -318,6 +320,17 @@ class ClassificationService:
         if not domains:
             logger.error("Q-Feeds list yielded 0 domains; keeping existing tier")
             self._last_fetch_error = "Feed returned no usable domains"
+            return -1
+        # A 200 maintenance page can still contain one domain-shaped token; without
+        # this floor it would replace the whole tier and still report ok.
+        existing = await self._source_domain_count(db, 'qfeeds')
+        if len(domains) < _QFEEDS_MIN_DOMAINS or (
+                existing and len(domains) < existing // 2):
+            logger.error(
+                f"Q-Feeds returned {len(domains)} domains (had {existing}); "
+                "implausible, keeping existing tier")
+            self._last_fetch_error = (
+                f"Feed returned only {len(domains)} domains; refused as implausible")
             return -1
         n = await self._replace_source(db, 'qfeeds', [{
             'slug': 'malware', 'name': 'Malware', 'category': None,
@@ -456,35 +469,32 @@ class ClassificationService:
         return matcher
 
     async def build_threat_matcher(self, db: AsyncSession) -> ThreatMatcher:
-        """Build the threat-only matcher — the complement of build_matcher.
-
-        The definition's slug is the threat type, which is what generalises if a
-        paid feed tier later adds phishing alongside malware."""
+        """The complement of build_matcher. A definition's slug is its threat
+        type, which generalises if a paid tier later adds phishing."""
         rows = await db.execute(
             select(AppDomain.domain, AppDefinition.slug, AppDefinition.source)
             .join(AppDefinition, AppDomain.app_id == AppDefinition.id)
             .where(AppDefinition.enabled == True, AppDomain.is_wildcard == False,
                    AppDefinition.source.in_(THREAT_SOURCES))
+            # add() is first-wins; unordered, a doubly-claimed domain would flip type.
+            .order_by(AppDefinition.source, AppDefinition.slug)
         )
         matcher = ThreatMatcher()
         for domain, slug, source in rows:
-            matcher.add(domain, threat_type=slug, threat_source=source)
+            matcher.add(domain, threat_type=slug[:_THREAT_TYPE_MAX],
+                        threat_source=source)
         return matcher
 
     def match_threat(self, fqdn: str) -> Optional[tuple[str, str]]:
-        """Threat status for a domain from the resident matcher, or None.
-
-        Safe to call before the first build — an empty matcher simply misses."""
+        """Threat status from the resident matcher, or None. Safe before the
+        first build — an empty matcher simply misses."""
         return self._threat_matcher.match(fqdn)
 
     async def prime_threat_matcher(self, db: AsyncSession) -> int:
-        """Load the already-persisted threat tier into the resident matcher.
+        """Load the persisted threat tier into the resident matcher (no network).
 
-        Pure DB read, no network. Required at startup because
-        _run_initial_ingestion runs ingest_and_alert() BEFORE
-        classification_task(), so a matcher populated only by reclassify would be
-        empty for the first alert pass — and those queries are never
-        re-evaluated."""
+        Needed because the first alert pass runs before the first reclassify,
+        and queries evaluated then are never re-evaluated."""
         self._threat_matcher = await self.build_threat_matcher(db)
         return len(self._threat_matcher)
 
@@ -498,8 +508,7 @@ class ClassificationService:
 
         matcher = await self.build_matcher(db)
         threat_matcher = await self.build_threat_matcher(db)
-        # Single assignment of an already-built object: readers never observe a
-        # partially-populated matcher, so no reader-side locking is needed.
+        # Single assignment of a built object — readers never see it half-populated.
         self._threat_matcher = threat_matcher
         distinct_domains = (await db.execute(
             select(DomainStatsHourly.domain).distinct()

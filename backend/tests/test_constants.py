@@ -92,10 +92,8 @@ def test_singleton_kinds_are_the_non_hosts_kinds():
 def test_qfeeds_seeded_row_is_disabled_and_token_free():
     from backend.constants import QFEEDS_FEED_URL
     row = next(s for s in DEFAULT_INSIGHT_SOURCES if s["kind"] == "qfeeds")
-    # Enabled-by-default would 403 on every refresh until a key is saved.
     assert row["enabled"] is False
-    # The token is merged in at fetch time; storing it here would leak it via
-    # InsightSource.url into the API response and the settings changelog.
+    # url is returned to readonly users; a stored token would leak there.
     assert "api_token" not in row["url"]
     assert row["url"] == QFEEDS_FEED_URL
     assert row["format"] == "domains"

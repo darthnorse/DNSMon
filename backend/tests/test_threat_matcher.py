@@ -66,3 +66,13 @@ def test_threat_sources_are_engine_only():
     for src in THREAT_SOURCES:
         assert src not in SOURCE_PRECEDENCE, f"{src} must not compete for the app slot"
         assert src not in VALID_SOURCES, f"{src} must not be settable on a manual definition"
+
+
+def test_duplicate_domain_is_first_write_wins():
+    """Deterministic tie-break: build_threat_matcher feeds entries ORDER BY
+    source, slug, so a domain claimed twice must not flip type between runs."""
+    tm = ThreatMatcher()
+    tm.add('evil.com', 'malware', 'qfeeds')
+    tm.add('evil.com', 'phishing', 'qfeeds')
+    assert tm.match('evil.com') == ('malware', 'qfeeds')
+    assert len(tm) == 1

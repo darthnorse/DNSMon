@@ -92,9 +92,11 @@ async def test_load_qfeeds_writes_definitions(db_session, monkeypatch):
     svc = ClassificationService()
     seen = {}
 
+    feed = "evil.com\nbad.example\n" + "\n".join(f"x{i}.example" for i in range(150))
+
     async def fake_fetch(url, what):
         seen['url'] = url
-        return "evil.com\nbad.example\n"
+        return feed
 
     monkeypatch.setattr(svc, '_safe_fetch', fake_fetch)
     assert await svc.load_qfeeds(db_session, _Row()) == 1
@@ -107,7 +109,7 @@ async def test_load_qfeeds_writes_definitions(db_session, monkeypatch):
 
     domains = set((await db_session.execute(
         select(AppDomain.domain).where(AppDomain.app_id == ad.id))).scalars())
-    assert domains == {'evil.com', 'bad.example'}
+    assert {'evil.com', 'bad.example'} <= domains
 
 
 async def test_load_qfeeds_empty_body_keeps_existing_tier(db_session, monkeypatch):
@@ -116,7 +118,8 @@ async def test_load_qfeeds_empty_body_keeps_existing_tier(db_session, monkeypatc
     from backend.models import AppDefinition
 
     svc = ClassificationService()
-    monkeypatch.setattr(svc, '_safe_fetch', lambda url, what: _returns("evil.com\n"))
+    monkeypatch.setattr(svc, '_safe_fetch', lambda url, what: _returns(
+        "\n".join(f"evil{i}.example" for i in range(150))))
     await svc.load_qfeeds(db_session, _Row())
 
     monkeypatch.setattr(svc, '_safe_fetch', lambda url, what: _returns("Access forbidden."))
@@ -130,3 +133,47 @@ async def test_load_qfeeds_fetch_failure_keeps_existing_tier(db_session, monkeyp
     svc = ClassificationService()
     monkeypatch.setattr(svc, '_safe_fetch', lambda url, what: _returns(None))
     assert await svc.load_qfeeds(db_session, _Row()) == -1
+
+
+async def test_load_qfeeds_refuses_an_implausibly_small_feed(db_session, monkeypatch):
+    """A 200 maintenance page containing one domain-shaped token must not
+    replace the whole malware tier while reporting success."""
+    from sqlalchemy import select, func
+    from backend.models import AppDomain
+
+    svc = ClassificationService()
+    full = "\n".join(f"evil{i}.example" for i in range(200))
+    monkeypatch.setattr(svc, '_safe_fetch', lambda url, what: _returns(full))
+    assert await svc.load_qfeeds(db_session, _Row()) == 1
+
+    monkeypatch.setattr(svc, '_safe_fetch',
+                        lambda url, what: _returns("www.qfeeds.com"))
+    assert await svc.load_qfeeds(db_session, _Row()) == -1
+    assert 'implausible' in (svc._last_fetch_error or '')
+
+    assert await db_session.scalar(
+        select(func.count()).select_from(AppDomain)) == 200
+
+
+async def test_load_qfeeds_refuses_a_halved_feed(db_session, monkeypatch):
+    from sqlalchemy import select, func
+    from backend.models import AppDomain
+
+    svc = ClassificationService()
+    monkeypatch.setattr(svc, '_safe_fetch', lambda url, what: _returns(
+        "\n".join(f"evil{i}.example" for i in range(1000))))
+    await svc.load_qfeeds(db_session, _Row())
+
+    monkeypatch.setattr(svc, '_safe_fetch', lambda url, what: _returns(
+        "\n".join(f"evil{i}.example" for i in range(400))))
+    assert await svc.load_qfeeds(db_session, _Row()) == -1
+    assert await db_session.scalar(
+        select(func.count()).select_from(AppDomain)) == 1000
+
+
+async def test_first_load_accepts_a_feed_above_the_floor(db_session, monkeypatch):
+    """The floor must not block a legitimate first fetch."""
+    svc = ClassificationService()
+    monkeypatch.setattr(svc, '_safe_fetch', lambda url, what: _returns(
+        "\n".join(f"evil{i}.example" for i in range(150))))
+    assert await svc.load_qfeeds(db_session, _Row()) == 1

@@ -544,7 +544,6 @@ async def test_match_threat_uses_the_resident_matcher(db_session):
     from backend.classification_service import ClassificationService
 
     svc = ClassificationService()
-    # Nothing built yet — must not raise.
     assert svc.match_threat('evil.com') is None
 
     ad = _threat_def()
@@ -574,3 +573,21 @@ async def test_prime_threat_matcher_loads_the_persisted_tier(db_session):
     assert svc.match_threat('evil.com') is None
     assert await svc.prime_threat_matcher(db_session) == 1
     assert svc.match_threat('cdn.evil.com') == ('malware', 'qfeeds')
+
+
+async def test_build_threat_matcher_truncates_an_overlong_slug(db_session):
+    """domain_labels.threat_type is VARCHAR(20) but slug is VARCHAR(100);
+    truncating at the boundary degrades one label instead of aborting the
+    whole reclassify upsert."""
+    from backend.models import AppDefinition, AppDomain
+    from backend.classification_service import ClassificationService
+
+    ad = AppDefinition(slug='x' * 40, name='Long', category=None,
+                       source='qfeeds', enabled=True, is_category_only=False)
+    db_session.add(ad)
+    await db_session.flush()
+    db_session.add(AppDomain(domain='evil.com', app_id=ad.id, is_wildcard=False))
+    await db_session.commit()
+
+    hit = (await ClassificationService().build_threat_matcher(db_session)).match('evil.com')
+    assert hit is not None and len(hit[0]) == 20

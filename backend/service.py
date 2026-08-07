@@ -193,16 +193,24 @@ class DNSMonService:
         self.scheduler.start()
         logger.info(f"Scheduler started (poll: {self.settings.poll_interval_seconds}s, sync: {self.settings.sync_interval_seconds}s)")
 
+    async def _prime_threat_matcher(self):
+        """Load the persisted threat tier before anything can evaluate alerts.
+
+        Runs before start_scheduler() because a backfill slower than
+        poll_interval_seconds would otherwise let the scheduled first alert pass
+        run against an empty matcher. Contained so a DB error can't stop startup."""
+        try:
+            async with async_session_maker() as db:
+                n = await self.classification_service.prime_threat_matcher(db)
+            if n:
+                logger.info(f"Primed threat matcher with {n} domains")
+        except Exception as e:
+            logger.error(f"Could not prime threat matcher: {e}", exc_info=True)
+
     async def _run_initial_ingestion(self):
         """Run initial ingestion with error handling"""
         try:
             await self.ingestion_service.backfill_hourly_stats()
-            # Must precede ingest_and_alert(): classification_task() runs after
-            # it, so without this the resident threat matcher would be empty
-            # exactly when the first batch of queries is evaluated for alerts,
-            # and those queries are never re-evaluated.
-            async with async_session_maker() as db:
-                await self.classification_service.prime_threat_matcher(db)
             await self.ingest_and_alert()
             await self.classification_task()
         except Exception as e:
@@ -215,6 +223,8 @@ class DNSMonService:
             return
 
         logger.info("Starting DNSMon service...")
+
+        await self._prime_threat_matcher()
 
         self.start_scheduler()
 

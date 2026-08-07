@@ -56,10 +56,8 @@ V2FLY_FEED_URL = (
     "/releases/latest/download/dlc.dat_plain.yml"
 )
 
-# Q-Feeds threat intelligence (Community tier). Requires a per-install API key,
-# merged into the URL at fetch time so the token never reaches the stored row.
-# Only feed_type=malware_domains is available on Community; the other feed types
-# return 403.
+# Token-free: the per-install API key is merged in at fetch time so it never
+# reaches the stored row. Community tier serves only malware_domains; others 403.
 QFEEDS_FEED_URL = "https://api.qfeeds.com/api?feed_type=malware_domains&download=0"
 
 # Higher number wins when more than one source claims a domain.
@@ -69,15 +67,11 @@ SOURCE_PRECEDENCE = {'blocklist': 0, 'v2fly': 1, 'adguard': 2, 'dnsmon': 3, 'man
 # 'v2fly' are engine-only.
 VALID_SOURCES = frozenset({'adguard', 'dnsmon', 'manual'})
 
-# Sources whose definitions describe a domain's *threat* status, not its app or
-# category. Partitioned out of the app matcher entirely: they never compete for
-# the app/category slot, which is why they are absent from SOURCE_PRECEDENCE and
-# VALID_SOURCES.
+# Threat status is orthogonal to app/category, so these never compete for that
+# slot — hence their absence from SOURCE_PRECEDENCE and VALID_SOURCES.
 THREAT_SOURCES = frozenset({'qfeeds'})
 
-# Sources that are engine plumbing, not user-manageable apps: they must not
-# appear in the Apps settings list, in manual-label autocomplete, or be mutable
-# through the app-definition endpoints.
+# Engine plumbing, not user-manageable apps.
 HIDDEN_APP_SOURCES = frozenset({'blocklist'}) | THREAT_SOURCES
 
 # Insight-source kinds that have at most one row each, keyed on `kind`.
@@ -94,8 +88,7 @@ DEFAULT_INSIGHT_SOURCES = [
      'kind': 'hosts', 'category': 'Ads & Tracking', 'format': 'domains', 'license': 'GPL-3.0'},
     {'name': 'v2fly Community', 'url': V2FLY_FEED_URL, 'kind': 'v2fly',
      'category': None, 'format': 'yaml', 'license': 'MIT'},
-    # Seeded disabled: enabled-by-default would 403 on every refresh until an
-    # admin saves an API key in Settings.
+    # Disabled until an admin saves a key, else every refresh 403s.
     {'name': 'Q-Feeds Malware Domains', 'url': QFEEDS_FEED_URL, 'kind': 'qfeeds',
      'category': None, 'format': 'domains', 'license': 'Q-Feeds Community',
      'enabled': False},

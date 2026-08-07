@@ -130,6 +130,22 @@ def parse_v2fly_entries(text: str, mapping: dict) -> list[dict]:
     return defs
 
 
+def normalize_domain(domain: str) -> str:
+    """Canonical key form for matcher entries and lookups."""
+    return domain.strip().strip('.').lower()
+
+
+def domain_suffixes(fqdn: str):
+    """Yield (specificity, suffix) most-specific first.
+
+    Stops before the last label so a single-label entry (a bare TLD) can never
+    tag every domain beneath it.
+    """
+    labels = normalize_domain(fqdn).split('.')
+    for i in range(len(labels) - 1):
+        yield len(labels) - i, '.'.join(labels[i:])
+
+
 @dataclass
 class MatchResult:
     app_id: int
@@ -148,7 +164,7 @@ class DomainMatcher:
 
     def add(self, domain: str, app_id: int, app_name: Optional[str],
             category: Optional[str], source: str) -> None:
-        domain = domain.strip().strip('.').lower()
+        domain = normalize_domain(domain)
         if not domain:
             return
         existing = self._entries.get(domain)
@@ -164,12 +180,9 @@ class DomainMatcher:
     def match(self, fqdn: str) -> Optional[MatchResult]:
         if not fqdn:
             return None
-        labels = fqdn.strip().rstrip('.').lower().split('.')
         best: Optional[MatchResult] = None
         best_key = (-1, -1, -1)  # (is_app, source_rank, specificity)
-        for i in range(len(labels) - 1):
-            specificity = len(labels) - i
-            candidate = '.'.join(labels[i:])
+        for specificity, candidate in domain_suffixes(fqdn):
             hit = self._entries.get(candidate)
             if hit is None:
                 continue
@@ -187,28 +200,26 @@ class DomainMatcher:
 class ThreatMatcher:
     """Suffix matcher for threat-tagged domains.
 
-    Parallel to DomainMatcher but resolution-free: threat status is not tiered,
-    so a hit is a hit and the only tie-break is suffix specificity.
+    Unlike DomainMatcher there is no tiering, so suffix specificity is the only
+    tie-break between differently-scoped entries. For the same exact domain
+    added twice the first add wins, so callers must feed a deterministic order
+    or threat_type would flip between refreshes with no data change.
     """
 
     def __init__(self):
         self._entries: dict[str, Tuple[str, str]] = {}
 
     def add(self, domain: str, threat_type: str, threat_source: str) -> None:
-        domain = domain.strip().strip('.').lower()
+        domain = normalize_domain(domain)
         if not domain:
             return
-        self._entries[domain] = (threat_type, threat_source)
+        self._entries.setdefault(domain, (threat_type, threat_source))
 
     def match(self, fqdn: str) -> Optional[Tuple[str, str]]:
         if not fqdn:
             return None
-        labels = fqdn.strip().rstrip('.').lower().split('.')
-        # Walks most-specific first, so the first hit is the answer. The bound
-        # stops before the last label so a single-label entry (a bare TLD) can
-        # never tag every domain beneath it.
-        for i in range(len(labels) - 1):
-            hit = self._entries.get('.'.join(labels[i:]))
+        for _, candidate in domain_suffixes(fqdn):
+            hit = self._entries.get(candidate)
             if hit is not None:
                 return hit
         return None

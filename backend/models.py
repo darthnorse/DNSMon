@@ -662,8 +662,7 @@ class DomainLabel(Base):
     app_name = Column(String(150), nullable=True)
     category = Column(String(50), nullable=True)
     matched_source = Column(String(20), nullable=True)
-    # Threat status is orthogonal to app/category: a domain can be both a known
-    # app and a known-malicious host, so these never share the app/category slot.
+    # Orthogonal to app/category: a domain can be both a known app and malicious.
     threat_type = Column(String(20), nullable=True)
     threat_source = Column(String(20), nullable=True)
     classified_at = Column(DateTime(timezone=True), default=utcnow)
@@ -695,7 +694,7 @@ class InsightSource(Base):
     format = Column(String(20), nullable=False, default='domains')  # domains|hosts|adguard|json
     license = Column(String(50), nullable=True)
     enabled = Column(Boolean, default=True)
-    api_key = Column(Text, nullable=True)  # never serialised; see has_api_key + to_dict()
+    api_key = Column(Text, nullable=True)  # never serialised; see has_api_key
     last_fetched_at = Column(DateTime(timezone=True), nullable=True)
     last_status = Column(String(20), nullable=True)  # ok|error
     last_error = Column(String(200), nullable=True)
@@ -709,9 +708,9 @@ class InsightSource(Base):
 
     @property
     def has_api_key(self) -> bool:
-        """Whether a key is stored. The key itself is never serialised — this
-        boolean is what the API exposes, because GET /api/insight-sources is
-        readable by readonly users."""
+        """Exposed in place of the key itself. The real boundary is
+        InsightSourceResponse's field allowlist, which omits api_key — and must
+        keep omitting it, since readonly users can read that endpoint."""
         return bool(self.api_key)
 
     def to_dict(self):

@@ -119,10 +119,8 @@ async def update_definition(def_id: int, payload: AppDefinitionUpdate,
                             db: AsyncSession = Depends(get_db),
                             _: User = Depends(require_admin)):
     ad = await db.get(AppDefinition, def_id)
-    # blocklist and threat pseudo-apps are managed via /api/insight-sources, not
-    # here — treat them as absent so this endpoint can't toggle them or serialize
-    # their huge domain sets. Disabling one would also survive feed refreshes
-    # (_replace_source preserves disabled slugs), silently breaking matching.
+    # Managed via /api/insight-sources. A disable here would survive feed
+    # refreshes (_replace_source keeps disabled slugs) and silently break matching.
     if not ad or ad.source in HIDDEN_APP_SOURCES:
         raise HTTPException(status_code=404, detail="App definition not found")
 
