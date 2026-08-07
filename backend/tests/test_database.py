@@ -122,7 +122,7 @@ async def test_ensure_insight_sources_idempotent(db_session):
     cnt = await db_session.scalar(select(func.count()).select_from(InsightSource))
     assert cnt == expected
     kinds = set((await db_session.execute(select(InsightSource.kind))).scalars())
-    assert kinds == {"adguard", "dnsmon", "hosts", "v2fly"}
+    assert kinds == {"adguard", "dnsmon", "hosts", "v2fly", "qfeeds"}
 
 
 async def test_ensure_insight_sources_no_duplicate_singleton_on_url_change(db_session):

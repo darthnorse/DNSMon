@@ -56,6 +56,12 @@ V2FLY_FEED_URL = (
     "/releases/latest/download/dlc.dat_plain.yml"
 )
 
+# Q-Feeds threat intelligence (Community tier). Requires a per-install API key,
+# merged into the URL at fetch time so the token never reaches the stored row.
+# Only feed_type=malware_domains is available on Community; the other feed types
+# return 403.
+QFEEDS_FEED_URL = "https://api.qfeeds.com/api?feed_type=malware_domains&download=0"
+
 # Higher number wins when more than one source claims a domain.
 SOURCE_PRECEDENCE = {'blocklist': 0, 'v2fly': 1, 'adguard': 2, 'dnsmon': 3, 'manual': 4}
 
@@ -76,7 +82,7 @@ HIDDEN_APP_SOURCES = frozenset({'blocklist'}) | THREAT_SOURCES
 
 # Insight-source kinds that have at most one row each, keyed on `kind`.
 # 'hosts' rows may be many and key on url instead.
-SINGLETON_SOURCE_KINDS = ('adguard', 'dnsmon', 'v2fly')
+SINGLETON_SOURCE_KINDS = ('adguard', 'dnsmon', 'v2fly', 'qfeeds')
 
 DEFAULT_INSIGHT_SOURCES = [
     {'name': 'AdGuard', 'url': CLASSIFICATION_FEED_URL, 'kind': 'adguard',
@@ -88,6 +94,11 @@ DEFAULT_INSIGHT_SOURCES = [
      'kind': 'hosts', 'category': 'Ads & Tracking', 'format': 'domains', 'license': 'GPL-3.0'},
     {'name': 'v2fly Community', 'url': V2FLY_FEED_URL, 'kind': 'v2fly',
      'category': None, 'format': 'yaml', 'license': 'MIT'},
+    # Seeded disabled: enabled-by-default would 403 on every refresh until an
+    # admin saves an API key in Settings.
+    {'name': 'Q-Feeds Malware Domains', 'url': QFEEDS_FEED_URL, 'kind': 'qfeeds',
+     'category': None, 'format': 'domains', 'license': 'Q-Feeds Community',
+     'enabled': False},
 ]
 
 # AdGuard's `group` values remapped to DNSMon's display taxonomy.

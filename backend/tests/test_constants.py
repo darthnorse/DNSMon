@@ -56,7 +56,7 @@ def test_valid_sources_excludes_blocklist():
 
 def test_default_insight_sources_cover_all_kinds():
     kinds = {src["kind"] for src in DEFAULT_INSIGHT_SOURCES}
-    assert kinds == {"adguard", "dnsmon", "hosts", "v2fly"}
+    assert kinds == {"adguard", "dnsmon", "hosts", "v2fly", "qfeeds"}
 
 
 def test_default_insight_seed_includes_hagezi_pro_plus():
@@ -85,5 +85,33 @@ def test_default_insight_seed_includes_v2fly():
 
 
 def test_singleton_kinds_are_the_non_hosts_kinds():
-    assert set(SINGLETON_SOURCE_KINDS) == {"adguard", "dnsmon", "v2fly"}
+    assert set(SINGLETON_SOURCE_KINDS) == {"adguard", "dnsmon", "v2fly", "qfeeds"}
     assert "hosts" not in SINGLETON_SOURCE_KINDS
+
+
+def test_qfeeds_seeded_row_is_disabled_and_token_free():
+    from backend.constants import QFEEDS_FEED_URL
+    row = next(s for s in DEFAULT_INSIGHT_SOURCES if s["kind"] == "qfeeds")
+    # Enabled-by-default would 403 on every refresh until a key is saved.
+    assert row["enabled"] is False
+    # The token is merged in at fetch time; storing it here would leak it via
+    # InsightSource.url into the API response and the settings changelog.
+    assert "api_token" not in row["url"]
+    assert row["url"] == QFEEDS_FEED_URL
+    assert row["format"] == "domains"
+
+
+def test_qfeeds_is_a_singleton_kind():
+    assert "qfeeds" in SINGLETON_SOURCE_KINDS
+
+
+def test_every_threat_source_has_a_seeded_row():
+    from backend.constants import THREAT_SOURCES
+    kinds = {s["kind"] for s in DEFAULT_INSIGHT_SOURCES}
+    assert THREAT_SOURCES <= kinds
+
+
+def test_hidden_app_sources_covers_blocklist_and_threats():
+    from backend.constants import HIDDEN_APP_SOURCES, THREAT_SOURCES
+    assert "blocklist" in HIDDEN_APP_SOURCES
+    assert THREAT_SOURCES <= HIDDEN_APP_SOURCES
