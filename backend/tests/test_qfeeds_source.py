@@ -450,3 +450,42 @@ async def test_record_threat_labels_creates_a_row_for_an_unseen_domain(db_sessio
 async def test_record_threat_labels_is_a_noop_when_nothing_matched(db_session):
     from backend.classification_service import ClassificationService
     assert await ClassificationService().record_threat_labels(db_session, {}) == 0
+
+
+async def test_a_keyless_disabled_source_is_quiet(db_session, monkeypatch, caplog):
+    """The default install state: Q-Feeds seeded disabled with no key. It must
+    neither fetch nor log an error, and must not disturb the other sources."""
+    import logging
+    from backend.classification_service import ClassificationService
+
+    db_session.add(InsightSource(
+        name='Q-Feeds Malware Domains', url=QFEEDS_FEED_URL, kind='qfeeds',
+        format='domains', enabled=False, api_key=None))
+    await db_session.commit()
+
+    svc = ClassificationService()
+    fetches = []
+
+    async def spy(url, what):
+        fetches.append(what)
+        return None
+
+    monkeypatch.setattr(svc, '_safe_fetch', spy)
+
+    with caplog.at_level(logging.ERROR):
+        await svc._refresh_all_sources(db_session)
+
+    assert not any('Q-Feeds' in f for f in fetches), "must not fetch without a key"
+    assert not any('Q-Feeds' in r.message or 'qfeeds' in r.message
+                   for r in caplog.records), "must not log an error"
+
+
+async def test_match_threat_rules_are_inert_without_a_feed(db_session):
+    """No feed configured must mean 'matches nothing', never 'matches everything'."""
+    from backend.alerts import AlertEngine
+    from backend.classification_service import ClassificationService
+
+    svc = ClassificationService()
+    assert await svc.prime_threat_matcher(db_session) == 0
+    assert svc.match_threat('anything.example') is None
+    assert AlertEngine(svc)._resolve_threats([], []) == {}
