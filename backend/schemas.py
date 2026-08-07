@@ -637,8 +637,10 @@ class InsightSourceResponse(BaseModel):
     format: str
     license: Optional[str]
     enabled: bool
+    has_api_key: bool = False
     last_fetched_at: Optional[datetime]
     last_status: Optional[str]
+    last_error: Optional[str] = None
     domain_count: Optional[int]
     created_at: datetime
     updated_at: datetime
@@ -655,4 +657,5 @@ class InsightSourceResponse(BaseModel):
 
 
 class InsightSourceUpdate(BaseModel):
-    enabled: bool
+    enabled: Optional[bool] = None
+    api_key: Optional[str] = PydanticField(default=None, max_length=512)

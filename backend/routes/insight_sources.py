@@ -8,6 +8,7 @@ from ..database import get_db
 from ..models import User, InsightSource
 from ..schemas import InsightSourceResponse, InsightSourceUpdate
 from ..auth import get_current_user, require_admin
+from ..constants import THREAT_SOURCES
 from ..service import get_service
 from ._background import run_in_background
 
@@ -39,11 +40,26 @@ async def update_source(source_id: int, payload: InsightSourceUpdate,
     src = await db.get(InsightSource, source_id)
     if not src:
         raise HTTPException(status_code=404, detail="Insight source not found")
-    changed = src.enabled != payload.enabled
-    src.enabled = payload.enabled
+
+    fields = payload.model_dump(exclude_unset=True)
+    key_changed = False
+    if 'api_key' in fields:
+        new_key = (fields['api_key'] or '').strip() or None
+        key_changed = src.api_key != new_key
+        src.api_key = new_key
+
+    enabled = fields.get('enabled', src.enabled)
+    if enabled and src.kind in THREAT_SOURCES and not src.api_key:
+        raise HTTPException(status_code=400,
+                            detail="API key required before enabling this source")
+
+    toggled = src.enabled != enabled
+    src.enabled = enabled
+
     await db.commit()
     await db.refresh(src)
-    if changed:  # a no-op toggle shouldn't kick off an HTTP fetch + reclassify
+    # A no-op save shouldn't kick off an HTTP fetch + reclassify.
+    if toggled or (key_changed and src.enabled):
         _trigger_kind_refresh(src.kind)
     return InsightSourceResponse.model_validate(src)
 

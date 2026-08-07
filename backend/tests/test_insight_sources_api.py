@@ -106,3 +106,115 @@ async def test_app_definitions_feed_domains_previewed_with_count(async_admin_cli
     assert len(by_slug["bigapp"]["domains"]) == 5  # previewed, not the full tier
     assert by_slug["manapp"]["domain_count"] == 8
     assert len(by_slug["manapp"]["domains"]) == 8  # manual apps keep full lists
+
+
+import pytest
+
+from backend.constants import QFEEDS_FEED_URL
+
+
+@pytest.fixture
+def no_refresh(monkeypatch):
+    """PATCH would otherwise spawn a real fetch against the live Q-Feeds API."""
+    monkeypatch.setattr(
+        "backend.routes.insight_sources._trigger_kind_refresh", lambda kind: None)
+
+
+async def _qfeeds_row(db, api_key=None, enabled=False):
+    row = InsightSource(
+        name="Q-Feeds Malware Domains", url=QFEEDS_FEED_URL, kind="qfeeds",
+        category=None, format="domains", license="Q-Feeds Community",
+        enabled=enabled, api_key=api_key)
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+
+async def test_api_key_is_never_returned_to_a_readonly_user(
+        async_readonly_client: AsyncClient, db_session):
+    """The real exposure boundary is InsightSourceResponse's field allowlist.
+    This fails loudly if anyone ever adds api_key to that schema."""
+    await _qfeeds_row(db_session, api_key="tip_supersecret")
+
+    r = await async_readonly_client.get("/api/insight-sources")
+    assert r.status_code == 200
+    assert "tip_supersecret" not in r.text
+    row = next(s for s in r.json() if s["kind"] == "qfeeds")
+    assert "api_key" not in row
+    assert row["has_api_key"] is True
+
+
+async def test_has_api_key_is_false_without_one(async_admin_client: AsyncClient, db_session):
+    await _qfeeds_row(db_session)
+    r = await async_admin_client.get("/api/insight-sources")
+    assert next(s for s in r.json() if s["kind"] == "qfeeds")["has_api_key"] is False
+
+
+async def test_enabling_without_a_key_is_rejected(
+        async_admin_client: AsyncClient, db_session, no_refresh):
+    row = await _qfeeds_row(db_session)
+    r = await async_admin_client.patch(
+        f"/api/insight-sources/{row.id}", json={"enabled": True})
+    assert r.status_code == 400
+    assert "API key" in r.json()["detail"]
+
+
+async def test_saving_a_key_then_enabling_works(
+        async_admin_client: AsyncClient, db_session, no_refresh):
+    row = await _qfeeds_row(db_session)
+
+    r = await async_admin_client.patch(
+        f"/api/insight-sources/{row.id}", json={"api_key": "tip_abc"})
+    assert r.status_code == 200, r.text
+    assert r.json()["has_api_key"] is True
+    assert "tip_abc" not in r.text
+
+    r = await async_admin_client.patch(
+        f"/api/insight-sources/{row.id}", json={"enabled": True})
+    assert r.status_code == 200, r.text
+    assert r.json()["enabled"] is True
+
+
+async def test_key_and_enable_in_one_request(
+        async_admin_client: AsyncClient, db_session, no_refresh):
+    row = await _qfeeds_row(db_session)
+    r = await async_admin_client.patch(
+        f"/api/insight-sources/{row.id}", json={"api_key": "tip_abc", "enabled": True})
+    assert r.status_code == 200, r.text
+    assert r.json()["enabled"] is True
+
+
+async def test_blank_api_key_clears_it(
+        async_admin_client: AsyncClient, db_session, no_refresh):
+    row = await _qfeeds_row(db_session, api_key="tip_abc")
+    r = await async_admin_client.patch(
+        f"/api/insight-sources/{row.id}", json={"api_key": ""})
+    assert r.status_code == 200, r.text
+    assert r.json()["has_api_key"] is False
+
+
+async def test_omitting_enabled_preserves_it(
+        async_admin_client: AsyncClient, db_session, no_refresh):
+    row = await _qfeeds_row(db_session, api_key="tip_abc", enabled=True)
+    r = await async_admin_client.patch(
+        f"/api/insight-sources/{row.id}", json={"api_key": "tip_new"})
+    assert r.status_code == 200, r.text
+    assert r.json()["enabled"] is True
+
+
+async def test_readonly_cannot_patch_a_key(async_readonly_client: AsyncClient, db_session):
+    row = await _qfeeds_row(db_session)
+    r = await async_readonly_client.patch(
+        f"/api/insight-sources/{row.id}", json={"api_key": "tip_abc"})
+    assert r.status_code == 403
+
+
+async def test_last_error_is_exposed(async_admin_client: AsyncClient, db_session):
+    row = await _qfeeds_row(db_session)
+    row.last_error = "HTTP 403 from feed"
+    db_session.add(row)
+    await db_session.commit()
+
+    r = await async_admin_client.get("/api/insight-sources")
+    assert next(s for s in r.json() if s["kind"] == "qfeeds")["last_error"] == "HTTP 403 from feed"
