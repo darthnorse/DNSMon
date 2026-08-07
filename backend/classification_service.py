@@ -563,6 +563,37 @@ class ClassificationService:
         first build — an empty matcher simply misses."""
         return self._threat_matcher.match(fqdn)
 
+    async def record_threat_labels(self, db: AsyncSession, hits: dict[str, str]) -> int:
+        """Persist threat tags for domains the alert path just matched.
+
+        The alert engine reads the live matcher while every UI surface reads
+        domain_labels, which only _do_reclassify writes (every
+        classification_refresh_hours, default 24h). Without this an operator
+        paged about a domain would open the Dashboard and see it unflagged.
+        Touches only the threat columns, so it cannot clobber an app/category
+        label that reclassify owns."""
+        if not hits:
+            return 0
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+        from .models import utcnow
+
+        now = utcnow()
+        stmt = pg_insert(DomainLabel).values([
+            {'domain': d, 'threat_type': t, 'threat_source': self._threat_source_for(d),
+             'classified_at': now}
+            for d, t in hits.items()
+        ])
+        await db.execute(stmt.on_conflict_do_update(
+            index_elements=['domain'],
+            set_={'threat_type': stmt.excluded.threat_type,
+                  'threat_source': stmt.excluded.threat_source}))
+        await db.commit()
+        return len(hits)
+
+    def _threat_source_for(self, domain: str) -> Optional[str]:
+        hit = self._threat_matcher.match(domain)
+        return hit[1] if hit else None
+
     async def prime_threat_matcher(self, db: AsyncSession) -> int:
         """Load the persisted threat tier into the resident matcher (no network).
 

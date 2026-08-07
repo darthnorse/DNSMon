@@ -411,3 +411,42 @@ async def test_disabled_source_is_excluded_from_the_threat_matcher(db_session):
     svc = ClassificationService()
     assert await svc.prime_threat_matcher(db_session) == 0
     assert svc.match_threat('evil.com') is None
+
+
+async def test_record_threat_labels_writes_only_threat_columns(db_session):
+    """The alert path must not clobber the app/category label reclassify owns."""
+    from backend.models import DomainLabel
+    from backend.classification_service import ClassificationService
+
+    db_session.add(DomainLabel(domain='evil.com', app_name='SomeApp',
+                               category='Streaming', matched_source='adguard'))
+    await db_session.commit()
+
+    svc = ClassificationService()
+    svc._threat_matcher.add('evil.com', 'malware', 'qfeeds')
+    assert await svc.record_threat_labels(db_session, {'evil.com': 'malware'}) == 1
+
+    row = await db_session.get(DomainLabel, 'evil.com')
+    await db_session.refresh(row)
+    assert row.threat_type == 'malware'
+    assert row.threat_source == 'qfeeds'
+    assert row.app_name == 'SomeApp'
+    assert row.category == 'Streaming'
+
+
+async def test_record_threat_labels_creates_a_row_for_an_unseen_domain(db_session):
+    from backend.models import DomainLabel
+    from backend.classification_service import ClassificationService
+
+    svc = ClassificationService()
+    svc._threat_matcher.add('brand.new', 'malware', 'qfeeds')
+    await svc.record_threat_labels(db_session, {'brand.new': 'malware'})
+
+    row = await db_session.get(DomainLabel, 'brand.new')
+    assert row is not None and row.threat_type == 'malware'
+    assert row.app_name is None
+
+
+async def test_record_threat_labels_is_a_noop_when_nothing_matched(db_session):
+    from backend.classification_service import ClassificationService
+    assert await ClassificationService().record_threat_labels(db_session, {}) == 0

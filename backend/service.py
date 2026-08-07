@@ -41,6 +41,11 @@ class DNSMonService:
 
             matches = await self.alert_engine.evaluate_queries(ingested_queries)
 
+            # Keep the label the UI reads in step with the live matcher the alert
+            # engine reads, so a paged operator does not open the Dashboard and
+            # see the domain unflagged.
+            await self._record_threat_labels(ingested_queries)
+
             if matches:
                 logger.info(f"Found {len(matches)} query matches for alert rules")
 
@@ -192,6 +197,22 @@ class DNSMonService:
 
         self.scheduler.start()
         logger.info(f"Scheduler started (poll: {self.settings.poll_interval_seconds}s, sync: {self.settings.sync_interval_seconds}s)")
+
+    async def _record_threat_labels(self, ingested_queries):
+        """Write threat tags for any freshly-ingested domain the matcher flags."""
+        try:
+            svc = self.classification_service
+            hits = {}
+            for domain in {q.domain for q in ingested_queries}:
+                hit = svc.match_threat(domain)
+                if hit:
+                    hits[domain] = hit[0]
+            if hits:
+                async with async_session_maker() as db:
+                    await svc.record_threat_labels(db, hits)
+                logger.info(f"Recorded threat labels for {len(hits)} domains")
+        except Exception as e:
+            logger.error(f"Could not record threat labels: {e}", exc_info=True)
 
     async def _prime_threat_matcher(self):
         """Load the persisted threat tier before anything can evaluate alerts.
