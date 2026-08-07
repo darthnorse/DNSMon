@@ -8,6 +8,19 @@ from backend.classification_service import ClassificationService, resolve_redire
 from backend.models import AppDefinition, AppDomain, DomainLabel, DomainStatsHourly, Query, InsightSource
 
 
+class _SrcRow:
+    """Minimal stand-in for an InsightSource row — the singleton loaders take
+    the row (they need url AND api_key), not a bare URL."""
+
+    def __init__(self, url, api_key=None, kind='dnsmon', name='test'):
+        self.url = url
+        self.api_key = api_key
+        self.kind = kind
+        self.name = name
+
+
+
+
 async def test_load_dnsmon_bundled_populates_definitions(db_session):
     svc = ClassificationService()
     await svc.load_dnsmon_bundled(db_session)
@@ -144,7 +157,7 @@ async def test_load_dnsmon_remote_success(db_session, monkeypatch):
     monkeypatch.setattr(ClassificationService, "_fetch_capped_text", fake)
 
     svc = ClassificationService()
-    n = await svc.load_dnsmon(db_session, "https://example.com/dnsmon.json")
+    n = await svc.load_dnsmon(db_session, _SrcRow("https://example.com/dnsmon.json"))
     assert n == 1
     acme = await db_session.scalar(select(AppDefinition).where(
         AppDefinition.slug == "acme", AppDefinition.source == "dnsmon"))
@@ -161,7 +174,7 @@ async def test_load_dnsmon_fetch_fail_keeps_existing(db_session, monkeypatch):
         raise httpx.ConnectError("down")
     monkeypatch.setattr(ClassificationService, "_fetch_capped_text", boom)
 
-    n = await svc.load_dnsmon(db_session, "https://example.com/dnsmon.json")
+    n = await svc.load_dnsmon(db_session, _SrcRow("https://example.com/dnsmon.json"))
     assert n == -1
     cnt = await db_session.scalar(select(func.count()).select_from(AppDefinition).where(
         AppDefinition.source == "dnsmon"))
@@ -175,7 +188,7 @@ async def test_load_dnsmon_fetch_fail_first_boot_uses_bundled(db_session, monkey
         raise httpx.ConnectError("down")
     monkeypatch.setattr(ClassificationService, "_fetch_capped_text", boom)
 
-    n = await svc.load_dnsmon(db_session, "https://example.com/dnsmon.json")
+    n = await svc.load_dnsmon(db_session, _SrcRow("https://example.com/dnsmon.json"))
     assert n >= 10  # bundled dnsmon.json loaded on first boot
     tv = await db_session.scalar(select(AppDefinition).where(
         AppDefinition.slug == "teamviewer", AppDefinition.source == "dnsmon"))
@@ -323,7 +336,7 @@ async def test_load_v2fly_remote_success(db_session, monkeypatch):
     monkeypatch.setattr(ClassificationService, "_fetch_capped_text", fake)
 
     svc = ClassificationService()
-    n = await svc.load_v2fly(db_session, "https://example.com/dlc.yml")
+    n = await svc.load_v2fly(db_session, _SrcRow("https://example.com/dlc.yml", kind="v2fly"))
     assert n == 1  # only 'netflix' is in the real bundled mapping
     netflix = await db_session.scalar(select(AppDefinition).where(
         AppDefinition.slug == "netflix", AppDefinition.source == "v2fly"))
@@ -344,7 +357,7 @@ async def test_load_v2fly_fetch_fail_keeps_existing(db_session, monkeypatch):
         raise httpx.ConnectError("down")
     monkeypatch.setattr(ClassificationService, "_fetch_capped_text", boom)
 
-    n = await svc.load_v2fly(db_session, "https://example.com/dlc.yml")
+    n = await svc.load_v2fly(db_session, _SrcRow("https://example.com/dlc.yml", kind="v2fly"))
     assert n == -1
     cnt = await db_session.scalar(select(func.count()).select_from(AppDefinition).where(
         AppDefinition.source == "v2fly"))
@@ -360,7 +373,7 @@ async def test_load_v2fly_garbage_body_keeps_existing(db_session, monkeypatch):
         return "<html>rate limited</html>"
     monkeypatch.setattr(ClassificationService, "_fetch_capped_text", fake)
 
-    n = await svc.load_v2fly(db_session, "https://example.com/dlc.yml")
+    n = await svc.load_v2fly(db_session, _SrcRow("https://example.com/dlc.yml", kind="v2fly"))
     assert n == -1
     cnt = await db_session.scalar(select(func.count()).select_from(AppDefinition).where(
         AppDefinition.source == "v2fly"))

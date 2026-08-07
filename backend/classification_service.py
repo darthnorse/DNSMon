@@ -231,14 +231,14 @@ class ClassificationService:
             logger.error(_scrub_secrets(f"Failed to fetch {what}: {e}"))
             return None
 
-    async def load_dnsmon(self, db: AsyncSession, url: str) -> int:
+    async def load_dnsmon(self, db: AsyncSession, row) -> int:
         """Fetch the remote DNSMon curated list and replace the 'dnsmon' source.
 
         Remote success → replace from remote. Remote failure → keep existing defs
         if any (don't regress a known-good fetch to the older bundled copy on a
         transient blip), else fall back to the bundled dnsmon.json (first boot)."""
         raw = None
-        text = await self._safe_fetch(url, 'DNSMon list')
+        text = await self._safe_fetch(row.url, 'DNSMon list')
         if text is not None:
             try:
                 parsed = json.loads(text)
@@ -263,7 +263,7 @@ class ClassificationService:
             return -1
         return await self.load_dnsmon_bundled(db)
 
-    async def load_v2fly(self, db: AsyncSession, url: str) -> int:
+    async def load_v2fly(self, db: AsyncSession, row) -> int:
         """Fetch the v2fly community list and replace the 'v2fly' source.
 
         Only slugs present in the bundled v2fly_map.json are imported. Any
@@ -272,7 +272,7 @@ class ClassificationService:
         mapping = _load_v2fly_map()
         if not mapping:
             return -1
-        text = await self._safe_fetch(url, 'v2fly list')
+        text = await self._safe_fetch(row.url, 'v2fly list')
         if text is None:
             return -1
         defs = parse_v2fly_entries(text, mapping)
@@ -283,12 +283,12 @@ class ClassificationService:
         logger.info(f"Loaded {n} v2fly definitions")
         return n
 
-    async def refresh_feed(self, db: AsyncSession, url: str = CLASSIFICATION_FEED_URL) -> int:
+    async def refresh_feed(self, db: AsyncSession, row) -> int:
         """Fetch AdGuard services.json and replace the 'adguard' definitions.
 
         Skips wildcard rules (a handful of infra domains). Returns app count,
         or -1 on fetch/parse failure (leaves existing data untouched)."""
-        text = await self._safe_fetch(url, 'classification feed')
+        text = await self._safe_fetch(row.url, 'classification feed')
         if text is None:
             return -1
         try:
@@ -503,7 +503,7 @@ class ClassificationService:
         loaders = {'adguard': self.refresh_feed, 'dnsmon': self.load_dnsmon,
                    'v2fly': self.load_v2fly}
         refresh = loaders[row.kind]
-        n = await refresh(db, row.url)
+        n = await refresh(db, row)
         row.last_status = 'ok' if n >= 0 else 'error'
         if n >= 0:
             row.last_fetched_at = utcnow()
