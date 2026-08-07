@@ -54,6 +54,17 @@ def _scrub_secrets(msg: str) -> str:
     """Mask credential query params in a message bound for logs or the DB."""
     return _SECRET_PARAM_RE.sub(r'\1***', msg)
 
+
+def build_qfeeds_url(base_url: str, api_key: str) -> str:
+    """Merge the API token into the stored (token-free) feed URL.
+
+    Uses httpx's URL builder rather than string concatenation so a stored URL
+    that already carries a query string stays well-formed and the token is
+    percent-encoded.
+    """
+    return str(httpx.URL(base_url).copy_merge_params({'api_token': api_key}))
+
+
 # GitHub release-asset URLs 302 to objects.githubusercontent.com; follow a
 # bounded number of hops, re-validating each target against the SSRF guard.
 _MAX_REDIRECTS = 3
@@ -167,6 +178,12 @@ class ClassificationService:
 
     def __init__(self):
         self._lock = asyncio.Lock()
+        # Held resident so the alert engine can match newly-seen malware domains
+        # without a DB read; rebuilt and swapped on every refresh/reclassify.
+        self._threat_matcher = ThreatMatcher()
+        # Last failure reason, consumed by the caller to populate
+        # InsightSource.last_error so a misconfigured feed says why.
+        self._last_fetch_error: Optional[str] = None
 
     async def _replace_source(self, db: AsyncSession, source: str, defs: list[dict]) -> int:
         """Delete all definitions for `source` and re-insert `defs`.
@@ -281,6 +298,33 @@ class ClassificationService:
             return -1
         n = await self._replace_source(db, 'v2fly', defs)
         logger.info(f"Loaded {n} v2fly definitions")
+        return n
+
+    async def load_qfeeds(self, db: AsyncSession, row) -> int:
+        """Fetch the Q-Feeds malware-domain list and replace the 'qfeeds' source.
+
+        The feed is a plain newline-separated domain list, so parse_blocklist_text
+        handles it unchanged. Any failure (no key, fetch error, empty/unparseable
+        body) keeps the existing tier and returns -1."""
+        if not row.api_key:
+            logger.error("Q-Feeds source has no API key; skipping refresh")
+            self._last_fetch_error = "API key required"
+            return -1
+        text = await self._safe_fetch(
+            build_qfeeds_url(row.url, row.api_key), 'Q-Feeds threat list')
+        if text is None:
+            return -1
+        domains = parse_blocklist_text(text)
+        if not domains:
+            logger.error("Q-Feeds list yielded 0 domains; keeping existing tier")
+            self._last_fetch_error = "Feed returned no usable domains"
+            return -1
+        n = await self._replace_source(db, 'qfeeds', [{
+            'slug': 'malware', 'name': 'Malware', 'category': None,
+            'is_category_only': False,
+            'domains': [(d, False) for d in sorted(domains)],
+        }])
+        logger.info(f"Loaded {len(domains)} Q-Feeds malware domains")
         return n
 
     async def refresh_feed(self, db: AsyncSession, row) -> int:
@@ -501,7 +545,7 @@ class ClassificationService:
         """Fetch one enabled singleton-kind row and record its status + real domain count."""
         from .models import utcnow
         loaders = {'adguard': self.refresh_feed, 'dnsmon': self.load_dnsmon,
-                   'v2fly': self.load_v2fly}
+                   'v2fly': self.load_v2fly, 'qfeeds': self.load_qfeeds}
         refresh = loaders[row.kind]
         n = await refresh(db, row)
         row.last_status = 'ok' if n >= 0 else 'error'
