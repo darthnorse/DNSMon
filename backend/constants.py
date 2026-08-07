@@ -63,6 +63,17 @@ SOURCE_PRECEDENCE = {'blocklist': 0, 'v2fly': 1, 'adguard': 2, 'dnsmon': 3, 'man
 # 'v2fly' are engine-only.
 VALID_SOURCES = frozenset({'adguard', 'dnsmon', 'manual'})
 
+# Sources whose definitions describe a domain's *threat* status, not its app or
+# category. Partitioned out of the app matcher entirely: they never compete for
+# the app/category slot, which is why they are absent from SOURCE_PRECEDENCE and
+# VALID_SOURCES.
+THREAT_SOURCES = frozenset({'qfeeds'})
+
+# Sources that are engine plumbing, not user-manageable apps: they must not
+# appear in the Apps settings list, in manual-label autocomplete, or be mutable
+# through the app-definition endpoints.
+HIDDEN_APP_SOURCES = frozenset({'blocklist'}) | THREAT_SOURCES
+
 # Insight-source kinds that have at most one row each, keyed on `kind`.
 # 'hosts' rows may be many and key on url instead.
 SINGLETON_SOURCE_KINDS = ('adguard', 'dnsmon', 'v2fly')

@@ -182,3 +182,36 @@ class DomainMatcher:
 
     def __len__(self) -> int:
         return len(self._entries)
+
+
+class ThreatMatcher:
+    """Suffix matcher for threat-tagged domains.
+
+    Parallel to DomainMatcher but resolution-free: threat status is not tiered,
+    so a hit is a hit and the only tie-break is suffix specificity.
+    """
+
+    def __init__(self):
+        self._entries: dict[str, Tuple[str, str]] = {}
+
+    def add(self, domain: str, threat_type: str, threat_source: str) -> None:
+        domain = domain.strip().strip('.').lower()
+        if not domain:
+            return
+        self._entries[domain] = (threat_type, threat_source)
+
+    def match(self, fqdn: str) -> Optional[Tuple[str, str]]:
+        if not fqdn:
+            return None
+        labels = fqdn.strip().rstrip('.').lower().split('.')
+        # Walks most-specific first, so the first hit is the answer. The bound
+        # stops before the last label so a single-label entry (a bare TLD) can
+        # never tag every domain beneath it.
+        for i in range(len(labels) - 1):
+            hit = self._entries.get('.'.join(labels[i:]))
+            if hit is not None:
+                return hit
+        return None
+
+    def __len__(self) -> int:
+        return len(self._entries)
