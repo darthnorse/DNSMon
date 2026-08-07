@@ -102,6 +102,14 @@ async def _run_migrations(conn):
                   col_type='VARCHAR(20)', default="'hosts'", nullable=False),
         Migration(table='alert_rules', column='exclude_client_ips',
                   col_type='TEXT', default=None, nullable=True),
+        Migration(table='domain_labels', column='threat_type',
+                  col_type='VARCHAR(20)', default=None, nullable=True),
+        Migration(table='domain_labels', column='threat_source',
+                  col_type='VARCHAR(20)', default=None, nullable=True),
+        Migration(table='insight_sources', column='api_key',
+                  col_type='TEXT', default=None, nullable=True),
+        Migration(table='insight_sources', column='last_error',
+                  col_type='VARCHAR(200)', default=None, nullable=True),
     ]
     for m in migrations:
         result = await conn.execute(text(

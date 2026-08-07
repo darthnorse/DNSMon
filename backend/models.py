@@ -662,6 +662,10 @@ class DomainLabel(Base):
     app_name = Column(String(150), nullable=True)
     category = Column(String(50), nullable=True)
     matched_source = Column(String(20), nullable=True)
+    # Threat status is orthogonal to app/category: a domain can be both a known
+    # app and a known-malicious host, so these never share the app/category slot.
+    threat_type = Column(String(20), nullable=True)
+    threat_source = Column(String(20), nullable=True)
     classified_at = Column(DateTime(timezone=True), default=utcnow)
 
     def to_dict(self):
@@ -671,6 +675,8 @@ class DomainLabel(Base):
             'app_name': self.app_name,
             'category': self.category,
             'matched_source': self.matched_source,
+            'threat_type': self.threat_type,
+            'threat_source': self.threat_source,
             'classified_at': self.classified_at.isoformat() if self.classified_at else None,
         }
 
@@ -684,13 +690,15 @@ class InsightSource(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(100), nullable=False)
     url = Column(String(2048), nullable=False)  # bounded so the unique index is btree-safe
-    kind = Column(String(20), nullable=False, default='hosts')  # adguard | dnsmon | hosts
+    kind = Column(String(20), nullable=False, default='hosts')  # adguard | dnsmon | v2fly | qfeeds | hosts
     category = Column(String(50), nullable=True)  # set only for hosts (category-only) rows
     format = Column(String(20), nullable=False, default='domains')  # domains|hosts|adguard|json
     license = Column(String(50), nullable=True)
     enabled = Column(Boolean, default=True)
+    api_key = Column(Text, nullable=True)  # never serialised; see has_api_key + to_dict()
     last_fetched_at = Column(DateTime(timezone=True), nullable=True)
     last_status = Column(String(20), nullable=True)  # ok|error
+    last_error = Column(String(200), nullable=True)
     domain_count = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
@@ -698,6 +706,13 @@ class InsightSource(Base):
     __table_args__ = (
         Index('idx_insight_sources_url', 'url', unique=True),
     )
+
+    @property
+    def has_api_key(self) -> bool:
+        """Whether a key is stored. The key itself is never serialised — this
+        boolean is what the API exposes, because GET /api/insight-sources is
+        readable by readonly users."""
+        return bool(self.api_key)
 
     def to_dict(self):
         return {
@@ -709,8 +724,10 @@ class InsightSource(Base):
             'format': self.format,
             'license': self.license,
             'enabled': self.enabled,
+            'has_api_key': self.has_api_key,
             'last_fetched_at': self.last_fetched_at.isoformat() if self.last_fetched_at else None,
             'last_status': self.last_status,
+            'last_error': self.last_error,
             'domain_count': self.domain_count,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,

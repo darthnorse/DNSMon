@@ -157,3 +157,34 @@ async def test_ensure_insight_sources_seeds_v2fly_once(db_session):
     assert len(rows) == 1
     assert rows[0].enabled is True
     assert rows[0].license == 'MIT'
+
+
+async def test_threat_migrations_add_missing_columns():
+    """Drop each new column, re-run migrations, verify each comes back.
+
+    Asserting the columns merely exist would pass vacuously: create_all() builds
+    them from models.py whether or not the Migration entries are present.
+    """
+    columns = [
+        ('domain_labels', 'threat_type'),
+        ('domain_labels', 'threat_source'),
+        ('insight_sources', 'api_key'),
+        ('insight_sources', 'last_error'),
+    ]
+    async with production_engine.begin() as conn:
+        for table, column in columns:
+            await conn.execute(text(f"ALTER TABLE {table} DROP COLUMN {column}"))
+            gone = await conn.execute(text(
+                "SELECT 1 FROM information_schema.columns "
+                "WHERE table_name = :t AND column_name = :c"), {'t': table, 'c': column})
+            assert gone.fetchone() is None, f"{table}.{column} should be dropped"
+
+        await _run_migrations(conn)
+
+        for table, column in columns:
+            back = await conn.execute(text(
+                "SELECT is_nullable FROM information_schema.columns "
+                "WHERE table_name = :t AND column_name = :c"), {'t': table, 'c': column})
+            row = back.fetchone()
+            assert row is not None, f"migration did not add {table}.{column}"
+            assert row[0] == 'YES', f"{table}.{column} must stay nullable"
