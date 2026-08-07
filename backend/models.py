@@ -3,6 +3,8 @@ from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Index, BigInteger, ForeignKey, JSON
 from sqlalchemy.orm import declarative_base
 
+from .constants import THREAT_SOURCES
+
 Base = declarative_base()
 
 
@@ -611,7 +613,7 @@ class AppDefinition(Base):
     slug = Column(String(100), nullable=False)
     name = Column(String(150), nullable=False)
     category = Column(String(50), nullable=True)
-    source = Column(String(20), nullable=False)  # adguard | dnsmon | v2fly | manual | blocklist
+    source = Column(String(20), nullable=False)  # adguard | dnsmon | v2fly | qfeeds | manual | blocklist
     icon_svg = Column(Text, nullable=True)
     enabled = Column(Boolean, default=True)
     is_category_only = Column(Boolean, nullable=False, default=False)
@@ -716,7 +718,6 @@ class InsightSource(Base):
     @property
     def requires_api_key(self) -> bool:
         """Mirrors THREAT_SOURCES so the frontend need not duplicate that set."""
-        from .constants import THREAT_SOURCES
         return self.kind in THREAT_SOURCES
 
     @property

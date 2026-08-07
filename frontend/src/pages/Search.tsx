@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { queryApi, domainApi } from '../utils/api';
+import ThreatBadge from '../components/ThreatBadge';
 import { getErrorMessage } from '../utils/errors';
 import type { Query, QuerySearchParams } from '../types';
 
@@ -270,7 +271,10 @@ export default function Search() {
                       {format(new Date(query.timestamp), 'MMM dd, yyyy HH:mm:ss')}
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-300 break-all">
-                      {query.domain}
+                      <span className="flex items-center gap-1.5">
+                        {query.domain}
+                        <ThreatBadge threatType={query.threat_type} />
+                      </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-300">
                       {query.client_ip}

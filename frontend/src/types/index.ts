@@ -423,6 +423,7 @@ export interface DomainUsage {
 
 export interface DomainLabelInfo {
   domain: string;
+  threat_type?: string | null;
   registrable: string;
   matched: boolean;
   app_name: string | null;

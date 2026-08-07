@@ -19,6 +19,18 @@ logger = logging.getLogger(__name__)
 # non-writable HOME, so a disk cache write would fail and log a confusing warning.
 _TLD_EXTRACT = tldextract.TLDExtract(suffix_list_urls=(), cache_dir=None)
 
+# Includes the PSL private section (duckdns.org, github.io, …) so multi-tenant
+# parents are recognised as suffixes, not as registrable domains.
+_TLD_EXTRACT_PRIVATE = tldextract.TLDExtract(
+    suffix_list_urls=(), cache_dir=None, include_psl_private_domains=True)
+
+
+def is_public_suffix(domain: str) -> bool:
+    """True when the domain IS a public suffix (co.uk, duckdns.org) rather than a
+    name registered under one. Matching such an entry by suffix walk would tag
+    every domain beneath it."""
+    return not _TLD_EXTRACT_PRIVATE(domain).domain
+
 # Networks that are never legitimate targets for outbound HTTP from this app.
 # RFC 1918 private ranges are intentionally NOT blocked — this app commonly
 # runs on LANs alongside the services it contacts (Pi-hole, AdGuard, ntfy, etc.).

@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import re
+import sys
 from http import HTTPStatus
 from pathlib import Path
 from typing import Optional
@@ -22,7 +23,7 @@ from .constants import (
 )
 from .database import async_session_maker
 from .models import AppDefinition, AppDomain, InsightSource, DomainLabel, DomainStatsHourly, Query
-from .utils import async_resolve_url_safety
+from .utils import async_resolve_url_safety, is_public_suffix
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,10 @@ _THREAT_TYPE_MAX = 20
 
 # The real feed carries ~127k domains; anything near this is an error page.
 _QFEEDS_MIN_DOMAINS = 100
+
+# Bounds memory: every accepted domain is held in the resident matcher and
+# materialised again during insert.
+_QFEEDS_MAX_DOMAINS = 2_000_000
 
 # A halving guard would still admit an upstream serving exactly half each
 # time; 80% leaves no such step, while tolerating real feed churn.
@@ -245,12 +250,12 @@ class ClassificationService:
             )
             db.add(ad)
             await db.flush()  # assign ad.id
-            domain_rows = [
-                {'domain': dom, 'app_id': ad.id, 'is_wildcard': wild}
-                for (dom, wild) in d['domains']
-            ]
-            for i in range(0, len(domain_rows), _DOMAIN_INSERT_BATCH):
-                await db.execute(insert(AppDomain), domain_rows[i:i + _DOMAIN_INSERT_BATCH])
+            doms = d['domains']
+            for i in range(0, len(doms), _DOMAIN_INSERT_BATCH):
+                await db.execute(insert(AppDomain), [
+                    {'domain': dom, 'app_id': ad.id, 'is_wildcard': wild}
+                    for (dom, wild) in doms[i:i + _DOMAIN_INSERT_BATCH]
+                ])
 
         if disabled_slugs:
             await db.execute(update(AppDefinition).where(
@@ -353,9 +358,21 @@ class ClassificationService:
         if text is None:
             return -1
         domains = parse_blocklist_text(text)
+        # A public-suffix entry (ru.net, co.uk, duckdns.org) would tag every domain
+        # beneath it via the matcher's suffix walk. The live feed already carries one.
+        dropped = {d for d in domains if is_public_suffix(d)}
+        if dropped:
+            logger.warning(
+                f"Q-Feeds: dropping {len(dropped)} public-suffix entries: "
+                f"{sorted(dropped)[:5]}")
+            domains -= dropped
         if not domains:
             logger.error("Q-Feeds list yielded 0 domains; keeping existing tier")
             self._last_fetch_error = _NO_DOMAINS_ERROR
+            return -1
+        if len(domains) > _QFEEDS_MAX_DOMAINS:
+            logger.error(f"Q-Feeds returned {len(domains)} domains; refusing")
+            self._last_fetch_error = "Feed implausibly large; refused"
             return -1
         # A 200 maintenance page can still contain one domain-shaped token; without
         # this floor it would replace the whole tier and still report ok. Anchored
@@ -370,7 +387,7 @@ class ClassificationService:
                 "implausible, keeping existing tier")
             self._last_fetch_error = (
                 f"Feed returned {len(domains)} domains vs a peak of {anchor}; "
-                "refused as implausible. Disable and re-enable to accept a new baseline.")
+                "refused as implausible.")
             return -1
         n = await self._replace_source(db, 'qfeeds', [{
             'slug': 'malware', 'name': 'Malware', 'category': None,
@@ -516,18 +533,29 @@ class ClassificationService:
     async def build_threat_matcher(self, db: AsyncSession) -> ThreatMatcher:
         """The complement of build_matcher. A definition's slug is its threat
         type, which generalises if a paid tier later adds phishing."""
+        enabled_kinds = select(InsightSource.kind).where(InsightSource.enabled == True)
         rows = await db.execute(
             select(AppDomain.domain, AppDefinition.slug, AppDefinition.source)
             .join(AppDefinition, AppDomain.app_id == AppDefinition.id)
+            # Also gated on the InsightSource row: a crash between disabling the
+            # source and clearing its definitions must not resurrect the tier.
             .where(AppDefinition.enabled == True, AppDomain.is_wildcard == False,
-                   AppDefinition.source.in_(THREAT_SOURCES))
+                   AppDefinition.source.in_(THREAT_SOURCES),
+                   AppDefinition.source.in_(enabled_kinds))
             # add() is first-wins; unordered, a doubly-claimed domain would flip type.
             .order_by(AppDefinition.source, AppDefinition.slug)
         )
         matcher = ThreatMatcher()
+        # One shared tuple per (slug, source): a per-row tuple of fresh strings
+        # costs ~30 MB resident on a 127k-domain feed.
+        values: dict[tuple[str, str], tuple[str, str]] = {}
         for domain, slug, source in rows:
-            matcher.add(domain, threat_type=slug[:_THREAT_TYPE_MAX],
-                        threat_source=source)
+            key = (slug, source)
+            value = values.get(key)
+            if value is None:
+                value = values[key] = (sys.intern(slug[:_THREAT_TYPE_MAX]),
+                                       sys.intern(source))
+            matcher.add(domain, threat_type=value[0], threat_source=value[1])
         return matcher
 
     def match_threat(self, fqdn: str) -> Optional[tuple[str, str]]:
@@ -553,8 +581,6 @@ class ClassificationService:
 
         matcher = await self.build_matcher(db)
         threat_matcher = await self.build_threat_matcher(db)
-        # Single assignment of a built object — readers never see it half-populated.
-        self._threat_matcher = threat_matcher
         distinct_domains = (await db.execute(
             select(DomainStatsHourly.domain).distinct()
         )).scalars().all()
@@ -592,6 +618,9 @@ class ClassificationService:
             )
             await db.execute(stmt)
         await db.commit()
+        # Swapped only after the commit, so a failed upsert cannot leave the
+        # matcher disagreeing with the labels every UI surface reads.
+        self._threat_matcher = threat_matcher
         logger.info(f"Reclassified {len(values)} distinct domains")
         return len(values)
 
@@ -645,10 +674,19 @@ class ClassificationService:
         )).scalars().all()
         for kind in SINGLETON_SOURCE_KINDS:
             row = next((s for s in sources if s.kind == kind), None)
-            if row:
-                await self._refresh_singleton_row(db, row)
-            else:
-                await self._replace_source(db, kind, [])
+            try:
+                if row:
+                    await self._refresh_singleton_row(db, row)
+                else:
+                    await self._replace_source(db, kind, [])
+            except Exception as e:
+                # Isolated so one bad feed cannot skip the remaining sources,
+                # refresh_blocklists, or the reclassify that follows.
+                await db.rollback()
+                logger.error(_scrub_secrets(f"Refresh of {kind} failed: {e}"), exc_info=True)
+                if row:
+                    row.last_status = 'error'
+                    row.last_error = _scrub_secrets(str(e))[:200]
         await self.refresh_blocklists(db)
         await db.commit()
 

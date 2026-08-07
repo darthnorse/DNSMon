@@ -166,13 +166,15 @@ async def test_threat_migrations_add_missing_columns():
     them from models.py whether or not the Migration entries are present.
     """
     columns = [
-        ('domain_labels', 'threat_type'),
-        ('domain_labels', 'threat_source'),
-        ('insight_sources', 'api_key'),
-        ('insight_sources', 'last_error'),
+        ('domain_labels', 'threat_type', 'YES'),
+        ('domain_labels', 'threat_source', 'YES'),
+        ('insight_sources', 'api_key', 'YES'),
+        ('insight_sources', 'last_error', 'YES'),
+        ('insight_sources', 'domain_count_high_water', 'YES'),
+        ('alert_rules', 'match_threat', 'NO'),
     ]
     async with production_engine.begin() as conn:
-        for table, column in columns:
+        for table, column, _ in columns:
             await conn.execute(text(f"ALTER TABLE {table} DROP COLUMN {column}"))
             gone = await conn.execute(text(
                 "SELECT 1 FROM information_schema.columns "
@@ -181,10 +183,10 @@ async def test_threat_migrations_add_missing_columns():
 
         await _run_migrations(conn)
 
-        for table, column in columns:
+        for table, column, nullable in columns:
             back = await conn.execute(text(
                 "SELECT is_nullable FROM information_schema.columns "
                 "WHERE table_name = :t AND column_name = :c"), {'t': table, 'c': column})
             row = back.fetchone()
             assert row is not None, f"migration did not add {table}.{column}"
-            assert row[0] == 'YES', f"{table}.{column} must stay nullable"
+            assert row[0] == nullable, f"{table}.{column} nullability drifted"

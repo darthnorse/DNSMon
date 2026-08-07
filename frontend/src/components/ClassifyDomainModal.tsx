@@ -4,6 +4,7 @@ import { getErrorMessage } from '../utils/errors';
 import { nearestSuggestion } from '../utils/typoGuard';
 import AutocompleteInput from './AutocompleteInput';
 import type { DomainLabelInfo } from '../types';
+import ThreatBadge from './ThreatBadge';
 import { sourceLabel } from '../utils/labels';
 
 interface Props {
@@ -98,6 +99,7 @@ export default function ClassifyDomainModal({ domain, onClose, onClassified }: P
         {info?.matched && (
           <p className="text-xs mb-3 text-gray-500 dark:text-gray-400">
             Currently: <span className="font-medium">{info.app_name ?? info.category}</span>
+            {' '}<ThreatBadge threatType={info.threat_type ?? null} />
             {' '}(via {sourceLabel(info.matched_source)}){!isManual && ' — saving creates a manual override'}
           </p>
         )}

@@ -356,3 +356,58 @@ async def test_a_modest_shrink_is_still_accepted(db_session, monkeypatch):
     monkeypatch.setattr(svc, '_safe_fetch', lambda url, what: _returns(feed(3600)))
     assert await svc.load_qfeeds(db_session, row) == 1
     assert row.domain_count_high_water == 4000
+
+
+async def test_public_suffix_entries_are_dropped(db_session, monkeypatch):
+    """A bare public suffix would tag every domain beneath it via the suffix
+    walk. The real feed already carries one (ru.net)."""
+    from sqlalchemy import select
+    from backend.models import AppDomain
+    from backend.classification_service import ClassificationService
+
+    svc = ClassificationService()
+    feed = "\n".join(["ru.net", "co.uk", "duckdns.org"] +
+                     [f"evil{i}.example" for i in range(150)])
+    monkeypatch.setattr(svc, '_safe_fetch', lambda url, what: _returns(feed))
+    assert await svc.load_qfeeds(db_session, _Row()) == 1
+
+    stored = set((await db_session.execute(select(AppDomain.domain))).scalars())
+    assert 'ru.net' not in stored
+    assert 'co.uk' not in stored
+    assert 'duckdns.org' not in stored
+    assert 'evil0.example' in stored
+
+
+async def test_entries_under_a_public_suffix_are_kept(db_session, monkeypatch):
+    from sqlalchemy import select
+    from backend.models import AppDomain
+    from backend.classification_service import ClassificationService
+
+    svc = ClassificationService()
+    feed = "\n".join(["bad.duckdns.org", "evil.co.uk"] +
+                     [f"x{i}.example" for i in range(150)])
+    monkeypatch.setattr(svc, '_safe_fetch', lambda url, what: _returns(feed))
+    await svc.load_qfeeds(db_session, _Row())
+
+    stored = set((await db_session.execute(select(AppDomain.domain))).scalars())
+    assert {'bad.duckdns.org', 'evil.co.uk'} <= stored
+
+
+async def test_disabled_source_is_excluded_from_the_threat_matcher(db_session):
+    """A crash between disabling the source and clearing its definitions must
+    not let startup priming resurrect the tier."""
+    from backend.models import AppDefinition, AppDomain
+    from backend.classification_service import ClassificationService
+
+    row = InsightSource(name='Q-Feeds', url=QFEEDS_FEED_URL + '&t=disabled',
+                        kind='qfeeds', format='domains', enabled=False)
+    ad = AppDefinition(slug='malware', name='Malware', category=None,
+                       source='qfeeds', enabled=True, is_category_only=False)
+    db_session.add_all([row, ad])
+    await db_session.flush()
+    db_session.add(AppDomain(domain='evil.com', app_id=ad.id, is_wildcard=False))
+    await db_session.commit()
+
+    svc = ClassificationService()
+    assert await svc.prime_threat_matcher(db_session) == 0
+    assert svc.match_threat('evil.com') is None

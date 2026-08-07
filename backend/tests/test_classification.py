@@ -426,3 +426,11 @@ def test_v2fly_colon_form_attrs_real_artifact_shape():
     carrier = next(d for d in defs if d['slug'] == 'attrcarrier')
     assert carrier['domains'] == [('keep-me.example.com', False),
                                   ('multi.example.com', False)]
+
+
+def test_parse_blocklist_line_rejects_an_overlong_domain():
+    """app_domains.domain is String(255); an over-long entry would abort the
+    insert and take the whole refresh chain down with it."""
+    from backend.classification import parse_blocklist_line
+    assert parse_blocklist_line('a' * 250 + '.com') is None
+    assert parse_blocklist_line('a' * 40 + '.com') == 'a' * 40 + '.com'

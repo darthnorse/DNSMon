@@ -404,6 +404,18 @@ def _threat_def(enabled=True):
                          source='qfeeds', enabled=enabled, is_category_only=False)
 
 
+async def _enable_qfeeds_source(db, enabled=True):
+    """build_threat_matcher is gated on the InsightSource row, not just the
+    AppDefinition, so a disabled source cannot resurrect a stale tier."""
+    from backend.models import InsightSource
+    from backend.constants import QFEEDS_FEED_URL
+    row = InsightSource(name='Q-Feeds', url=QFEEDS_FEED_URL, kind='qfeeds',
+                        format='domains', enabled=enabled, api_key='tip_abc')
+    db.add(row)
+    await db.commit()
+    return row
+
+
 async def test_threat_defs_are_excluded_from_the_app_matcher(db_session):
     from backend.models import AppDomain
     from backend.classification_service import ClassificationService
@@ -419,6 +431,7 @@ async def test_threat_defs_are_excluded_from_the_app_matcher(db_session):
 
 
 async def test_build_threat_matcher_finds_threat_defs(db_session):
+    await _enable_qfeeds_source(db_session)
     from backend.models import AppDomain
     from backend.classification_service import ClassificationService
 
@@ -437,6 +450,8 @@ async def test_app_and_threat_labels_coexist(db_session):
     both a known app and known-malicious must keep BOTH."""
     from backend.models import AppDefinition, AppDomain
     from backend.classification_service import ClassificationService
+
+    await _enable_qfeeds_source(db_session)
 
     app = AppDefinition(slug='netflix', name='Netflix', category='Streaming',
                         source='adguard', enabled=True, is_category_only=False)
@@ -471,6 +486,7 @@ async def test_build_threat_matcher_skips_disabled_defs(db_session):
 
 
 async def test_reclassify_writes_threat_fields(db_session):
+    await _enable_qfeeds_source(db_session)
     from backend.models import AppDomain, DomainLabel, DomainStatsHourly, utcnow
     from backend.classification_service import ClassificationService
 
@@ -499,6 +515,8 @@ async def test_reclassify_persists_app_and_threat_on_one_row(db_session):
     land on the SAME domain_labels row."""
     from backend.models import AppDefinition, AppDomain, DomainLabel, DomainStatsHourly, utcnow
     from backend.classification_service import ClassificationService
+
+    await _enable_qfeeds_source(db_session)
 
     app = AppDefinition(slug='netflix', name='Netflix', category='Streaming',
                         source='adguard', enabled=True, is_category_only=False)
@@ -540,6 +558,7 @@ async def test_reclassify_clears_a_stale_threat_tag(db_session):
 
 
 async def test_match_threat_uses_the_resident_matcher(db_session):
+    await _enable_qfeeds_source(db_session)
     from backend.models import AppDomain
     from backend.classification_service import ClassificationService
 
@@ -563,6 +582,8 @@ async def test_prime_threat_matcher_loads_the_persisted_tier(db_session):
     from backend.models import AppDomain
     from backend.classification_service import ClassificationService
 
+    await _enable_qfeeds_source(db_session)
+
     ad = _threat_def()
     db_session.add(ad)
     await db_session.flush()
@@ -581,6 +602,8 @@ async def test_build_threat_matcher_truncates_an_overlong_slug(db_session):
     whole reclassify upsert."""
     from backend.models import AppDefinition, AppDomain
     from backend.classification_service import ClassificationService
+
+    await _enable_qfeeds_source(db_session)
 
     ad = AppDefinition(slug='x' * 40, name='Long', category=None,
                        source='qfeeds', enabled=True, is_category_only=False)

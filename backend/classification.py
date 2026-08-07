@@ -10,6 +10,10 @@ from .constants import SOURCE_PRECEDENCE
 
 _DOMAIN_RE = re.compile(r'^[a-z0-9.*-]+$')
 
+# app_domains.domain is String(255); an over-long entry would abort the insert
+# and take the whole refresh down with it.
+_MAX_DOMAIN_LENGTH = 253
+
 
 def parse_adguard_rule(rule: str) -> Optional[Tuple[str, bool]]:
     """Normalize an AdGuard ``||domain^`` rule to ``(bare_domain, is_wildcard)``.
@@ -64,7 +68,7 @@ def parse_blocklist_line(line: str) -> Optional[str]:
     if tok.startswith('*.'):
         tok = tok[2:]
     tok = tok.strip('.')
-    if (not tok or '.' not in tok or '*' in tok
+    if (not tok or '.' not in tok or '*' in tok or len(tok) > _MAX_DOMAIN_LENGTH
             or tok in _BLOCKLIST_NOISE or not _DOMAIN_RE.match(tok)):
         return None
     return tok
