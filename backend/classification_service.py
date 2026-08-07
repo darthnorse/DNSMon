@@ -245,11 +245,17 @@ class ClassificationService:
     async def _safe_fetch(self, url: str, what: str) -> Optional[str]:
         """Fetch `url` (SSRF-validated and IP-pinned per hop by
         _fetch_capped_text); None on any failure (already logged)."""
+        self._last_fetch_error = None
         try:
             return await self._fetch_capped_text(url)
         except (httpx.HTTPError, ValueError) as e:
+            self._last_fetch_error = f"{type(e).__name__}: {e}"
             logger.error(_scrub_secrets(f"Failed to fetch {what}: {e}"))
             return None
+
+    def _failure_message(self) -> str:
+        """Scrubbed and bounded, for a last_error column readable by any user."""
+        return _scrub_secrets(self._last_fetch_error or 'Refresh failed')[:200]
 
     async def load_dnsmon(self, db: AsyncSession, row) -> int:
         """Fetch the remote DNSMon curated list and replace the 'dnsmon' source.
@@ -431,6 +437,7 @@ class ClassificationService:
             text = await self._safe_fetch(src.url, f"blocklist {src.name}")
             if text is None:
                 src.last_status = 'error'
+                src.last_error = self._failure_message()
                 continue
             domains = parse_blocklist_text(text)
             if not domains:
@@ -438,8 +445,10 @@ class ClassificationService:
                 # must not wipe the tier — mark it an error and keep prior data.
                 logger.error(f"Blocklist {src.name} yielded 0 domains; treating as error")
                 src.last_status = 'error'
+                src.last_error = 'Feed returned no usable domains'
                 continue
             src.last_status = 'ok'
+            src.last_error = None
             src.last_fetched_at = utcnow()
             src.domain_count = len(domains)
             fetched.append((src.category, domains))
@@ -587,6 +596,9 @@ class ClassificationService:
         if n >= 0:
             row.last_fetched_at = utcnow()
             row.domain_count = await self._source_domain_count(db, row.kind)
+            row.last_error = None
+        else:
+            row.last_error = self._failure_message()
 
     async def _refresh_all_sources(self, db: AsyncSession) -> None:
         """Fetch every enabled insight_sources row, dispatch by kind, replace each
