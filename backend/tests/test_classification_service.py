@@ -468,3 +468,109 @@ async def test_build_threat_matcher_skips_disabled_defs(db_session):
     await db_session.commit()
 
     assert len(await ClassificationService().build_threat_matcher(db_session)) == 0
+
+
+async def test_reclassify_writes_threat_fields(db_session):
+    from backend.models import AppDomain, DomainLabel, DomainStatsHourly, utcnow
+    from backend.classification_service import ClassificationService
+
+    ad = _threat_def()
+    db_session.add(ad)
+    await db_session.flush()
+    db_session.add(AppDomain(domain='evil.com', app_id=ad.id, is_wildcard=False))
+    db_session.add(DomainStatsHourly(hour=utcnow(), server='pihole1',
+                                     domain='cdn.evil.com', total=1))
+    db_session.add(DomainStatsHourly(hour=utcnow(), server='pihole1',
+                                     domain='clean.example', total=1))
+    await db_session.commit()
+
+    await ClassificationService()._do_reclassify(db_session)
+
+    evil = await db_session.get(DomainLabel, 'cdn.evil.com')
+    assert (evil.threat_type, evil.threat_source) == ('malware', 'qfeeds')
+    assert evil.app_name is None
+
+    clean = await db_session.get(DomainLabel, 'clean.example')
+    assert clean.threat_type is None and clean.threat_source is None
+
+
+async def test_reclassify_persists_app_and_threat_on_one_row(db_session):
+    """End-to-end version of the coexistence guarantee: both dimensions must
+    land on the SAME domain_labels row."""
+    from backend.models import AppDefinition, AppDomain, DomainLabel, DomainStatsHourly, utcnow
+    from backend.classification_service import ClassificationService
+
+    app = AppDefinition(slug='netflix', name='Netflix', category='Streaming',
+                        source='adguard', enabled=True, is_category_only=False)
+    threat = _threat_def()
+    db_session.add_all([app, threat])
+    await db_session.flush()
+    db_session.add_all([
+        AppDomain(domain='shared.example', app_id=app.id, is_wildcard=False),
+        AppDomain(domain='shared.example', app_id=threat.id, is_wildcard=False),
+    ])
+    db_session.add(DomainStatsHourly(hour=utcnow(), server='pihole1',
+                                     domain='shared.example', total=1))
+    await db_session.commit()
+
+    await ClassificationService()._do_reclassify(db_session)
+
+    row = await db_session.get(DomainLabel, 'shared.example')
+    assert row.app_name == 'Netflix'
+    assert row.category == 'Streaming'
+    assert row.threat_type == 'malware'
+
+
+async def test_reclassify_clears_a_stale_threat_tag(db_session):
+    """A domain dropped from the feed must lose its tag on the next reclassify."""
+    from backend.models import DomainLabel, DomainStatsHourly, utcnow
+    from backend.classification_service import ClassificationService
+
+    db_session.add(DomainLabel(domain='was-bad.example', threat_type='malware',
+                               threat_source='qfeeds'))
+    db_session.add(DomainStatsHourly(hour=utcnow(), server='pihole1',
+                                     domain='was-bad.example', total=1))
+    await db_session.commit()
+
+    await ClassificationService()._do_reclassify(db_session)
+
+    row = await db_session.get(DomainLabel, 'was-bad.example')
+    await db_session.refresh(row)
+    assert row.threat_type is None
+
+
+async def test_match_threat_uses_the_resident_matcher(db_session):
+    from backend.models import AppDomain
+    from backend.classification_service import ClassificationService
+
+    svc = ClassificationService()
+    # Nothing built yet — must not raise.
+    assert svc.match_threat('evil.com') is None
+
+    ad = _threat_def()
+    db_session.add(ad)
+    await db_session.flush()
+    db_session.add(AppDomain(domain='evil.com', app_id=ad.id, is_wildcard=False))
+    await db_session.commit()
+
+    await svc._do_reclassify(db_session)
+    assert svc.match_threat('cdn.evil.com') == ('malware', 'qfeeds')
+
+
+async def test_prime_threat_matcher_loads_the_persisted_tier(db_session):
+    """The first alert pass runs BEFORE the first reclassify (service.py
+    _run_initial_ingestion), so a matcher populated only by reclassify would be
+    empty exactly when the first queries are evaluated."""
+    from backend.models import AppDomain
+    from backend.classification_service import ClassificationService
+
+    ad = _threat_def()
+    db_session.add(ad)
+    await db_session.flush()
+    db_session.add(AppDomain(domain='evil.com', app_id=ad.id, is_wildcard=False))
+    await db_session.commit()
+
+    svc = ClassificationService()
+    assert svc.match_threat('evil.com') is None
+    assert await svc.prime_threat_matcher(db_session) == 1
+    assert svc.match_threat('cdn.evil.com') == ('malware', 'qfeeds')

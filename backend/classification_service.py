@@ -471,6 +471,23 @@ class ClassificationService:
             matcher.add(domain, threat_type=slug, threat_source=source)
         return matcher
 
+    def match_threat(self, fqdn: str) -> Optional[tuple[str, str]]:
+        """Threat status for a domain from the resident matcher, or None.
+
+        Safe to call before the first build — an empty matcher simply misses."""
+        return self._threat_matcher.match(fqdn)
+
+    async def prime_threat_matcher(self, db: AsyncSession) -> int:
+        """Load the already-persisted threat tier into the resident matcher.
+
+        Pure DB read, no network. Required at startup because
+        _run_initial_ingestion runs ingest_and_alert() BEFORE
+        classification_task(), so a matcher populated only by reclassify would be
+        empty for the first alert pass — and those queries are never
+        re-evaluated."""
+        self._threat_matcher = await self.build_threat_matcher(db)
+        return len(self._threat_matcher)
+
     async def _do_reclassify(self, db: AsyncSession) -> int:
         """Resolve every distinct observed domain into domain_labels.
 
@@ -480,6 +497,10 @@ class ClassificationService:
         from .models import utcnow
 
         matcher = await self.build_matcher(db)
+        threat_matcher = await self.build_threat_matcher(db)
+        # Single assignment of an already-built object: readers never observe a
+        # partially-populated matcher, so no reader-side locking is needed.
+        self._threat_matcher = threat_matcher
         distinct_domains = (await db.execute(
             select(DomainStatsHourly.domain).distinct()
         )).scalars().all()
@@ -488,12 +509,15 @@ class ClassificationService:
         values = []
         for fqdn in distinct_domains:
             hit = matcher.match(fqdn)
+            threat = threat_matcher.match(fqdn)
             values.append({
                 'domain': fqdn,
                 'app_id': hit.app_id if hit else None,
                 'app_name': hit.app_name if hit else None,
                 'category': hit.category if hit else None,
                 'matched_source': hit.matched_source if hit else None,
+                'threat_type': threat[0] if threat else None,
+                'threat_source': threat[1] if threat else None,
                 'classified_at': now,
             })
 
@@ -507,6 +531,8 @@ class ClassificationService:
                     'app_name': stmt.excluded.app_name,
                     'category': stmt.excluded.category,
                     'matched_source': stmt.excluded.matched_source,
+                    'threat_type': stmt.excluded.threat_type,
+                    'threat_source': stmt.excluded.threat_source,
                     'classified_at': stmt.excluded.classified_at,
                 },
             )

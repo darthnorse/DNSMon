@@ -197,6 +197,12 @@ class DNSMonService:
         """Run initial ingestion with error handling"""
         try:
             await self.ingestion_service.backfill_hourly_stats()
+            # Must precede ingest_and_alert(): classification_task() runs after
+            # it, so without this the resident threat matcher would be empty
+            # exactly when the first batch of queries is evaluated for alerts,
+            # and those queries are never re-evaluated.
+            async with async_session_maker() as db:
+                await self.classification_service.prime_threat_matcher(db)
             await self.ingest_and_alert()
             await self.classification_task()
         except Exception as e:
