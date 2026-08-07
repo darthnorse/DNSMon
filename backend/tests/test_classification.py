@@ -452,3 +452,16 @@ def test_v2fly_still_parses_unquoted_list_names():
     text = '  - name: netflix\n    rules:\n      - "domain:netflix.com"\n'
     defs = parse_v2fly_entries(text, {'netflix': {'name': 'Netflix', 'category': 'Streaming'}})
     assert len(defs) == 1 and defs[0]['slug'] == 'netflix'
+
+
+def test_v2fly_unparsable_name_does_not_leak_domains_into_the_previous_list():
+    """A name line the regex rejects must reset the list context; otherwise its
+    rules are silently merged into the preceding app definition."""
+    from backend.classification import parse_v2fly_entries
+    text = (
+        '  - name: "netflix"\n    rules:\n      - "domain:netflix.com"\n'
+        '  - name: "we"ird"\n    rules:\n      - "domain:evil.example"\n'
+    )
+    defs = parse_v2fly_entries(text, {'netflix': {'name': 'Netflix', 'category': 'Streaming'}})
+    assert len(defs) == 1
+    assert defs[0]['domains'] == [('netflix.com', False)]

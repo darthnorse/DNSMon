@@ -96,10 +96,18 @@ export default function ClassifyDomainModal({ domain, onClose, onClassified }: P
         <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-1">Classify domain</h3>
         <p className="text-sm text-gray-500 dark:text-gray-400 break-all mb-4">{domain}</p>
 
+        {/* Outside the `matched` block: that flag reflects only the app/category
+            label, so a threat-only domain — the case an admin most needs warning
+            about — would otherwise show no badge at all. */}
+        {info?.threat_type && (
+          <p className="text-xs mb-2">
+            <ThreatBadge threatType={info.threat_type} />
+          </p>
+        )}
+
         {info?.matched && (
           <p className="text-xs mb-3 text-gray-500 dark:text-gray-400">
             Currently: <span className="font-medium">{info.app_name ?? info.category}</span>
-            {' '}<ThreatBadge threatType={info.threat_type ?? null} />
             {' '}(via {sourceLabel(info.matched_source)}){!isManual && ' — saving creates a manual override'}
           </p>
         )}

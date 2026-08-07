@@ -9,6 +9,7 @@ from typing import Optional
 
 import httpx
 from sqlalchemy import select, delete, insert, update, func
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .classification import (
@@ -22,7 +23,8 @@ from .constants import (
     THREAT_SOURCES,
 )
 from .database import async_session_maker
-from .models import AppDefinition, AppDomain, InsightSource, DomainLabel, DomainStatsHourly, Query
+from .models import (AppDefinition, AppDomain, InsightSource, DomainLabel,
+                     DomainStatsHourly, Query, utcnow)
 from .utils import async_resolve_url_safety, is_public_suffix
 
 logger = logging.getLogger(__name__)
@@ -49,6 +51,10 @@ _MAX_BLOCKLIST_BYTES = 64 * 1024 * 1024
 
 # threat_type is VARCHAR(20) but its source, slug, is VARCHAR(100).
 _THREAT_TYPE_MAX = 20
+
+# 4 bind params per row against PostgreSQL's ~32k cap, matching the sibling
+# bulk writers.
+_LABEL_INSERT_BATCH = 2000
 
 # The real feed carries ~127k domains; anything near this is an error page.
 _QFEEDS_MIN_DOMAINS = 100
@@ -472,7 +478,6 @@ class ClassificationService:
         domains (every fetch failed, or returned an unparseable/empty body) →
         leaves existing data untouched (returns -1). Not lock-protected: callers
         run_full holds the lock."""
-        from .models import utcnow
         sources = (await db.execute(
             select(InsightSource).where(
                 InsightSource.enabled == True, InsightSource.kind == 'hosts')
@@ -563,36 +568,41 @@ class ClassificationService:
         first build — an empty matcher simply misses."""
         return self._threat_matcher.match(fqdn)
 
-    async def record_threat_labels(self, db: AsyncSession, hits: dict[str, str]) -> int:
+    async def record_threat_labels(
+            self, db: AsyncSession, hits: dict[str, tuple[str, str]]) -> int:
         """Persist threat tags for domains the alert path just matched.
 
         The alert engine reads the live matcher while every UI surface reads
         domain_labels, which only _do_reclassify writes (every
         classification_refresh_hours, default 24h). Without this an operator
         paged about a domain would open the Dashboard and see it unflagged.
-        Touches only the threat columns, so it cannot clobber an app/category
-        label that reclassify owns."""
-        if not hits:
+
+        Skipped while a reclassify holds the lock: that pass owns domain_labels
+        and is about to write authoritative values, so a concurrent write here
+        could resurrect a tag it just cleared. Touches only the threat columns,
+        so it cannot clobber the app/category label reclassify owns.
+        """
+        if not hits or self._lock.locked():
             return 0
-        from sqlalchemy.dialects.postgresql import insert as pg_insert
-        from .models import utcnow
 
-        now = utcnow()
-        stmt = pg_insert(DomainLabel).values([
-            {'domain': d, 'threat_type': t, 'threat_source': self._threat_source_for(d),
-             'classified_at': now}
-            for d, t in hits.items()
-        ])
-        await db.execute(stmt.on_conflict_do_update(
-            index_elements=['domain'],
-            set_={'threat_type': stmt.excluded.threat_type,
-                  'threat_source': stmt.excluded.threat_source}))
-        await db.commit()
+        async with self._lock:
+            now = utcnow()
+            # Sorted so this and _do_reclassify take row locks in the same order;
+            # opposing orders on overlapping domains deadlock.
+            items = sorted(hits.items())
+            for i in range(0, len(items), _LABEL_INSERT_BATCH):
+                stmt = pg_insert(DomainLabel).values([
+                    {'domain': d, 'threat_type': t, 'threat_source': src,
+                     'classified_at': now}
+                    for d, (t, src) in items[i:i + _LABEL_INSERT_BATCH]
+                ])
+                await db.execute(stmt.on_conflict_do_update(
+                    index_elements=['domain'],
+                    set_={'threat_type': stmt.excluded.threat_type,
+                          'threat_source': stmt.excluded.threat_source,
+                          'classified_at': stmt.excluded.classified_at}))
+            await db.commit()
         return len(hits)
-
-    def _threat_source_for(self, domain: str) -> Optional[str]:
-        hit = self._threat_matcher.match(domain)
-        return hit[1] if hit else None
 
     async def prime_threat_matcher(self, db: AsyncSession) -> int:
         """Load the persisted threat tier into the resident matcher (no network).
@@ -607,14 +617,11 @@ class ClassificationService:
 
         Stores a row for every distinct domain (matched or not). Idempotent —
         upserts on the `domain` primary key. Returns rows written."""
-        from sqlalchemy.dialects.postgresql import insert as pg_insert
-        from .models import utcnow
-
         matcher = await self.build_matcher(db)
         threat_matcher = await self.build_threat_matcher(db)
-        distinct_domains = (await db.execute(
+        distinct_domains = sorted((await db.execute(
             select(DomainStatsHourly.domain).distinct()
-        )).scalars().all()
+        )).scalars().all())
 
         now = utcnow()
         values = []
@@ -683,7 +690,6 @@ class ClassificationService:
 
     async def _refresh_singleton_row(self, db: AsyncSession, row) -> None:
         """Fetch one enabled singleton-kind row and record its status + real domain count."""
-        from .models import utcnow
         loaders = {'adguard': self.refresh_feed, 'dnsmon': self.load_dnsmon,
                    'v2fly': self.load_v2fly, 'qfeeds': self.load_qfeeds}
         refresh = loaders[row.kind]
@@ -700,24 +706,33 @@ class ClassificationService:
     async def _refresh_all_sources(self, db: AsyncSession) -> None:
         """Fetch every enabled insight_sources row, dispatch by kind, replace each
         target app_definitions source. Tiers with no enabled row are cleared."""
-        sources = (await db.execute(
-            select(InsightSource).where(InsightSource.enabled == True)
-        )).scalars().all()
         for kind in SINGLETON_SOURCE_KINDS:
-            row = next((s for s in sources if s.kind == kind), None)
+            row = None
             try:
+                # Re-selected per iteration rather than hoisted: a rollback in the
+                # handler below expires every loaded instance, and reading .kind
+                # off an expired object outside a greenlet raises MissingGreenlet
+                # — which would escape this loop and skip the remaining sources,
+                # refresh_blocklists and the reclassify, i.e. exactly what this
+                # isolation exists to prevent.
+                row = (await db.execute(select(InsightSource).where(
+                    InsightSource.enabled == True, InsightSource.kind == kind
+                ))).scalars().first()
                 if row:
                     await self._refresh_singleton_row(db, row)
                 else:
                     await self._replace_source(db, kind, [])
+                await db.commit()
             except Exception as e:
-                # Isolated so one bad feed cannot skip the remaining sources,
-                # refresh_blocklists, or the reclassify that follows.
                 await db.rollback()
                 logger.error(_scrub_secrets(f"Refresh of {kind} failed: {e}"), exc_info=True)
-                if row:
+                if row is not None:
+                    row = await db.merge(row)
                     row.last_status = 'error'
                     row.last_error = _scrub_secrets(str(e))[:200]
+                    # Committed here: a later iteration's rollback would
+                    # otherwise discard this status along with its own.
+                    await db.commit()
         await self.refresh_blocklists(db)
         await db.commit()
 

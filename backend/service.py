@@ -206,7 +206,7 @@ class DNSMonService:
             for domain in {q.domain for q in ingested_queries}:
                 hit = svc.match_threat(domain)
                 if hit:
-                    hits[domain] = hit[0]
+                    hits[domain] = hit
             if hits:
                 async with async_session_maker() as db:
                     await svc.record_threat_labels(db, hits)

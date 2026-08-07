@@ -424,7 +424,7 @@ async def test_record_threat_labels_writes_only_threat_columns(db_session):
 
     svc = ClassificationService()
     svc._threat_matcher.add('evil.com', 'malware', 'qfeeds')
-    assert await svc.record_threat_labels(db_session, {'evil.com': 'malware'}) == 1
+    assert await svc.record_threat_labels(db_session, {'evil.com': ('malware', 'qfeeds')}) == 1
 
     row = await db_session.get(DomainLabel, 'evil.com')
     await db_session.refresh(row)
@@ -440,7 +440,7 @@ async def test_record_threat_labels_creates_a_row_for_an_unseen_domain(db_sessio
 
     svc = ClassificationService()
     svc._threat_matcher.add('brand.new', 'malware', 'qfeeds')
-    await svc.record_threat_labels(db_session, {'brand.new': 'malware'})
+    await svc.record_threat_labels(db_session, {'brand.new': ('malware', 'qfeeds')})
 
     row = await db_session.get(DomainLabel, 'brand.new')
     assert row is not None and row.threat_type == 'malware'
@@ -489,3 +489,29 @@ async def test_match_threat_rules_are_inert_without_a_feed(db_session):
     assert await svc.prime_threat_matcher(db_session) == 0
     assert svc.match_threat('anything.example') is None
     assert AlertEngine(svc)._resolve_threats([], []) == {}
+
+
+async def test_record_threat_labels_skips_while_a_reclassify_holds_the_lock(db_session):
+    """That pass owns domain_labels and is about to write authoritative values;
+    writing concurrently could resurrect a tag it just cleared."""
+    from backend.models import DomainLabel
+    from backend.classification_service import ClassificationService
+
+    svc = ClassificationService()
+    async with svc._lock:
+        assert await svc.record_threat_labels(
+            db_session, {'evil.com': ('malware', 'qfeeds')}) == 0
+    assert await db_session.get(DomainLabel, 'evil.com') is None
+
+
+async def test_record_threat_labels_batches_beyond_the_bind_param_cap(db_session):
+    """4 params/row against PostgreSQL's ~32k cap: >8191 rows in one statement
+    fails outright."""
+    from sqlalchemy import select, func
+    from backend.models import DomainLabel
+    from backend.classification_service import ClassificationService
+
+    hits = {f'evil{i}.example': ('malware', 'qfeeds') for i in range(9000)}
+    assert await ClassificationService().record_threat_labels(db_session, hits) == 9000
+    assert await db_session.scalar(
+        select(func.count()).select_from(DomainLabel)) == 9000

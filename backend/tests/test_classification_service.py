@@ -614,3 +614,49 @@ async def test_build_threat_matcher_truncates_an_overlong_slug(db_session):
 
     hit = (await ClassificationService().build_threat_matcher(db_session)).match('evil.com')
     assert hit is not None and len(hit[0]) == 20
+
+
+async def test_one_failing_source_does_not_skip_the_others(db_session, monkeypatch):
+    """A rollback expires every loaded instance; reading .kind off an expired
+    object outside a greenlet raises MissingGreenlet, which would escape the
+    loop and skip the remaining sources, refresh_blocklists and the reclassify."""
+    from backend.models import InsightSource
+    from backend.classification_service import ClassificationService
+
+    db_session.add_all([
+        InsightSource(name='AdGuard', url='https://example.invalid/ag.json',
+                      kind='adguard', format='adguard', enabled=True),
+        InsightSource(name='DNSMon', url='https://example.invalid/dm.json',
+                      kind='dnsmon', format='json', enabled=True),
+    ])
+    await db_session.commit()
+
+    svc = ClassificationService()
+    reached = []
+
+    async def boom(db, row):
+        raise RuntimeError("adguard exploded")
+
+    async def ok(db, row):
+        reached.append(row.kind)
+        return 1
+
+    monkeypatch.setattr(svc, 'refresh_feed', boom)
+    monkeypatch.setattr(svc, 'load_dnsmon', ok)
+    monkeypatch.setattr(svc, 'refresh_blocklists', lambda db: _done(reached))
+
+    await svc._refresh_all_sources(db_session)
+
+    assert 'dnsmon' in reached, "a later source was skipped"
+    assert 'blocklists' in reached, "refresh_blocklists was skipped"
+
+    adguard = (await db_session.execute(select(InsightSource).where(
+        InsightSource.url == 'https://example.invalid/ag.json'))).scalars().one()
+    await db_session.refresh(adguard)
+    assert adguard.last_status == 'error'
+    assert 'exploded' in (adguard.last_error or '')
+
+
+async def _done(reached):
+    reached.append('blocklists')
+    return 0

@@ -95,9 +95,12 @@ def parse_v2fly_entries(text: str, mapping: dict) -> list[dict]:
     domains_by_list: dict[str, set[str]] = {}
     current: Optional[str] = None
     for line in text.splitlines():
-        m = _V2FLY_NAME_RE.match(line)
-        if m:
-            current = m.group(1) if m.group(1) in mapping else None
+        if line.startswith('  - name:'):
+            # Reset on ANY name line, not just a parsed one: a line the regex
+            # rejects would otherwise leave `current` on the previous list and
+            # silently merge this one's domains into it.
+            m = _V2FLY_NAME_RE.match(line)
+            current = m.group(1) if (m and m.group(1) in mapping) else None
             continue
         if current is None:
             continue

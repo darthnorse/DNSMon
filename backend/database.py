@@ -4,9 +4,15 @@ from typing import NamedTuple, Optional
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.pool import NullPool
 from sqlalchemy import text
+from .constants import HAGEZI_FEED_URL
 from .models import Base
 
 logger = logging.getLogger(__name__)
+
+_STALE_HAGEZI_URL = (
+    "https://raw.githubusercontent.com/hagezi/dns-blocklists"
+    "/main/domains/pro.plus.txt"
+)
 
 
 class Migration(NamedTuple):
@@ -137,11 +143,15 @@ async def _run_migrations(conn):
 
     # Hagezi deleted domains/ upstream, so the seeded URL 404s. hosts rows are
     # keyed on url, so seeding the new one would add a second row instead of
-    # fixing this one. Idempotent: matches nothing once applied.
+    # fixing this one. url is uniquely indexed and this runs inside init_db's
+    # transaction, so a blind UPDATE would raise on a duplicate and leave the
+    # app unable to start — guard, then drop the now-redundant stale row.
     await conn.execute(text(
-        "UPDATE insight_sources SET url = :new WHERE url = :old"),
-        {'new': "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro.plus-onlydomains.txt",
-         'old': "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/pro.plus.txt"})
+        "UPDATE insight_sources SET url = :new WHERE url = :old "
+        "AND NOT EXISTS (SELECT 1 FROM insight_sources WHERE url = :new)"),
+        {'new': HAGEZI_FEED_URL, 'old': _STALE_HAGEZI_URL})
+    await conn.execute(text(
+        "DELETE FROM insight_sources WHERE url = :old"), {'old': _STALE_HAGEZI_URL})
 
     # create_all only builds indexes for NEW tables, so an upgraded install needs
     # this explicitly. IF NOT EXISTS keeps it idempotent.
