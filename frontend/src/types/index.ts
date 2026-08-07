@@ -525,8 +525,10 @@ export interface InsightSource {
   format: string;
   license: string | null;
   enabled: boolean;
+  has_api_key: boolean;
   last_fetched_at: string | null;
   last_status: 'ok' | 'error' | null;
+  last_error: string | null;
   domain_count: number | null;
   created_at: string;
   updated_at: string;

@@ -61,6 +61,21 @@ def _scrub_secrets(msg: str) -> str:
     return _SECRET_PARAM_RE.sub(r'\1***', msg)
 
 
+def _describe_fetch_error(e: Exception) -> str:
+    """Short operator-facing reason for a failed fetch.
+
+    httpx stringifies with the SSRF-pinned request IP and an MDN link, which is
+    noise in a 200-char column an admin reads to fix their config.
+    """
+    if isinstance(e, httpx.HTTPStatusError):
+        return f"HTTP {e.response.status_code} {e.response.reason_phrase}".strip()
+    if isinstance(e, httpx.TimeoutException):
+        return "Timed out contacting the feed"
+    if isinstance(e, httpx.TransportError):
+        return f"Could not reach the feed ({type(e).__name__})"
+    return str(e) or type(e).__name__
+
+
 def build_qfeeds_url(base_url: str, api_key: str) -> str:
     """Merge the API token into the stored (token-free) feed URL.
 
@@ -249,7 +264,7 @@ class ClassificationService:
         try:
             return await self._fetch_capped_text(url)
         except (httpx.HTTPError, ValueError) as e:
-            self._last_fetch_error = f"{type(e).__name__}: {e}"
+            self._last_fetch_error = _describe_fetch_error(e)
             logger.error(_scrub_secrets(f"Failed to fetch {what}: {e}"))
             return None
 

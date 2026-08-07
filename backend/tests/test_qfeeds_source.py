@@ -177,3 +177,27 @@ async def test_first_load_accepts_a_feed_above_the_floor(db_session, monkeypatch
     monkeypatch.setattr(svc, '_safe_fetch', lambda url, what: _returns(
         "\n".join(f"evil{i}.example" for i in range(150))))
     assert await svc.load_qfeeds(db_session, _Row()) == 1
+
+
+def test_describe_fetch_error_summarises_a_status_error():
+    from backend.classification_service import _describe_fetch_error
+    resp = httpx.Response(401, request=httpx.Request(
+        'GET', 'https://172.67.73.170/api?api_token=tip_secret'))
+    e = httpx.HTTPStatusError('boom', request=resp.request, response=resp)
+    out = _describe_fetch_error(e)
+    assert out == 'HTTP 401 Unauthorized'
+    assert 'tip_secret' not in out
+    assert '172.67' not in out
+
+
+def test_describe_fetch_error_handles_timeout_and_transport():
+    from backend.classification_service import _describe_fetch_error
+    req = httpx.Request('GET', 'https://x/y')
+    assert 'Timed out' in _describe_fetch_error(httpx.ConnectTimeout('t', request=req))
+    assert 'Could not reach' in _describe_fetch_error(httpx.ConnectError('c', request=req))
+
+
+def test_describe_fetch_error_passes_through_value_errors():
+    from backend.classification_service import _describe_fetch_error
+    assert _describe_fetch_error(ValueError('unsafe fetch target: loopback')) == \
+        'unsafe fetch target: loopback'

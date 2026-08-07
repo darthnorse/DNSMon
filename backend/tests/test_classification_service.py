@@ -606,7 +606,7 @@ async def test_singleton_refresh_records_a_scrubbed_last_error(db_session, monke
     svc = ClassificationService()
 
     async def failing_fetch(url, what):
-        svc._last_fetch_error = f"HTTPStatusError: 403 for {url}"
+        svc._last_fetch_error = f"403 for {url}"
         return None
 
     monkeypatch.setattr(svc, '_safe_fetch', failing_fetch)

@@ -483,8 +483,11 @@ export const appDefinitionApi = {
 export const insightSourceApi = {
   getAll: async (): Promise<InsightSource[]> =>
     (await api.get<InsightSource[]>('/insight-sources')).data,
-  toggle: async (id: number, enabled: boolean): Promise<InsightSource> =>
-    (await api.patch<InsightSource>(`/insight-sources/${id}`, { enabled })).data,
+  update: async (
+    id: number,
+    patch: { enabled?: boolean; api_key?: string },
+  ): Promise<InsightSource> =>
+    (await api.patch<InsightSource>(`/insight-sources/${id}`, patch)).data,
   refresh: async (): Promise<void> => { await api.post('/insight-sources/refresh'); },
 };
 

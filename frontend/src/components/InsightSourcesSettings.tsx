@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, Fragment } from 'react';
 import { insightSourceApi } from '../utils/api';
 import { getErrorMessage } from '../utils/errors';
 import type { InsightSource } from '../types';
@@ -13,6 +13,7 @@ export default function InsightSourcesSettings({ onError, onSuccess }: Props) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [keyDrafts, setKeyDrafts] = useState<Record<number, string>>({});
 
   const mountedRef = useRef(true);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -44,11 +45,30 @@ export default function InsightSourcesSettings({ onError, onSuccess }: Props) {
     onError(null);
     try {
       setSaving(true);
-      await insightSourceApi.toggle(src.id, !src.enabled);
+      await insightSourceApi.update(src.id, { enabled: !src.enabled });
       onSuccess('Saved — insights update shortly');
       await loadData();
     } catch (err: unknown) {
       onError(getErrorMessage(err, 'Failed to update insight source'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveKey = async (src: InsightSource) => {
+    onError(null);
+    try {
+      setSaving(true);
+      await insightSourceApi.update(src.id, { api_key: keyDrafts[src.id] ?? '' });
+      setKeyDrafts((prev) => {
+        const next = { ...prev };
+        delete next[src.id];
+        return next;
+      });
+      onSuccess('API key saved');
+      await loadData();
+    } catch (err: unknown) {
+      onError(getErrorMessage(err, 'Failed to save API key'));
     } finally {
       setSaving(false);
     }
@@ -78,8 +98,12 @@ export default function InsightSourcesSettings({ onError, onSuccess }: Props) {
   const formatDate = (dateStr: string | null): string =>
     dateStr ? new Date(dateStr).toLocaleString() : 'Never';
 
-  const provides = (kind: string): string =>
-    kind === 'hosts' ? 'Categories' : 'Apps + Categories';
+  const provides = (kind: string): string => {
+    if (kind === 'qfeeds') return 'Threat tagging';
+    return kind === 'hosts' ? 'Categories' : 'Apps + Categories';
+  };
+
+  const needsApiKey = (kind: string): boolean => kind === 'qfeeds';
 
   if (loading) {
     return (
@@ -105,7 +129,8 @@ export default function InsightSourcesSettings({ onError, onSuccess }: Props) {
       <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
         The feeds that power the Insights page. App feeds (AdGuard, DNSMon, v2fly) name apps
         and tint categories; category feeds only tint categories. A real app match always
-        wins over a category bucket.
+        wins over a category bucket. Threat feeds tag domains as malicious independently —
+        a domain can carry both an app label and a threat tag.
       </p>
 
       {sources.length === 0 ? (
@@ -126,7 +151,8 @@ export default function InsightSourcesSettings({ onError, onSuccess }: Props) {
             </thead>
             <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
               {sources.map((src) => (
-                <tr key={src.id} className={src.enabled ? '' : 'opacity-50'}>
+                <Fragment key={src.id}>
+                <tr className={src.enabled ? '' : 'opacity-50'}>
                   <td className="px-3 py-2 font-medium text-gray-900 dark:text-white whitespace-nowrap">{src.name}</td>
                   <td className="px-3 py-2 text-gray-600 dark:text-gray-400 whitespace-nowrap">{provides(src.kind)}</td>
                   <td className="px-3 py-2 text-gray-600 dark:text-gray-400 whitespace-nowrap">{src.category ?? '—'}</td>
@@ -163,6 +189,50 @@ export default function InsightSourcesSettings({ onError, onSuccess }: Props) {
                     </button>
                   </td>
                 </tr>
+                {(needsApiKey(src.kind) || src.last_error) && (
+                  <tr className="bg-gray-50 dark:bg-gray-900/40">
+                    <td colSpan={8} className="px-3 py-2">
+                      {needsApiKey(src.kind) && (
+                        <div className="flex items-center gap-2">
+                          <label
+                            htmlFor={`api-key-${src.id}`}
+                            className="text-xs font-medium text-gray-600 dark:text-gray-400 whitespace-nowrap"
+                          >
+                            API key
+                          </label>
+                          <input
+                            id={`api-key-${src.id}`}
+                            type="password"
+                            autoComplete="off"
+                            value={keyDrafts[src.id] ?? ''}
+                            onChange={(e) =>
+                              setKeyDrafts({ ...keyDrafts, [src.id]: e.target.value })
+                            }
+                            placeholder={
+                              src.has_api_key
+                                ? '•••••••• (saved — type to replace)'
+                                : 'Paste your Q-Feeds API key'
+                            }
+                            className="flex-1 max-w-md px-2 py-1 text-sm rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                          />
+                          <button
+                            onClick={() => handleSaveKey(src)}
+                            disabled={saving || refreshing || keyDrafts[src.id] === undefined}
+                            className="px-3 py-1 text-sm bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white rounded-md font-medium"
+                          >
+                            Save key
+                          </button>
+                        </div>
+                      )}
+                      {src.last_error && (
+                        <p className="mt-1 text-xs text-red-600 dark:text-red-400 break-all">
+                          {src.last_error}
+                        </p>
+                      )}
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
             </tbody>
           </table>
