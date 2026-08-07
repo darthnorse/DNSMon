@@ -41,6 +41,15 @@ _DOMAIN_INSERT_BATCH = 5000
 # Cap the fetched blocklist body to bound memory (pro.plus is ~13 MiB today).
 _MAX_BLOCKLIST_BYTES = 64 * 1024 * 1024
 
+# httpx errors stringify with the full request URL, so an API-key query param
+# would otherwise land in the logs verbatim on any fetch failure.
+_SECRET_PARAM_RE = re.compile(r'(api_token=)[^&\s]+')
+
+
+def _scrub_secrets(msg: str) -> str:
+    """Mask credential query params in a message bound for logs or the DB."""
+    return _SECRET_PARAM_RE.sub(r'\1***', msg)
+
 # GitHub release-asset URLs 302 to objects.githubusercontent.com; follow a
 # bounded number of hops, re-validating each target against the SSRF guard.
 _MAX_REDIRECTS = 3
@@ -215,7 +224,7 @@ class ClassificationService:
         try:
             return await self._fetch_capped_text(url)
         except (httpx.HTTPError, ValueError) as e:
-            logger.error(f"Failed to fetch {what}: {e}")
+            logger.error(_scrub_secrets(f"Failed to fetch {what}: {e}"))
             return None
 
     async def load_dnsmon(self, db: AsyncSession, url: str) -> int:
