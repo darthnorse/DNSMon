@@ -209,3 +209,15 @@ async def test_classify_reenables_disabled_category_bucket(async_admin_client: A
     assert r.status_code == 200, r.text
     await db_session.refresh(ad)
     assert ad.enabled is True
+
+
+async def test_threat_pseudo_app_is_not_suggested(async_admin_client, db_session):
+    from backend.models import AppDefinition
+
+    db_session.add(AppDefinition(slug='malware', name='Malware', category=None,
+                                 source='qfeeds', enabled=True, is_category_only=False))
+    await db_session.commit()
+
+    r = await async_admin_client.get("/api/classify/suggestions")
+    assert r.status_code == 200
+    assert 'Malware' not in r.json()['app_names']

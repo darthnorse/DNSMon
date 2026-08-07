@@ -10,7 +10,7 @@ from ..models import User, AppDefinition, AppDomain, DomainLabel
 from ..schemas import AppDefinitionCreate, AppDefinitionUpdate, AppDefinitionResponse, FeedStatusResponse
 from ..auth import get_current_user, require_admin
 from ..service import get_service
-from ..constants import VALID_SOURCES
+from ..constants import VALID_SOURCES, HIDDEN_APP_SOURCES
 from ._background import run_in_background as _run_in_background
 
 router = APIRouter(prefix="/api/app-definitions", tags=["app-definitions"])
@@ -58,7 +58,8 @@ async def list_definitions(source: Optional[str] = None,
         raise HTTPException(status_code=400, detail=f"Invalid source. Must be one of: {sorted(LISTABLE_SOURCES)}")
     # 'blocklist' is engine-only (absent from LISTABLE_SOURCES, so ?source=blocklist is
     # rejected above) and its pseudo-app carries ~546k domains — keep it out of this list.
-    stmt = select(AppDefinition).where(AppDefinition.source != 'blocklist').order_by(AppDefinition.name)
+    stmt = select(AppDefinition).where(
+        AppDefinition.source.notin_(HIDDEN_APP_SOURCES)).order_by(AppDefinition.name)
     if source:
         stmt = stmt.where(AppDefinition.source == source)
     defs = (await db.execute(stmt)).scalars().all()
@@ -118,9 +119,11 @@ async def update_definition(def_id: int, payload: AppDefinitionUpdate,
                             db: AsyncSession = Depends(get_db),
                             _: User = Depends(require_admin)):
     ad = await db.get(AppDefinition, def_id)
-    # blocklist pseudo-apps are managed via /api/insight-sources, not here —
-    # treat them as absent so this endpoint can't toggle them or serialize ~547k domains.
-    if not ad or ad.source == 'blocklist':
+    # blocklist and threat pseudo-apps are managed via /api/insight-sources, not
+    # here — treat them as absent so this endpoint can't toggle them or serialize
+    # their huge domain sets. Disabling one would also survive feed refreshes
+    # (_replace_source preserves disabled slugs), silently breaking matching.
+    if not ad or ad.source in HIDDEN_APP_SOURCES:
         raise HTTPException(status_code=404, detail="App definition not found")
 
     data = payload.model_dump(exclude_unset=True)

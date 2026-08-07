@@ -72,3 +72,32 @@ async def test_list_returns_correct_domains_per_app(async_admin_client: AsyncCli
     by_name = {d["name"]: set(d["domains"]) for d in r.json()}
     assert by_name["App One"] == {"one-a.com", "one-b.com"}
     assert by_name["App Two"] == {"two-a.com"}
+
+
+def _qfeeds_def():
+    from backend.models import AppDefinition
+    return AppDefinition(slug='malware', name='Malware', category=None,
+                         source='qfeeds', enabled=True, is_category_only=False)
+
+
+async def test_threat_pseudo_app_is_hidden_from_the_apps_list(async_admin_client, db_session):
+    db_session.add(_qfeeds_def())
+    await db_session.commit()
+
+    r = await async_admin_client.get("/api/app-definitions")
+    assert r.status_code == 200
+    assert not any(d['source'] == 'qfeeds' for d in r.json())
+
+
+async def test_threat_pseudo_app_cannot_be_disabled_via_put(async_admin_client, db_session):
+    """_replace_source preserves disabled slugs across refreshes, so a disable
+    here would silently kill threat matching while the Insight Source still
+    reports ok + 127k domains."""
+    ad = _qfeeds_def()
+    db_session.add(ad)
+    await db_session.commit()
+    await db_session.refresh(ad)
+
+    r = await async_admin_client.put(f"/api/app-definitions/{ad.id}",
+                                     json={'enabled': False})
+    assert r.status_code == 404

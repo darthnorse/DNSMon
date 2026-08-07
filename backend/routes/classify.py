@@ -6,6 +6,7 @@ from ..database import get_db
 from ..models import User, AppDefinition, AppDomain, DomainLabel
 from ..schemas import ClassifyRequest, ClassifySuggestions
 from ..auth import get_current_user, require_admin
+from ..constants import HIDDEN_APP_SOURCES
 from ..utils import registrable_domain
 from ..classification_service import _slugify
 from .app_definitions import _slugify_unique, _reclassify_async
@@ -132,7 +133,8 @@ async def get_suggestions(db: AsyncSession = Depends(get_db),
     """Existing app names + categories for the classify modal's autocomplete/typo guard."""
     app_names = (await db.execute(
         select(AppDefinition.name)
-        .where(AppDefinition.is_category_only == False)  # noqa: E712
+        .where(AppDefinition.is_category_only == False,  # noqa: E712
+               AppDefinition.source.notin_(HIDDEN_APP_SOURCES))
         .distinct().order_by(AppDefinition.name))).scalars().all()
     categories = (await db.execute(
         select(AppDefinition.category)
