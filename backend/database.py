@@ -142,16 +142,19 @@ async def _run_migrations(conn):
     ))
 
     # Hagezi deleted domains/ upstream, so the seeded URL 404s. hosts rows are
-    # keyed on url, so seeding the new one would add a second row instead of
-    # fixing this one. url is uniquely indexed and this runs inside init_db's
-    # transaction, so a blind UPDATE would raise on a duplicate and leave the
-    # app unable to start — guard, then drop the now-redundant stale row.
+    # keyed on url, so a plain reseed adds a second row instead of fixing this
+    # one. Where both exist, drop the machine-seeded new-url row and repoint the
+    # operator's — theirs may carry a deliberate enabled=false or a renamed
+    # category that the seeded default would silently discard.
     await conn.execute(text(
-        "UPDATE insight_sources SET url = :new WHERE url = :old "
-        "AND NOT EXISTS (SELECT 1 FROM insight_sources WHERE url = :new)"),
+        "DELETE FROM insight_sources WHERE url = :new "
+        "AND EXISTS (SELECT 1 FROM insight_sources WHERE url = :old)"),
         {'new': HAGEZI_FEED_URL, 'old': _STALE_HAGEZI_URL})
-    await conn.execute(text(
-        "DELETE FROM insight_sources WHERE url = :old"), {'old': _STALE_HAGEZI_URL})
+    repointed = await conn.execute(text(
+        "UPDATE insight_sources SET url = :new WHERE url = :old"),
+        {'new': HAGEZI_FEED_URL, 'old': _STALE_HAGEZI_URL})
+    if repointed.rowcount:
+        logger.info("Migration: repointed the stale Hagezi feed URL")
 
     # create_all only builds indexes for NEW tables, so an upgraded install needs
     # this explicitly. IF NOT EXISTS keeps it idempotent.

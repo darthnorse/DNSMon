@@ -183,13 +183,18 @@ async def get_threats(
             stmt = stmt.where(Query.client_ip.in_(client_list))
         return stmt
 
-    total = await db.scalar(base(func.count(Query.id))) or 0
+    # One CTE for both: a separate COUNT would scan the join twice and, under
+    # READ COMMITTED, could read a different snapshot than the ranking — letting
+    # a top-domain count exceed the total.
+    grouped = (base(Query.domain, DomainLabel.threat_type,
+                    func.count(Query.id).label('c'))
+               .group_by(Query.domain, DomainLabel.threat_type)).cte('flagged')
+
+    total = await db.scalar(
+        select(func.coalesce(func.sum(grouped.c.c), 0))) or 0
 
     domain_rows = (await db.execute(
-        base(Query.domain, DomainLabel.threat_type, func.count(Query.id).label('c'))
-        .group_by(Query.domain, DomainLabel.threat_type)
-        .order_by(func.count(Query.id).desc()).limit(10)
-    )).all()
+        select(grouped).order_by(grouped.c.c.desc()).limit(10))).all()
 
     client_rows = (await db.execute(
         base(Query.client_ip, func.max(Query.client_hostname).label('hostname'),

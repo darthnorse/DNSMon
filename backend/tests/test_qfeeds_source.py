@@ -491,17 +491,30 @@ async def test_match_threat_rules_are_inert_without_a_feed(db_session):
     assert AlertEngine(svc)._resolve_threats([], []) == {}
 
 
-async def test_record_threat_labels_skips_while_a_reclassify_holds_the_lock(db_session):
-    """That pass owns domain_labels and is about to write authoritative values;
-    writing concurrently could resurrect a tag it just cleared."""
+async def test_record_threat_labels_drops_hits_the_matcher_no_longer_flags(db_session):
+    """`hits` is matched before the lock is taken, so a reclassify can clear a
+    tag in between; writing the snapshot back would resurrect it."""
+    from backend.models import DomainLabel
+    from backend.classification_service import ClassificationService
+
+    svc = ClassificationService()          # resident matcher is empty
+    assert await svc.record_threat_labels(
+        db_session, {'evil.com': ('malware', 'qfeeds')}) == 0
+    assert await db_session.get(DomainLabel, 'evil.com') is None
+
+
+async def test_record_threat_labels_writes_what_the_matcher_still_flags(db_session):
     from backend.models import DomainLabel
     from backend.classification_service import ClassificationService
 
     svc = ClassificationService()
-    async with svc._lock:
-        assert await svc.record_threat_labels(
-            db_session, {'evil.com': ('malware', 'qfeeds')}) == 0
-    assert await db_session.get(DomainLabel, 'evil.com') is None
+    svc._threat_matcher.add('evil.com', 'malware', 'qfeeds')
+    assert await svc.record_threat_labels(
+        db_session, {'evil.com': ('malware', 'qfeeds'),
+                     'gone.example': ('malware', 'qfeeds')}) == 1
+
+    assert (await db_session.get(DomainLabel, 'evil.com')).threat_type == 'malware'
+    assert await db_session.get(DomainLabel, 'gone.example') is None
 
 
 async def test_record_threat_labels_batches_beyond_the_bind_param_cap(db_session):
@@ -511,7 +524,12 @@ async def test_record_threat_labels_batches_beyond_the_bind_param_cap(db_session
     from backend.models import DomainLabel
     from backend.classification_service import ClassificationService
 
-    hits = {f'evil{i}.example': ('malware', 'qfeeds') for i in range(9000)}
-    assert await ClassificationService().record_threat_labels(db_session, hits) == 9000
+    svc = ClassificationService()
+    hits = {}
+    for i in range(9000):
+        d = f'evil{i}.example'
+        svc._threat_matcher.add(d, 'malware', 'qfeeds')
+        hits[d] = ('malware', 'qfeeds')
+    assert await svc.record_threat_labels(db_session, hits) == 9000
     assert await db_session.scalar(
         select(func.count()).select_from(DomainLabel)) == 9000

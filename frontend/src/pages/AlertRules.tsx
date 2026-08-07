@@ -59,11 +59,10 @@ export default function AlertRules() {
   const loadThreatFeedState = async () => {
     try {
       const sources = await insightSourceApi.getAll();
-      // Not `=== 'ok'`: a just-enabled source has a null status until its first
-      // background refresh lands, and a failed refresh deliberately keeps the
-      // existing tier — the matcher gates on enabled, so both still match.
-      setThreatFeedReady(sources.some(
-        (s) => s.requires_api_key && s.enabled && s.last_status !== 'error'));
+      // Mirrors build_threat_matcher, which gates on `enabled` alone: a failed
+      // refresh keeps the existing tier and a just-enabled source has no status
+      // until its first refresh lands, so both still match.
+      setThreatFeedReady(sources.some((s) => s.requires_api_key && s.enabled));
     } catch {
       // Non-blocking: a failed probe must not hide the rules themselves.
     }

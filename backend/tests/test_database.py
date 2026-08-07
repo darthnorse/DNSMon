@@ -221,7 +221,11 @@ async def test_migration_repoints_the_stale_hagezi_url():
 
 async def test_hagezi_migration_survives_a_duplicate_new_url():
     """url is uniquely indexed and this runs inside init_db's transaction, so a
-    blind UPDATE would raise and leave the app unable to start."""
+    blind UPDATE would raise and leave the app unable to start.
+
+    Where both urls exist the OPERATOR's row must win: the new-url row is the
+    machine-seeded default, while theirs may carry a deliberate enabled=false.
+    """
     from backend.constants import HAGEZI_FEED_URL
     stale = ("https://raw.githubusercontent.com/hagezi/dns-blocklists"
              "/main/domains/pro.plus.txt")
@@ -229,18 +233,23 @@ async def test_hagezi_migration_survives_a_duplicate_new_url():
         await conn.execute(text(
             "DELETE FROM insight_sources WHERE url IN (:old, :new)"),
             {'old': stale, 'new': HAGEZI_FEED_URL})
-        for name, url in [('dup-new', HAGEZI_FEED_URL), ('dup-old', stale)]:
+        # seeded default (enabled) vs the operator's row (deliberately disabled)
+        for name, url, enabled in [('seeded', HAGEZI_FEED_URL, True),
+                                   ('operator', stale, False)]:
             await conn.execute(text(
                 "INSERT INTO insight_sources (name, url, kind, category, format, enabled) "
-                "VALUES (:n, :u, 'hosts', 'Ads & Tracking', 'domains', true)"),
-                {'n': name, 'u': url})
+                "VALUES (:n, :u, 'hosts', 'Ads & Tracking', 'domains', :e)"),
+                {'n': name, 'u': url, 'e': enabled})
+
         await _run_migrations(conn)          # must not raise
-        remaining = (await conn.execute(text(
-            "SELECT name FROM insight_sources WHERE url = :u"), {'u': HAGEZI_FEED_URL}
-        )).scalars().all()
+
+        rows = (await conn.execute(text(
+            "SELECT name, enabled FROM insight_sources WHERE url = :u"),
+            {'u': HAGEZI_FEED_URL})).all()
         stale_left = (await conn.execute(text(
             "SELECT count(*) FROM insight_sources WHERE url = :u"), {'u': stale})).scalar()
         await conn.execute(text(
-            "DELETE FROM insight_sources WHERE name IN ('dup-new', 'dup-old')"))
-    assert remaining == ['dup-new']
+            "DELETE FROM insight_sources WHERE name IN ('seeded', 'operator')"))
+
+    assert rows == [('operator', False)], "the operator's row and its settings must survive"
     assert stale_left == 0

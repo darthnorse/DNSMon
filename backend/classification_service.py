@@ -577,19 +577,23 @@ class ClassificationService:
         classification_refresh_hours, default 24h). Without this an operator
         paged about a domain would open the Dashboard and see it unflagged.
 
-        Skipped while a reclassify holds the lock: that pass owns domain_labels
-        and is about to write authoritative values, so a concurrent write here
-        could resurrect a tag it just cleared. Touches only the threat columns,
-        so it cannot clobber the app/category label reclassify owns.
+        `hits` was matched against whatever matcher was resident when the poll
+        started, so it is re-validated here under the lock: a reclassify may
+        have cleared those tags in the meantime, and writing the snapshot back
+        would resurrect them. Touches only the threat columns, so it cannot
+        clobber the app/category label reclassify owns.
         """
-        if not hits or self._lock.locked():
+        if not hits:
             return 0
 
         async with self._lock:
+            # Re-matched inside the lock; a domain the current matcher no longer
+            # flags is dropped rather than written back stale.
+            items = sorted(
+                (d, hit) for d in hits if (hit := self._threat_matcher.match(d)))
+            if not items:
+                return 0
             now = utcnow()
-            # Sorted so this and _do_reclassify take row locks in the same order;
-            # opposing orders on overlapping domains deadlock.
-            items = sorted(hits.items())
             for i in range(0, len(items), _LABEL_INSERT_BATCH):
                 stmt = pg_insert(DomainLabel).values([
                     {'domain': d, 'threat_type': t, 'threat_source': src,
@@ -602,7 +606,7 @@ class ClassificationService:
                           'threat_source': stmt.excluded.threat_source,
                           'classified_at': stmt.excluded.classified_at}))
             await db.commit()
-        return len(hits)
+        return len(items)
 
     async def prime_threat_matcher(self, db: AsyncSession) -> int:
         """Load the persisted threat tier into the resident matcher (no network).
@@ -619,9 +623,9 @@ class ClassificationService:
         upserts on the `domain` primary key. Returns rows written."""
         matcher = await self.build_matcher(db)
         threat_matcher = await self.build_threat_matcher(db)
-        distinct_domains = sorted((await db.execute(
+        distinct_domains = (await db.execute(
             select(DomainStatsHourly.domain).distinct()
-        )).scalars().all())
+        )).scalars().all()
 
         now = utcnow()
         values = []
@@ -727,12 +731,18 @@ class ClassificationService:
                 await db.rollback()
                 logger.error(_scrub_secrets(f"Refresh of {kind} failed: {e}"), exc_info=True)
                 if row is not None:
-                    row = await db.merge(row)
-                    row.last_status = 'error'
-                    row.last_error = _scrub_secrets(str(e))[:200]
-                    # Committed here: a later iteration's rollback would
-                    # otherwise discard this status along with its own.
-                    await db.commit()
+                    # Inner guard: these calls can raise too (a deleted row, or
+                    # the same connection failure that caused the outer error),
+                    # and escaping here would skip every remaining source.
+                    try:
+                        row.last_status = 'error'
+                        row.last_error = _scrub_secrets(str(e))[:200]
+                        # Committed now; a later iteration's rollback would
+                        # otherwise discard this status along with its own.
+                        await db.commit()
+                    except Exception:
+                        await db.rollback()
+                        logger.exception(f"Could not record error status for {kind}")
         await self.refresh_blocklists(db)
         await db.commit()
 

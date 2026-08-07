@@ -209,8 +209,13 @@ class DNSMonService:
                     hits[domain] = hit
             if hits:
                 async with async_session_maker() as db:
-                    await svc.record_threat_labels(db, hits)
-                logger.info(f"Recorded threat labels for {len(hits)} domains")
+                    written = await svc.record_threat_labels(db, hits)
+                if written:
+                    logger.info(f"Recorded threat labels for {written} domains")
+                else:
+                    logger.warning(
+                        f"Wrote no threat labels for {len(hits)} matched domains "
+                        "— the resident matcher no longer flags them")
         except Exception as e:
             logger.error(f"Could not record threat labels: {e}", exc_info=True)
 
