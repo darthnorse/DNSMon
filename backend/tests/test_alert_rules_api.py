@@ -169,3 +169,25 @@ async def test_exclude_client_ips_rejects_malformed_entry(async_admin_client: As
     })
     assert r.status_code == 422, r.text
     assert "exclude_client_ips" in r.text
+
+
+async def test_match_threat_round_trips(async_admin_client):
+    r = await async_admin_client.post("/api/alert-rules",
+                                      json={"name": "malware", "match_threat": True})
+    assert r.status_code in (200, 201), r.text
+    rule_id = r.json()["id"]
+    assert r.json()["match_threat"] is True
+
+    listed = await async_admin_client.get("/api/alert-rules")
+    assert next(x for x in listed.json() if x["id"] == rule_id)["match_threat"] is True
+
+    r = await async_admin_client.put(f"/api/alert-rules/{rule_id}",
+                                     json={"match_threat": False})
+    assert r.status_code == 200, r.text
+    assert r.json()["match_threat"] is False
+
+
+async def test_match_threat_defaults_to_false(async_admin_client):
+    r = await async_admin_client.post("/api/alert-rules",
+                                      json={"name": "plain", "domain_pattern": "x"})
+    assert r.json()["match_threat"] is False

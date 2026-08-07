@@ -112,6 +112,8 @@ async def _run_migrations(conn):
                   col_type='VARCHAR(200)', default=None, nullable=True),
         Migration(table='insight_sources', column='domain_count_high_water',
                   col_type='INTEGER', default=None, nullable=True),
+        Migration(table='alert_rules', column='match_threat',
+                  col_type='BOOLEAN', default='false', nullable=False),
     ]
     for m in migrations:
         result = await conn.execute(text(

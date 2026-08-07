@@ -27,7 +27,8 @@ def _q(domain="example.com", status="OK", client_ip="192.168.1.10",
 def _rule(id=1, name="r", domain_pattern=None, client_ip_pattern=None,
           client_hostname_pattern=None, exclude_domains=None,
           exclude_client_ips=None,
-          match_status="any", cooldown_minutes=5, enabled=True) -> AlertRule:
+          match_status="any", match_threat=False,
+          cooldown_minutes=5, enabled=True) -> AlertRule:
     return AlertRule(
         id=id, name=name,
         domain_pattern=domain_pattern,
@@ -37,6 +38,7 @@ def _rule(id=1, name="r", domain_pattern=None, client_ip_pattern=None,
         exclude_client_ips=exclude_client_ips,
         cooldown_minutes=cooldown_minutes,
         match_status=match_status,
+        match_threat=match_threat,
         enabled=enabled,
     )
 
@@ -412,3 +414,113 @@ async def test_exclude_client_ip_none_is_noop():
     cached = {rule.id: await e._get_cached_patterns(rule)}
     assert e._evaluate_query_against_rules(
         _q(domain="ads.example.com", client_ip="10.0.0.5"), [rule], cached) == [rule.id]
+
+
+class _FakeClassificationService:
+    def __init__(self, flagged):
+        self.flagged = flagged
+        self.calls = 0
+
+    def match_threat(self, fqdn):
+        self.calls += 1
+        return ('malware', 'qfeeds') if fqdn in self.flagged else None
+
+
+async def test_match_threat_fires_on_a_flagged_domain():
+    engine = AlertEngine()
+    rule = _rule(id=1, match_threat=True)
+    patterns = {1: await engine._get_cached_patterns(rule)}
+    assert engine._evaluate_query_against_rules(
+        _q(domain='cdn.evil.com'), [rule], patterns, {'cdn.evil.com': 'malware'}) == [1]
+
+
+async def test_match_threat_ignores_a_clean_domain():
+    engine = AlertEngine()
+    rule = _rule(id=1, match_threat=True)
+    patterns = {1: await engine._get_cached_patterns(rule)}
+    assert engine._evaluate_query_against_rules(
+        _q(domain='good.com'), [rule], patterns, {}) == []
+
+
+async def test_match_threat_composes_with_a_client_ip_pattern():
+    engine = AlertEngine()
+    rule = _rule(id=1, match_threat=True, client_ip_pattern='10.0.0.5')
+    patterns = {1: await engine._get_cached_patterns(rule)}
+    threats = {'evil.com': 'malware'}
+    assert engine._evaluate_query_against_rules(
+        _q(domain='evil.com', client_ip='10.0.0.5'), [rule], patterns, threats) == [1]
+    assert engine._evaluate_query_against_rules(
+        _q(domain='evil.com', client_ip='10.0.0.9'), [rule], patterns, threats) == []
+
+
+async def test_match_threat_respects_exclude_domains():
+    engine = AlertEngine()
+    rule = _rule(id=1, match_threat=True, exclude_domains='["evil.com"]')
+    patterns = {1: await engine._get_cached_patterns(rule)}
+    assert engine._evaluate_query_against_rules(
+        _q(domain='evil.com'), [rule], patterns, {'evil.com': 'malware'}) == []
+
+
+async def test_match_threat_respects_exclude_client_ips():
+    engine = AlertEngine()
+    rule = _rule(id=1, match_threat=True, exclude_client_ips='10.0.0.5')
+    patterns = {1: await engine._get_cached_patterns(rule)}
+    assert engine._evaluate_query_against_rules(
+        _q(domain='evil.com', client_ip='10.0.0.5'), [rule], patterns,
+        {'evil.com': 'malware'}) == []
+
+
+async def test_match_threat_respects_match_status():
+    engine = AlertEngine()
+    rule = _rule(id=1, match_threat=True, match_status='blocked')
+    patterns = {1: await engine._get_cached_patterns(rule)}
+    threats = {'evil.com': 'malware'}
+    assert engine._evaluate_query_against_rules(
+        _q(domain='evil.com', status='GRAVITY'), [rule], patterns, threats) == [1]
+    assert engine._evaluate_query_against_rules(
+        _q(domain='evil.com', status='OK'), [rule], patterns, threats) == []
+
+
+async def test_non_threat_rule_is_unaffected_by_threat_data():
+    engine = AlertEngine()
+    rule = _rule(id=1, domain_pattern='good')
+    patterns = {1: await engine._get_cached_patterns(rule)}
+    assert engine._evaluate_query_against_rules(
+        _q(domain='good.com'), [rule], patterns, {}) == [1]
+
+
+async def test_match_threat_fails_closed_when_the_arg_is_omitted():
+    """The default exists so the ~20 pre-existing direct calls keep working; it
+    must make a threat rule match NOTHING, never everything."""
+    engine = AlertEngine()
+    rule = _rule(id=1, match_threat=True)
+    patterns = {1: await engine._get_cached_patterns(rule)}
+    assert engine._evaluate_query_against_rules(_q(domain='evil.com'), [rule], patterns) == []
+
+
+def test_resolve_threats_maps_flagged_domains():
+    svc = _FakeClassificationService({'evil.com'})
+    engine = AlertEngine(svc)
+    out = engine._resolve_threats([_rule(id=1, match_threat=True)],
+                                  [_q(domain='evil.com'), _q(domain='good.com')])
+    assert out == {'evil.com': 'malware'}
+
+
+def test_resolve_threats_skips_the_matcher_when_no_rule_wants_it():
+    svc = _FakeClassificationService({'evil.com'})
+    engine = AlertEngine(svc)
+    assert engine._resolve_threats([_rule(id=1)], [_q(domain='evil.com')]) == {}
+    assert svc.calls == 0
+
+
+def test_resolve_threats_without_an_injected_service():
+    engine = AlertEngine()
+    assert engine._resolve_threats([_rule(id=1, match_threat=True)],
+                                   [_q(domain='evil.com')]) == {}
+
+
+def test_resolve_threats_deduplicates_domains():
+    svc = _FakeClassificationService({'evil.com'})
+    engine = AlertEngine(svc)
+    engine._resolve_threats([_rule(id=1, match_threat=True)], [_q(domain='evil.com')] * 5)
+    assert svc.calls == 1

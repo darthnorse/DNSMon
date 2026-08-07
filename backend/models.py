@@ -111,6 +111,8 @@ class AlertRule(Base):
     cooldown_minutes = Column(Integer, default=5)  # Min time between batch alerts for same rule
 
     match_status = Column(String(20), nullable=False, default='any')
+    # Composes with the pattern fields rather than replacing them.
+    match_threat = Column(Boolean, nullable=False, default=False)
 
     enabled = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
@@ -128,6 +130,7 @@ class AlertRule(Base):
             'exclude_client_ips': self.exclude_client_ips,
             'cooldown_minutes': self.cooldown_minutes,
             'match_status': self.match_status,
+            'match_threat': self.match_threat,
             'enabled': self.enabled,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,

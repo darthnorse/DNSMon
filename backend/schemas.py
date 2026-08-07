@@ -109,6 +109,7 @@ class AlertRuleCreate(BaseModel):
     exclude_client_ips: Optional[str] = PydanticField(default=None, max_length=5000)
     cooldown_minutes: int = PydanticField(default=5, ge=0, le=10080)  # 0 to 7 days
     match_status: MatchStatus = 'any'
+    match_threat: bool = False
     enabled: bool = True
 
     @field_validator('exclude_client_ips')
@@ -149,6 +150,7 @@ class AlertRuleUpdate(RejectsExplicitNulls):
     exclude_client_ips: Optional[str] = PydanticField(default=None, max_length=5000)
     cooldown_minutes: Optional[int] = PydanticField(default=None, ge=0, le=10080)
     match_status: Optional[MatchStatus] = None
+    match_threat: Optional[bool] = None
     enabled: Optional[bool] = None
 
     @field_validator('exclude_client_ips')
@@ -168,6 +170,7 @@ class AlertRuleResponse(BaseModel):
     exclude_client_ips: Optional[str]
     cooldown_minutes: int
     match_status: MatchStatus
+    match_threat: bool
     enabled: bool
     created_at: datetime
     updated_at: datetime

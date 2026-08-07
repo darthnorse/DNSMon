@@ -64,7 +64,11 @@ class IPExcludeMatcher:
 class AlertEngine:
     """Engine for evaluating alert rules and triggering notifications"""
 
-    def __init__(self):
+    def __init__(self, classification_service=None):
+        # Injected, not imported: service.py imports AlertEngine at module level,
+        # so importing service.py here would be circular.
+        self._classification_service = classification_service
+
         # Per-rule locks to prevent race conditions in alert recording
         # Using a bounded cache to prevent unbounded memory growth
         self._rule_locks: OrderedDict[int, asyncio.Lock] = OrderedDict()
@@ -254,17 +258,36 @@ class AlertEngine:
                 return True
         return False
 
+    def _resolve_threats(self, rules: List[AlertRule], queries: List) -> Dict[str, str]:
+        """Map domain -> threat_type for this batch, empty when no rule wants it.
+
+        Reads the resident matcher rather than domain_labels so a domain first
+        seen seconds ago still alerts; a reclassify-backed lookup would be up to
+        classification_refresh_hours late."""
+        if not self._classification_service or not any(r.match_threat for r in rules):
+            return {}
+        found = {}
+        for domain in {q.domain for q in queries}:
+            hit = self._classification_service.match_threat(domain)
+            if hit:
+                found[domain] = hit[0]
+        return found
+
     def _evaluate_query_against_rules(
         self,
         query: Query,
         rules: List[AlertRule],
-        cached_patterns: Dict[int, Dict[str, object]]
+        cached_patterns: Dict[int, Dict[str, object]],
+        threat_domains: Optional[Dict[str, str]] = None
     ) -> List[int]:
         """
         Evaluate a query against a list of alert rules (no DB access).
-        Uses pre-compiled cached patterns for performance.
+        Uses pre-compiled cached patterns for performance. `threat_domains` maps
+        domain -> threat_type for this batch; None/empty makes a match_threat
+        rule match nothing (fail closed).
         Returns list of matching rule IDs.
         """
+        threat_domains = threat_domains or {}
         matching_rules = []
 
         for rule in rules:
@@ -274,6 +297,9 @@ class AlertEngine:
                 wants_blocked = rule.match_status == 'blocked'
                 if (query.status in BLOCKED_STATUSES) != wants_blocked:
                     continue
+
+            if rule.match_threat and query.domain not in threat_domains:
+                continue
 
             # Check exclusions first
             if self._should_exclude(query.domain, rule.exclude_domains):
@@ -439,8 +465,10 @@ class AlertEngine:
                     if not queries:
                         break  # No more queries
 
+                    threat_domains = self._resolve_threats(rules, queries)
                     for query in queries:
-                        rule_ids = self._evaluate_query_against_rules(query, rules, cached_patterns)
+                        rule_ids = self._evaluate_query_against_rules(
+                            query, rules, cached_patterns, threat_domains)
                         if rule_ids:
                             matches.append((query, rule_ids))
                             if len(matches) >= max_matches:
@@ -487,6 +515,7 @@ class AlertEngine:
                 for rule in rules:
                     cached_patterns[rule.id] = await self._get_cached_patterns(rule)
 
+                threat_domains = self._resolve_threats(rules, queries)
                 matches = []
 
                 for query in queries:
@@ -494,7 +523,8 @@ class AlertEngine:
                         logger.warning(f"Reached matches limit ({max_matches}), stopping evaluation")
                         break
 
-                    rule_ids = self._evaluate_query_against_rules(query, rules, cached_patterns)
+                    rule_ids = self._evaluate_query_against_rules(
+                        query, rules, cached_patterns, threat_domains)
                     if rule_ids:
                         matches.append((query, rule_ids))
 

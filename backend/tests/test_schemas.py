@@ -21,7 +21,7 @@ def test_update_not_null_fields_covers_response_required_fields():
     # If a future non-Optional field is added to the response, this set grows
     # automatically — no separate hand-maintained list to forget.
     assert set(AlertRuleUpdate._NOT_NULL_FIELDS) == {
-        "name", "match_status", "enabled", "cooldown_minutes",
+        "name", "match_status", "match_threat", "enabled", "cooldown_minutes",
     }
 
 
@@ -79,7 +79,7 @@ def _base_response_kwargs(**overrides):
         id=1, name="x", description=None, domain_pattern=None,
         client_ip_pattern=None, client_hostname_pattern=None,
         exclude_domains=None, exclude_client_ips=None, cooldown_minutes=5,
-        match_status="any", enabled=True,
+        match_status="any", match_threat=False, enabled=True,
         created_at=datetime(2026, 5, 17, 12, 0, 0, tzinfo=timezone.utc),
         updated_at=datetime(2026, 5, 17, 12, 0, 0, tzinfo=timezone.utc),
     )

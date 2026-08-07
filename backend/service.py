@@ -24,10 +24,10 @@ class DNSMonService:
         self.settings = get_settings_sync()
         self.scheduler = AsyncIOScheduler()
         self.ingestion_service = QueryIngestionService()
-        self.alert_engine = AlertEngine()
+        self.classification_service = ClassificationService()
+        self.alert_engine = AlertEngine(self.classification_service)
         self.notification_service = NotificationService()
         self.sync_service = PiholeSyncService()
-        self.classification_service = ClassificationService()
         self._started = False
         self._initial_ingestion_task = None
 

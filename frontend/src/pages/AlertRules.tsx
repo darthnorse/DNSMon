@@ -45,6 +45,7 @@ export default function AlertRules() {
     exclude_client_ips: '',
     cooldown_minutes: 5,
     match_status: 'any',
+    match_threat: false,
     enabled: true,
   });
 
@@ -106,7 +107,8 @@ export default function AlertRules() {
       errors.push('Cooldown must be between 0 and 10080 minutes (7 days)');
     }
 
-    if (!formData.domain_pattern && !formData.client_ip_pattern && !formData.client_hostname_pattern) {
+    if (!formData.match_threat &&
+        !formData.domain_pattern && !formData.client_ip_pattern && !formData.client_hostname_pattern) {
       errors.push('At least one pattern (domain, IP, or hostname) must be specified');
     }
 
@@ -141,6 +143,7 @@ export default function AlertRules() {
       exclude_client_ips: rule.exclude_client_ips || '',
       cooldown_minutes: rule.cooldown_minutes,
       match_status: rule.match_status,
+      match_threat: rule.match_threat ?? false,
       enabled: rule.enabled,
     });
     setShowForm(true);
@@ -171,6 +174,7 @@ export default function AlertRules() {
       exclude_client_ips: '',
       cooldown_minutes: 5,
       match_status: 'any',
+      match_threat: false,
       enabled: true,
     });
   };
@@ -342,6 +346,22 @@ export default function AlertRules() {
                 options={MATCH_STATUS_OPTIONS}
               />
 
+              <div className="flex flex-col justify-center">
+                <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+                  <input
+                    type="checkbox"
+                    checked={formData.match_threat ?? false}
+                    onChange={(e) => setFormData({ ...formData, match_threat: e.target.checked })}
+                    className="rounded border-gray-300 dark:border-gray-600"
+                  />
+                  Malicious domains only
+                </label>
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  Fires on any query to a domain flagged by a threat feed. Needs no
+                  pattern; combine with the fields above to narrow it further.
+                </p>
+              </div>
+
               <div>
                 <label htmlFor="cooldown_minutes" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Cooldown (minutes)
@@ -418,6 +438,7 @@ export default function AlertRules() {
                             {matchStatusLabel(rule.match_status)}
                           </Badge>
                         )}
+                        {rule.match_threat && <Badge color="red">Malicious only</Badge>}
                       </div>
                       <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                         Cooldown: {rule.cooldown_minutes} min
