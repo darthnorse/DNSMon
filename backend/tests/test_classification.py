@@ -434,3 +434,21 @@ def test_parse_blocklist_line_rejects_an_overlong_domain():
     from backend.classification import parse_blocklist_line
     assert parse_blocklist_line('a' * 250 + '.com') is None
     assert parse_blocklist_line('a' * 40 + '.com') == 'a' * 40 + '.com'
+
+
+def test_v2fly_parses_quoted_list_names():
+    """The upstream artifact began quoting names; an unquoted capture matched
+    nothing in the slug mapping and silently produced zero definitions."""
+    from backend.classification import parse_v2fly_entries
+    text = 'lists:\n  - name: "netflix"\n    length: 1\n    rules:\n      - "domain:netflix.com"\n'
+    defs = parse_v2fly_entries(text, {'netflix': {'name': 'Netflix', 'category': 'Streaming'}})
+    assert len(defs) == 1
+    assert defs[0]['slug'] == 'netflix'
+    assert defs[0]['domains'] == [('netflix.com', False)]
+
+
+def test_v2fly_still_parses_unquoted_list_names():
+    from backend.classification import parse_v2fly_entries
+    text = '  - name: netflix\n    rules:\n      - "domain:netflix.com"\n'
+    defs = parse_v2fly_entries(text, {'netflix': {'name': 'Netflix', 'category': 'Streaming'}})
+    assert len(defs) == 1 and defs[0]['slug'] == 'netflix'

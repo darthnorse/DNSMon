@@ -58,6 +58,12 @@ V2FLY_FEED_URL = (
 
 # Token-free: the per-install API key is merged in at fetch time so it never
 # reaches the stored row. Community tier serves only malware_domains; others 403.
+# Hagezi removed the domains/ directory in a 2026 restructure; the plain-domain
+# list now lives under wildcard/.
+HAGEZI_FEED_URL = (
+    "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro.plus-onlydomains.txt"
+)
+
 QFEEDS_FEED_URL = "https://api.qfeeds.com/api?feed_type=malware_domains&download=0"
 
 # Higher number wins when more than one source claims a domain.
@@ -84,7 +90,7 @@ DEFAULT_INSIGHT_SOURCES = [
     {'name': 'DNSMon', 'url': DNSMON_LIST_URL, 'kind': 'dnsmon',
      'category': None, 'format': 'json', 'license': 'MIT'},
     {'name': 'Hagezi Pro.Plus',
-     'url': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/pro.plus.txt',
+     'url': HAGEZI_FEED_URL,
      'kind': 'hosts', 'category': 'Ads & Tracking', 'format': 'domains', 'license': 'GPL-3.0'},
     {'name': 'v2fly Community', 'url': V2FLY_FEED_URL, 'kind': 'v2fly',
      'category': None, 'format': 'yaml', 'license': 'MIT'},

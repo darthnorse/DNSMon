@@ -65,7 +65,8 @@ def test_default_insight_seed_includes_hagezi_pro_plus():
     assert src["category"] == "Ads & Tracking"
     assert src["format"] == "domains"
     assert src["license"] == "GPL-3.0"
-    assert src["url"].endswith("/domains/pro.plus.txt")
+    # Upstream deleted domains/; the plain-domain list moved under wildcard/.
+    assert src["url"].endswith("/wildcard/pro.plus-onlydomains.txt")
 
 
 def test_precedence_order_is_blocklist_v2fly_adguard_dnsmon_manual():

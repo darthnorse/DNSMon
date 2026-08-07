@@ -135,6 +135,14 @@ async def _run_migrations(conn):
         "WHERE source = 'blocklist' AND is_category_only = false"
     ))
 
+    # Hagezi deleted domains/ upstream, so the seeded URL 404s. hosts rows are
+    # keyed on url, so seeding the new one would add a second row instead of
+    # fixing this one. Idempotent: matches nothing once applied.
+    await conn.execute(text(
+        "UPDATE insight_sources SET url = :new WHERE url = :old"),
+        {'new': "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro.plus-onlydomains.txt",
+         'old': "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/pro.plus.txt"})
+
     # create_all only builds indexes for NEW tables, so an upgraded install needs
     # this explicitly. IF NOT EXISTS keeps it idempotent.
     await conn.execute(text(

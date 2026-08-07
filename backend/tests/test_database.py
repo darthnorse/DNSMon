@@ -190,3 +190,25 @@ async def test_threat_migrations_add_missing_columns():
             row = back.fetchone()
             assert row is not None, f"migration did not add {table}.{column}"
             assert row[0] == nullable, f"{table}.{column} nullability drifted"
+
+
+async def test_migration_repoints_the_stale_hagezi_url():
+    """Upstream deleted domains/; hosts rows key on url, so a plain reseed would
+    add a second row instead of fixing the existing one.
+
+    Seeds its own row: the suite truncates between tests, so it cannot assume
+    the seeded Hagezi row is present."""
+    from backend.constants import HAGEZI_FEED_URL
+    stale = ("https://raw.githubusercontent.com/hagezi/dns-blocklists"
+             "/main/domains/pro.plus.txt")
+    async with production_engine.begin() as conn:
+        await conn.execute(text(
+            "INSERT INTO insight_sources (name, url, kind, category, format, enabled) "
+            "VALUES ('stale-hagezi', :u, 'hosts', 'Ads & Tracking', 'domains', true)"),
+            {'u': stale})
+        await _run_migrations(conn)
+        url = (await conn.execute(text(
+            "SELECT url FROM insight_sources WHERE name = 'stale-hagezi'"))).scalar()
+        await conn.execute(text(
+            "DELETE FROM insight_sources WHERE name = 'stale-hagezi'"))
+    assert url == HAGEZI_FEED_URL

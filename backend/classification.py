@@ -74,7 +74,9 @@ def parse_blocklist_line(line: str) -> Optional[str]:
     return tok
 
 
-_V2FLY_NAME_RE = re.compile(r'^  - name: (\S+)$')
+# The artifact began quoting list names (`- name: "netflix"`); an unquoted
+# capture silently matched nothing in the slug mapping.
+_V2FLY_NAME_RE = re.compile(r'^  - name: "?([^"\s]+)"?$')
 _V2FLY_RULE_RE = re.compile(r'^      - "(domain|full|regexp|keyword):([^"]*)"$')
 
 
