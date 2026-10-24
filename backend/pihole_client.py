@@ -505,11 +505,17 @@ class PiholeClient(DNSBlockerClient):
 
     # ========== Config Methods ==========
 
-    async def get_config(self) -> Optional[Dict[str, Any]]:
-        """Get full Pi-hole configuration"""
+    async def get_config(self, detailed: bool = False) -> Optional[Dict[str, Any]]:
+        """
+        Get full Pi-hole configuration.
+
+        With detailed=True each setting is an object carrying 'value' and 'flags'
+        (e.g. flags.env_var marks a key locked by an FTLCONF_* environment variable).
+        """
         try:
             response = await self.client.get(
                 f"{self.url}/api/config",
+                params={'detailed': 'true'} if detailed else None,
                 headers=self.get_auth_headers()
             )
             if response.status_code == 200:

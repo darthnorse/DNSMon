@@ -1237,6 +1237,11 @@ export default function Settings() {
                             <li key={section}>{section.toUpperCase()}: {keys.join(', ')}</li>
                           ))}
                         </ul>
+                        {preview.config.excluded && (
+                          <p className="mt-1 ml-4 text-xs text-gray-500 dark:text-gray-400">
+                            Never synced: {preview.config.excluded.join(', ')}
+                          </p>
+                        )}
                         {preview.config.summary && (
                           <div className="mt-1 ml-4 text-xs text-gray-500 dark:text-gray-400">
                             {Object.entries(preview.config.summary as Record<string, unknown>)
@@ -1337,6 +1342,14 @@ export default function Settings() {
                                   <div>
                                     <span className="font-medium">Config sections:</span>{' '}
                                     {sync.items_synced?._config_sections?.join(', ')}
+                                  </div>
+                                )}
+                                {sync.items_synced?._config_changes && (
+                                  <div>
+                                    <span className="font-medium">Settings changed:</span>{' '}
+                                    {Object.entries(sync.items_synced._config_changes)
+                                      .map(([target, keys]) => `${target}: ${keys.join(', ')}`)
+                                      .join('; ') || 'None'}
                                   </div>
                                 )}
                                 {sync.items_synced && (

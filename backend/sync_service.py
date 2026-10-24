@@ -15,13 +15,107 @@ logger = logging.getLogger(__name__)
 _sync_lock = asyncio.Lock()
 
 
-# Config keys to sync per section (only sync specific safe keys, not entire sections)
-# This avoids issues with null values or device-specific settings
-SYNC_CONFIG_KEYS = {
-    'dns': ['hosts', 'cnameRecords', 'upstreams', 'revServers'],
-    # Add more sections/keys as needed:
-    # 'dhcp': ['...'],
-}
+# Pi-hole config paths that are never synced. Everything else is, so settings added
+# in new FTL releases sync by default. Entries match the path itself and anything below it.
+SYNC_CONFIG_DENYLIST = (
+    # The target's own network identity
+    'dns.interface',
+    'dns.listeningMode',
+    'dns.port',
+    'dns.hostRecord',
+    'dns.reply.host',
+    'dns.reply.blocking',
+    # DNSMon toggles blocking per server; a timed disable on the source must not propagate
+    'dns.blocking.active',
+    # Two DHCP servers handing out the same range on one LAN conflict
+    'dhcp',
+    'ntp',
+    # How DNSMon reaches and authenticates to the target: a copied port, ACL, TLS
+    # setting or password hash would cut the target off from DNSMon
+    'webserver',
+    'files',
+    # Would make the target reject every later PATCH
+    'misc.readOnly',
+    # Raw dnsmasq directives could re-add anything above (dhcp-range, interface=, ...)
+    'misc.dnsmasq_lines',
+    'misc.etc_dnsmasq_d',
+    'debug',
+)
+
+
+def _is_denied(path: str) -> bool:
+    return any(path == p or path.startswith(p + '.') for p in SYNC_CONFIG_DENYLIST)
+
+
+def _flatten(config: Dict[str, Any], prefix: str = '') -> Dict[str, Any]:
+    """Flatten a plain Pi-hole config into {dotted.path: value}."""
+    leaves = {}
+    for key, value in config.items():
+        path = f'{prefix}.{key}' if prefix else key
+        if isinstance(value, dict):
+            leaves.update(_flatten(value, path))
+        else:
+            leaves[path] = value
+    return leaves
+
+
+def _flatten_detailed(config: Dict[str, Any], prefix: str = '') -> Dict[str, Dict[str, Any]]:
+    """Flatten a detailed Pi-hole config (leaves carry 'value' and 'flags') into {dotted.path: leaf}."""
+    leaves = {}
+    for key, node in config.items():
+        path = f'{prefix}.{key}' if prefix else key
+        if isinstance(node, dict) and 'flags' in node:
+            leaves[path] = node
+        elif isinstance(node, dict):
+            leaves.update(_flatten_detailed(node, path))
+    return leaves
+
+
+def _nest(leaves: Dict[str, Any]) -> Dict[str, Any]:
+    nested: Dict[str, Any] = {}
+    for path, value in leaves.items():
+        *parents, last = path.split('.')
+        node = nested
+        for part in parents:
+            node = node.setdefault(part, {})
+        node[last] = value
+    return nested
+
+
+def _syncable_leaves(source_config: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        path: value for path, value in _flatten(source_config).items()
+        if value is not None and not _is_denied(path)
+    }
+
+
+def _teleporter_import_options(server_type: str) -> Optional[Dict[str, Any]]:
+    # deleteExistingFiles is a Technitium restore flag. Pi-hole must get None so the client's
+    # default import object applies: FTL skips every category an import object doesn't name,
+    # so {'deleteExistingFiles': True} made Pi-hole import neither gravity nor config.
+    return {'deleteExistingFiles': True} if server_type == 'technitium' else None
+
+
+def _build_target_patch(source_leaves: Dict[str, Any], target_detailed: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    Pick the source settings the target should receive, as flat {path: value}.
+
+    Skips keys the target's FTL version doesn't know (the PATCH would be rejected
+    whole), keys locked by an environment variable on the target (same), and keys
+    already equal (avoids needless dnsmasq restarts). Returns None when the target
+    reported no detailed settings, so nothing could be compared.
+    """
+    target_leaves = _flatten_detailed(target_detailed)
+    if not target_leaves:
+        return None
+    changes = {}
+    for path, value in source_leaves.items():
+        leaf = target_leaves.get(path)
+        if leaf is None or leaf['flags'].get('env_var'):
+            continue
+        if leaf.get('value') != value:
+            changes[path] = value
+    return changes
 
 
 async def _get_sources_and_targets(session) -> tuple:
@@ -54,27 +148,8 @@ class PiholeSyncService:
     Service for syncing Pi-hole configurations from source to targets.
 
     Uses Pi-hole's Teleporter API for gravity data (lists, domains, groups, clients)
-    and Config API for settings (DNS, DHCP, etc.).
+    and Config API for settings (everything outside SYNC_CONFIG_DENYLIST).
     """
-
-    def _filter_config_for_sync(self, config: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Filter config to only include specific keys we want to sync.
-        Only syncs safe keys like dns.hosts, dns.cnameRecords, etc.
-        Avoids syncing null values or device-specific settings.
-        """
-        filtered = {}
-        for section, keys in SYNC_CONFIG_KEYS.items():
-            if section in config and isinstance(config[section], dict):
-                section_data = {}
-                for key in keys:
-                    if key in config[section]:
-                        value = config[section][key]
-                        if value is not None:
-                            section_data[key] = value
-                if section_data:
-                    filtered[section] = section_data
-        return filtered
 
     def _get_config_summary(self, config: Dict[str, Any], server_type: str) -> Dict[str, Any]:
         """Get a summary of config sections for preview/history"""
@@ -95,15 +170,9 @@ class PiholeSyncService:
                 summary['forwarders'] = len(config['forwarders']) if isinstance(config['forwarders'], list) else 1
             summary['blocking_enabled'] = config.get('enableBlocking', False)
         else:
-            # Pi-hole config summary
-            for section, keys in SYNC_CONFIG_KEYS.items():
-                if section in config and isinstance(config[section], dict):
-                    section_data = config[section]
-                    for key in keys:
-                        if key in section_data:
-                            value = section_data[key]
-                            if isinstance(value, list):
-                                summary[f'{section}_{key}'] = len(value)
+            for path, value in _syncable_leaves(config).items():
+                if isinstance(value, list):
+                    summary[path.replace('.', '_')] = len(value)
 
         return summary
 
@@ -154,8 +223,11 @@ class PiholeSyncService:
                     'clients', 'client_by_group'
                 ]
             }
-            if source_type == 'pihole':
-                preview['config']['keys'] = SYNC_CONFIG_KEYS
+            if source_type == 'pihole' and config:
+                leaves = _syncable_leaves(config)
+                preview['config']['summary']['config_settings'] = len(leaves)
+                preview['config']['keys'] = {section: list(keys) for section, keys in _nest(leaves).items()}
+                preview['config']['excluded'] = list(SYNC_CONFIG_DENYLIST)
 
         return preview
 
@@ -245,12 +317,16 @@ class PiholeSyncService:
             logger.error("Failed to get config from AdGuard source")
             return None
 
-        if source_type == 'pihole':
-            sync_config = self._filter_config_for_sync(source_config) if source_config else {}
-        elif source_type == 'technitium':
-            sync_config = {}  # Technitium uses backup/restore only, no config patching
-        else:
-            sync_config = source_config
+        # Technitium syncs by backup/restore only; Pi-hole patches per target from source_leaves
+        sync_config = source_config if source_type == 'adguard' else {}
+        source_leaves = _syncable_leaves(source_config) if source_type == 'pihole' and source_config else {}
+        config_changes: Dict[str, List[str]] = {}
+        teleporter_options = _teleporter_import_options(source_type)
+
+        def record_failure(msg: str) -> None:
+            logger.error(msg)
+            if len(all_errors) < max_errors:
+                all_errors.append(msg)
 
         successful_syncs = 0
         gravity_errors: List[str] = []
@@ -269,19 +345,26 @@ class PiholeSyncService:
                         continue
 
                     if teleporter_data and client.supports_teleporter:
-                        if not await client.post_teleporter(teleporter_data, import_options={'deleteExistingFiles': True}):
-                            error_msg = f"{target.name}: Failed to upload teleporter backup"
-                            logger.error(error_msg)
-                            if len(all_errors) < max_errors:
-                                all_errors.append(error_msg)
+                        if not await client.post_teleporter(teleporter_data, import_options=teleporter_options):
+                            record_failure(f"{target.name}: Failed to upload teleporter backup")
                             target_success = False
+
+                    if source_leaves:
+                        target_detailed = await client.get_config(detailed=True)
+                        changes = _build_target_patch(source_leaves, target_detailed) if target_detailed else None
+                        if changes is None:
+                            record_failure(f"{target.name}: Failed to read config")
+                            target_success = False
+                        elif changes:
+                            if await client.patch_config(_nest(changes)):
+                                config_changes[target.name] = sorted(changes)
+                            else:
+                                record_failure(f"{target.name}: Failed to apply config")
+                                target_success = False
 
                     if sync_config:
                         if not await client.patch_config(sync_config):
-                            error_msg = f"{target.name}: Failed to apply config"
-                            logger.error(error_msg)
-                            if len(all_errors) < max_errors:
-                                all_errors.append(error_msg)
+                            record_failure(f"{target.name}: Failed to apply config")
                             target_success = False
 
                     if run_gravity:
@@ -314,7 +397,11 @@ class PiholeSyncService:
         if source_config:
             items_synced.update(self._get_config_summary(source_config, source_type))
         items_synced['_teleporter_size_bytes'] = len(teleporter_data) if teleporter_data else 0
-        items_synced['_config_sections'] = list(sync_config.keys()) if sync_config else []
+        if source_leaves:
+            items_synced['_config_sections'] = sorted(_nest(source_leaves))
+            items_synced['_config_changes'] = config_changes
+        else:
+            items_synced['_config_sections'] = list(sync_config.keys()) if sync_config else []
         items_synced['_server_type'] = source_type
         items_synced['_source_server_name'] = source.name
         items_synced['_target_server_names'] = [t.name for t in targets]
@@ -343,7 +430,7 @@ class PiholeSyncService:
 
         For Pi-hole:
         1. Teleporter - syncs gravity database (lists, domains, groups, clients)
-        2. Config PATCH - syncs settings (DNS including hosts, DHCP, etc.)
+        2. Config PATCH - syncs settings outside SYNC_CONFIG_DENYLIST, only keys that differ
 
         For AdGuard Home:
         1. Config sync - syncs user rules, DNS settings, filtering config

@@ -491,6 +491,7 @@ export interface SyncPreviewSource {
   };
   config?: {
     keys?: Record<string, string[]>;
+    excluded?: string[];
     summary?: Record<string, number | boolean>;
   };
   error?: string;
@@ -509,6 +510,7 @@ export interface SyncPreview {
 export interface SyncItemsSynced {
   _teleporter_size_bytes?: number;
   _config_sections?: string[];
+  _config_changes?: Record<string, string[]>;
   _server_type?: string;
   _source_server_name?: string;
   _target_server_names?: string[];
