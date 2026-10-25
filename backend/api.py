@@ -3,6 +3,7 @@ DNSMon API - Main FastAPI application
 """
 import os
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Depends, HTTPException
@@ -80,7 +81,31 @@ class DynamicCORSMiddleware:
         await inner(scope, receive, send)
 
 
-app = FastAPI(title="DNSMon", description="DNS Ad-Blocker Monitor - Pi-hole & AdGuard Home")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize database and services on startup; stop them on shutdown."""
+    logger.info("Initializing database...")
+    await init_db()
+
+    logger.info("Loading settings from database...")
+    settings = await get_settings()
+    logger.info(f"Settings loaded: poll_interval={settings.poll_interval_seconds}s")
+
+    logger.info("Starting background services...")
+    service = get_service()
+    await service.startup()
+    logger.info("Application startup complete")
+
+    yield
+
+    await service.shutdown()
+
+
+app = FastAPI(
+    title="DNSMon",
+    description="DNS Ad-Blocker Monitor - Pi-hole & AdGuard Home",
+    lifespan=lifespan,
+)
 
 app.add_middleware(DynamicCORSMiddleware)
 
@@ -100,29 +125,6 @@ app.include_router(insights_router)
 app.include_router(app_definitions_router)
 app.include_router(insight_sources_router)
 app.include_router(classify_router)
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize database and services on startup"""
-    logger.info("Initializing database...")
-    await init_db()
-
-    logger.info("Loading settings from database...")
-    settings = await get_settings()
-    logger.info(f"Settings loaded: poll_interval={settings.poll_interval_seconds}s")
-
-    logger.info("Starting background services...")
-    service = get_service()
-    await service.startup()
-    logger.info("Application startup complete")
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Shutdown services"""
-    service = get_service()
-    await service.shutdown()
 
 
 @app.get("/api/health")

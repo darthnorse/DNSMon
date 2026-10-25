@@ -2,14 +2,12 @@ fastapi==0.162.0
 uvicorn[standard]==0.41.0
 sqlalchemy==2.0.46
 asyncpg==0.31.0
-alembic==1.18.4
 pydantic==2.12.5
-pydantic-settings==2.16.1
 python-telegram-bot==22.6
 apscheduler==3.11.2
 httpx==0.28.1
+# Not imported; pinned as a version floor for the copy uvicorn[standard] pulls in
 pyyaml==6.0.3
-python-multipart==0.0.32
 
 # Authentication
 PyJWT[crypto]==2.15.1

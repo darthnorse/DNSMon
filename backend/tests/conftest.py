@@ -98,7 +98,7 @@ async def setup_test_db() -> AsyncGenerator[None, None]:
 
     # Create schema + run migrations (mirrors production startup).
     await init_db()
-    # Preload settings singleton (mirrors @app.on_event("startup")) so endpoints
+    # Preload settings singleton (mirrors the app's lifespan startup) so endpoints
     # that synchronously read settings via get_settings_sync() don't raise.
     await get_settings()
 
