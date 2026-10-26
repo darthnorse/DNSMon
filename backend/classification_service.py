@@ -3,6 +3,7 @@ import json
 import logging
 import re
 import sys
+from datetime import timedelta
 from http import HTTPStatus
 from pathlib import Path
 from typing import Optional
@@ -68,10 +69,13 @@ _QFEEDS_MAX_DOMAINS = 2_000_000
 # time; 80% leaves no such step, while tolerating real feed churn.
 _QFEEDS_MIN_RETAINED_PCT = 80
 
-# A truncated download or outage page rarely repeats at the same size, while an
-# upstream cleanup does. A drop below the retained floor is accepted once this
-# many consecutive refreshes return a count within the tolerance of each other.
+# A truncated download or outage page rarely repeats at the same size over days,
+# while an upstream cleanup does. A drop below the retained floor is accepted once
+# this many consecutive refreshes, spanning at least the minimum age, return a
+# count within the tolerance of the first. The age requirement stops a burst of
+# manual refreshes during one outage from accepting a cached partial body.
 _QFEEDS_STABLE_SHRINK_REFRESHES = 3
+_QFEEDS_STABLE_SHRINK_MIN_AGE = timedelta(hours=48)
 _QFEEDS_STABLE_SHRINK_TOLERANCE_PCT = 2
 
 _NO_DOMAINS_ERROR = 'Feed returned no usable domains'
@@ -225,6 +229,26 @@ def build_blocklist_defs(fetched: list[tuple[str, str]]) -> list[dict]:
         [(category, parse_blocklist_text(text)) for category, text in fetched])
 
 
+def _clear_shrink_candidate(row) -> None:
+    row.shrink_candidate_count = None
+    row.shrink_candidate_since = None
+    row.shrink_streak = None
+
+
+def _record_shrink_candidate(row, count: int) -> None:
+    """Extend the streak when count is within tolerance of the streak's first
+    count; otherwise start a new streak at count. The first count stays fixed so
+    a slowly drifting size cannot walk past the tolerance."""
+    candidate = row.shrink_candidate_count
+    if candidate is not None and row.shrink_candidate_since is not None and (
+            abs(count - candidate) * 100 <= candidate * _QFEEDS_STABLE_SHRINK_TOLERANCE_PCT):
+        row.shrink_streak = (row.shrink_streak or 0) + 1
+        return
+    row.shrink_candidate_count = count
+    row.shrink_candidate_since = utcnow()
+    row.shrink_streak = 1
+
+
 class ClassificationService:
     """Builds and maintains the app/category knowledge base and the
     resolved domain_labels cache."""
@@ -362,14 +386,55 @@ class ClassificationService:
 
         Any failure — no key, fetch error, empty or implausible body — keeps the
         existing tier and returns -1."""
+        domains = await self._fetch_qfeeds_domains(row)
+        if domains is None:
+            _clear_shrink_candidate(row)
+            return -1
+        count = len(domains)
+        # Anchored to the high-water mark, not the current count, so an upstream
+        # serving half each time cannot walk the tier down one accepted refresh at
+        # a time.
+        existing = await self._source_domain_count(db, 'qfeeds')
+        anchor = max(existing, row.domain_count_high_water or 0)
+        if count * 100 < anchor * _QFEEDS_MIN_RETAINED_PCT:
+            _record_shrink_candidate(row, count)
+            age = utcnow() - row.shrink_candidate_since
+            if (row.shrink_streak < _QFEEDS_STABLE_SHRINK_REFRESHES
+                    or age < _QFEEDS_STABLE_SHRINK_MIN_AGE):
+                hours = int(_QFEEDS_STABLE_SHRINK_MIN_AGE.total_seconds() // 3600)
+                logger.error(
+                    f"Q-Feeds returned {count} domains (peak {anchor}); keeping existing "
+                    f"tier ({row.shrink_streak} matching refresh(es) so far)")
+                self._last_fetch_error = (
+                    f"Feed returned {count} domains vs a peak of {anchor}; accepted once "
+                    f"it holds at this size for {hours}h across "
+                    f"{_QFEEDS_STABLE_SHRINK_REFRESHES} scheduled refreshes.")
+                return -1
+            logger.warning(
+                f"Q-Feeds held at ~{count} domains (peak {anchor}) for "
+                f"{row.shrink_streak} refreshes; accepting it as the new baseline")
+            anchor = count
+        n = await self._replace_source(db, 'qfeeds', [{
+            'slug': 'malware', 'name': 'Malware', 'category': None,
+            'is_category_only': False,
+            'domains': [(d, False) for d in sorted(domains)],
+        }])
+        row.domain_count_high_water = max(anchor, count)
+        _clear_shrink_candidate(row)
+        logger.info(f"Loaded {len(domains)} Q-Feeds malware domains")
+        return n
+
+    async def _fetch_qfeeds_domains(self, row) -> Optional[set]:
+        """Fetch and parse the feed; None (with _last_fetch_error set) when the
+        result is unusable regardless of what the tier currently holds."""
         if not row.api_key:
             logger.error("Q-Feeds source has no API key; skipping refresh")
             self._last_fetch_error = "API key required"
-            return -1
+            return None
         text = await self._safe_fetch(
             build_qfeeds_url(row.url, row.api_key), 'Q-Feeds threat list')
         if text is None:
-            return -1
+            return None
         domains = parse_blocklist_text(text)
         # A public-suffix entry (ru.net, co.uk, duckdns.org) would tag every domain
         # beneath it via the matcher's suffix walk. The live feed already carries one.
@@ -382,61 +447,20 @@ class ClassificationService:
         if not domains:
             logger.error("Q-Feeds list yielded 0 domains; keeping existing tier")
             self._last_fetch_error = _NO_DOMAINS_ERROR
-            return -1
+            return None
         if len(domains) > _QFEEDS_MAX_DOMAINS:
             logger.error(f"Q-Feeds returned {len(domains)} domains; refusing")
             self._last_fetch_error = "Feed implausibly large; refused"
-            return -1
+            return None
         # A 200 maintenance page can still contain one domain-shaped token; without
-        # this floor it would replace the whole tier and still report ok. Anchored
-        # to the high-water mark, not the current count, so an upstream serving
-        # half each time cannot walk the tier down one accepted refresh at a time.
-        count = len(domains)
-        if count < _QFEEDS_MIN_DOMAINS:
-            row.shrink_candidate_count = None
-            row.shrink_streak = None
-            logger.error(f"Q-Feeds returned {count} domains; implausible, keeping existing tier")
-            self._last_fetch_error = f"Feed returned only {count} domains; refused as implausible."
-            return -1
-        existing = await self._source_domain_count(db, 'qfeeds')
-        anchor = max(existing, row.domain_count_high_water or 0)
-        if count * 100 < anchor * _QFEEDS_MIN_RETAINED_PCT:
-            streak = self._shrink_streak(row, count)
-            if streak < _QFEEDS_STABLE_SHRINK_REFRESHES:
-                remaining = _QFEEDS_STABLE_SHRINK_REFRESHES - streak
-                logger.error(
-                    f"Q-Feeds returned {count} domains (peak {anchor}); keeping existing "
-                    f"tier unless the next {remaining} refresh(es) agree")
-                self._last_fetch_error = (
-                    f"Feed returned {count} domains vs a peak of {anchor}; accepted if "
-                    f"the next {remaining} refresh(es) return the same size.")
-                return -1
-            logger.warning(
-                f"Q-Feeds held at ~{count} domains (peak {anchor}) for {streak} "
-                "refreshes; accepting it as the new baseline")
-            anchor = count
-        n = await self._replace_source(db, 'qfeeds', [{
-            'slug': 'malware', 'name': 'Malware', 'category': None,
-            'is_category_only': False,
-            'domains': [(d, False) for d in sorted(domains)],
-        }])
-        row.domain_count_high_water = max(anchor, count)
-        row.shrink_candidate_count = None
-        row.shrink_streak = None
-        logger.info(f"Loaded {len(domains)} Q-Feeds malware domains")
-        return n
-
-    @staticmethod
-    def _shrink_streak(row, count: int) -> int:
-        """Record a refused smaller count and return how many consecutive refreshes
-        have now returned roughly that size."""
-        candidate = row.shrink_candidate_count
-        holds = candidate is not None and (
-            abs(count - candidate) * 100 <= candidate * _QFEEDS_STABLE_SHRINK_TOLERANCE_PCT)
-        streak = (row.shrink_streak or 0) + 1 if holds else 1
-        row.shrink_candidate_count = count
-        row.shrink_streak = streak
-        return streak
+        # this floor it would replace the whole tier and still report ok.
+        if len(domains) < _QFEEDS_MIN_DOMAINS:
+            logger.error(
+                f"Q-Feeds returned {len(domains)} domains; implausible, keeping existing tier")
+            self._last_fetch_error = (
+                f"Feed returned only {len(domains)} domains; refused as implausible.")
+            return None
+        return domains
 
     async def refresh_feed(self, db: AsyncSession, row) -> int:
         """Fetch AdGuard services.json and replace the 'adguard' definitions.

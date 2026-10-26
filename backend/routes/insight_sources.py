@@ -79,6 +79,7 @@ async def update_source(source_id: int, payload: InsightSourceUpdate,
         src.last_error = None
         src.domain_count_high_water = None
         src.shrink_candidate_count = None
+        src.shrink_candidate_since = None
         src.shrink_streak = None
 
     await db.commit()

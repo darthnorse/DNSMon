@@ -174,6 +174,7 @@ async def test_threat_migrations_add_missing_columns():
         ('alert_rules', 'match_threat', 'NO'),
         ('insight_sources', 'shrink_candidate_count', 'YES'),
         ('insight_sources', 'shrink_streak', 'YES'),
+        ('insight_sources', 'shrink_candidate_since', 'YES'),
     ]
     async with production_engine.begin() as conn:
         for table, column, _ in columns:

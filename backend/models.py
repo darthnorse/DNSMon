@@ -718,6 +718,7 @@ class InsightSource(Base):
     # Lets a genuine upstream cleanup past the guard: a smaller count that holds
     # across consecutive refreshes replaces the high-water mark.
     shrink_candidate_count = Column(Integer, nullable=True)
+    shrink_candidate_since = Column(DateTime(timezone=True), nullable=True)
     shrink_streak = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)

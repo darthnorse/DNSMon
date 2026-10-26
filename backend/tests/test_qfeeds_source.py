@@ -1,5 +1,7 @@
 """Tests for the Q-Feeds threat source: secret scrubbing, URL building, loader."""
 
+from datetime import timedelta
+
 import httpx
 
 from backend.classification_service import (
@@ -78,6 +80,7 @@ class _Row:
         self.name = 'Q-Feeds Malware Domains'
         self.domain_count_high_water = None
         self.shrink_candidate_count = None
+        self.shrink_candidate_since = None
         self.shrink_streak = None
 
 
@@ -305,61 +308,6 @@ async def test_v2fly_missing_map_does_not_inherit_another_sources_error(
     assert 'v2fly mapping' in row.last_error
 
 
-async def test_repeated_halving_cannot_drain_the_tier(db_session, monkeypatch):
-    """Anchoring the guard to the current count makes it a ratchet: each accepted
-    refresh lowers the bar for the next, so serving exactly the maximum tolerated
-    shrink every time walks the tier to nothing while every step reports ok."""
-    from sqlalchemy import select, func
-    from backend.models import AppDomain
-    from backend.classification_service import ClassificationService
-
-    row = InsightSource(name='Q-Feeds', url=QFEEDS_FEED_URL + '&t=ratchet',
-                        kind='qfeeds', format='domains', enabled=True,
-                        api_key='tip_abc')
-    db_session.add(row)
-    await db_session.commit()
-
-    svc = ClassificationService()
-
-    def feed(n):
-        return "\n".join(f"evil{i}.example" for i in range(n))
-
-    monkeypatch.setattr(svc, '_safe_fetch', lambda url, what: _returns(feed(4000)))
-    assert await svc.load_qfeeds(db_session, row) == 1
-    assert row.domain_count_high_water == 4000
-
-    monkeypatch.setattr(svc, '_safe_fetch', lambda url, what: _returns(feed(2000)))
-    assert await svc.load_qfeeds(db_session, row) == -1
-
-    monkeypatch.setattr(svc, '_safe_fetch', lambda url, what: _returns(feed(1000)))
-    assert await svc.load_qfeeds(db_session, row) == -1
-
-    assert await db_session.scalar(
-        select(func.count()).select_from(AppDomain)) == 4000
-
-
-async def test_a_modest_shrink_is_still_accepted(db_session, monkeypatch):
-    from backend.classification_service import ClassificationService
-
-    row = InsightSource(name='Q-Feeds', url=QFEEDS_FEED_URL + '&t=shrink',
-                        kind='qfeeds', format='domains', enabled=True,
-                        api_key='tip_abc')
-    db_session.add(row)
-    await db_session.commit()
-
-    svc = ClassificationService()
-
-    def feed(n):
-        return "\n".join(f"evil{i}.example" for i in range(n))
-
-    monkeypatch.setattr(svc, '_safe_fetch', lambda url, what: _returns(feed(4000)))
-    await svc.load_qfeeds(db_session, row)
-
-    monkeypatch.setattr(svc, '_safe_fetch', lambda url, what: _returns(feed(3600)))
-    assert await svc.load_qfeeds(db_session, row) == 1
-    assert row.domain_count_high_water == 4000
-
-
 async def _seeded_qfeeds_row(db_session, monkeypatch, tag, peak=4000):
     from backend.classification_service import ClassificationService
 
@@ -379,9 +327,39 @@ def _serve(svc, monkeypatch, n):
     monkeypatch.setattr(svc, '_safe_fetch', lambda url, what: _returns(feed))
 
 
+def _age_candidate(row, hours):
+    row.shrink_candidate_since -= timedelta(hours=hours)
+
+
+async def test_repeated_halving_cannot_drain_the_tier(db_session, monkeypatch):
+    """Anchoring the guard to the current count makes it a ratchet: each accepted
+    refresh lowers the bar for the next, so serving exactly the maximum tolerated
+    shrink every time walks the tier to nothing while every step reports ok."""
+    from sqlalchemy import select, func
+    from backend.models import AppDomain
+
+    svc, row = await _seeded_qfeeds_row(db_session, monkeypatch, 'ratchet')
+    assert row.domain_count_high_water == 4000
+
+    for n in (2000, 1000):
+        _serve(svc, monkeypatch, n)
+        assert await svc.load_qfeeds(db_session, row) == -1
+
+    assert await db_session.scalar(
+        select(func.count()).select_from(AppDomain)) == 4000
+
+
+async def test_a_modest_shrink_is_still_accepted(db_session, monkeypatch):
+    svc, row = await _seeded_qfeeds_row(db_session, monkeypatch, 'shrink')
+
+    _serve(svc, monkeypatch, 3600)
+    assert await svc.load_qfeeds(db_session, row) == 1
+    assert row.domain_count_high_water == 4000
+
+
 async def test_a_large_drop_is_accepted_once_it_holds(db_session, monkeypatch):
     """An upstream cleanup is indistinguishable from a broken download on one
-    refresh, but a broken download rarely repeats at the same size."""
+    refresh, but a broken download rarely repeats at the same size for days."""
     from sqlalchemy import select, func
     from backend.models import AppDomain
 
@@ -390,14 +368,38 @@ async def test_a_large_drop_is_accepted_once_it_holds(db_session, monkeypatch):
     for n in (1000, 1010):
         _serve(svc, monkeypatch, n)
         assert await svc.load_qfeeds(db_session, row) == -1
-        assert 'accepted if the next' in svc._last_fetch_error
+        assert 'accepted once it holds' in svc._last_fetch_error
     assert row.shrink_streak == 2
 
+    _age_candidate(row, 49)
     _serve(svc, monkeypatch, 1005)
     assert await svc.load_qfeeds(db_session, row) == 1
     assert row.domain_count_high_water == 1005
     assert row.shrink_candidate_count is None and row.shrink_streak is None
+    assert row.shrink_candidate_since is None
     assert await db_session.scalar(select(func.count()).select_from(AppDomain)) == 1005
+
+
+async def test_rapid_refreshes_cannot_accept_a_drop(db_session, monkeypatch):
+    """Clicking Refresh repeatedly during one outage can get the same cached
+    partial body every time; the count alone must not accept it."""
+    svc, row = await _seeded_qfeeds_row(db_session, monkeypatch, 'rapid')
+
+    for _ in range(5):
+        _serve(svc, monkeypatch, 1000)
+        assert await svc.load_qfeeds(db_session, row) == -1
+    assert row.shrink_streak == 5
+    assert row.domain_count_high_water == 4000
+
+
+async def test_tolerance_is_measured_from_the_first_count(db_session, monkeypatch):
+    svc, row = await _seeded_qfeeds_row(db_session, monkeypatch, 'drift')
+
+    for n in (1000, 1019, 1038):
+        _serve(svc, monkeypatch, n)
+        assert await svc.load_qfeeds(db_session, row) == -1
+    assert row.shrink_candidate_count == 1038
+    assert row.shrink_streak == 1
 
 
 async def test_a_drop_that_changes_size_restarts_the_streak(db_session, monkeypatch):
@@ -411,13 +413,18 @@ async def test_a_drop_that_changes_size_restarts_the_streak(db_session, monkeypa
     assert row.domain_count_high_water == 4000
 
 
-async def test_an_error_page_between_drops_restarts_the_streak(db_session, monkeypatch):
-    svc, row = await _seeded_qfeeds_row(db_session, monkeypatch, 'errpage')
-
-    for n in (1000, 1000, 5, 1000):
-        _serve(svc, monkeypatch, n)
-        assert await svc.load_qfeeds(db_session, row) == -1
-    assert row.shrink_streak == 1
+async def test_any_refused_refresh_between_drops_restarts_the_streak(db_session, monkeypatch):
+    for tag, interruption in (('errpage', "\n".join(f"x{i}.example" for i in range(5))),
+                              ('empty', "Access forbidden."),
+                              ('fetchfail', None)):
+        svc, row = await _seeded_qfeeds_row(db_session, monkeypatch, tag)
+        for body in (1000, 1000, interruption, 1000):
+            if isinstance(body, int):
+                _serve(svc, monkeypatch, body)
+            else:
+                monkeypatch.setattr(svc, '_safe_fetch', lambda url, what, b=body: _returns(b))
+            assert await svc.load_qfeeds(db_session, row) == -1
+        assert row.shrink_streak == 1, tag
 
 
 async def test_a_recovered_feed_clears_a_pending_drop(db_session, monkeypatch):
