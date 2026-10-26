@@ -368,7 +368,7 @@ async def test_a_large_drop_is_accepted_once_it_holds(db_session, monkeypatch):
     for n in (1000, 1010):
         _serve(svc, monkeypatch, n)
         assert await svc.load_qfeeds(db_session, row) == -1
-        assert 'accepted once it holds' in svc._last_fetch_error
+        assert 'accepted once it has held' in svc._last_fetch_error
     assert row.shrink_streak == 2
 
     _age_candidate(row, 49)

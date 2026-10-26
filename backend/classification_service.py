@@ -407,8 +407,8 @@ class ClassificationService:
                     f"tier ({row.shrink_streak} matching refresh(es) so far)")
                 self._last_fetch_error = (
                     f"Feed returned {count} domains vs a peak of {anchor}; accepted once "
-                    f"it holds at this size for {hours}h across "
-                    f"{_QFEEDS_STABLE_SHRINK_REFRESHES} scheduled refreshes.")
+                    f"it has held at this size for {hours}h and "
+                    f"{_QFEEDS_STABLE_SHRINK_REFRESHES} refreshes.")
                 return -1
             logger.warning(
                 f"Q-Feeds held at ~{count} domains (peak {anchor}) for "
