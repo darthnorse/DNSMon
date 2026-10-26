@@ -120,6 +120,10 @@ async def _run_migrations(conn):
                   col_type='INTEGER', default=None, nullable=True),
         Migration(table='alert_rules', column='match_threat',
                   col_type='BOOLEAN', default='false', nullable=False),
+        Migration(table='insight_sources', column='shrink_candidate_count',
+                  col_type='INTEGER', default=None, nullable=True),
+        Migration(table='insight_sources', column='shrink_streak',
+                  col_type='INTEGER', default=None, nullable=True),
     ]
     for m in migrations:
         result = await conn.execute(text(

@@ -56,7 +56,8 @@ _THREAT_TYPE_MAX = 20
 # bulk writers.
 _LABEL_INSERT_BATCH = 2000
 
-# The real feed carries ~127k domains; anything near this is an error page.
+# The real feed carries tens of thousands of domains; anything near this is an
+# error page.
 _QFEEDS_MIN_DOMAINS = 100
 
 # Bounds memory: every accepted domain is held in the resident matcher and
@@ -66,6 +67,12 @@ _QFEEDS_MAX_DOMAINS = 2_000_000
 # A halving guard would still admit an upstream serving exactly half each
 # time; 80% leaves no such step, while tolerating real feed churn.
 _QFEEDS_MIN_RETAINED_PCT = 80
+
+# A truncated download or outage page rarely repeats at the same size, while an
+# upstream cleanup does. A drop below the retained floor is accepted once this
+# many consecutive refreshes return a count within the tolerance of each other.
+_QFEEDS_STABLE_SHRINK_REFRESHES = 3
+_QFEEDS_STABLE_SHRINK_TOLERANCE_PCT = 2
 
 _NO_DOMAINS_ERROR = 'Feed returned no usable domains'
 
@@ -384,25 +391,52 @@ class ClassificationService:
         # this floor it would replace the whole tier and still report ok. Anchored
         # to the high-water mark, not the current count, so an upstream serving
         # half each time cannot walk the tier down one accepted refresh at a time.
+        count = len(domains)
+        if count < _QFEEDS_MIN_DOMAINS:
+            row.shrink_candidate_count = None
+            row.shrink_streak = None
+            logger.error(f"Q-Feeds returned {count} domains; implausible, keeping existing tier")
+            self._last_fetch_error = f"Feed returned only {count} domains; refused as implausible."
+            return -1
         existing = await self._source_domain_count(db, 'qfeeds')
         anchor = max(existing, row.domain_count_high_water or 0)
-        if len(domains) < _QFEEDS_MIN_DOMAINS or (
-                len(domains) * 100 < anchor * _QFEEDS_MIN_RETAINED_PCT):
-            logger.error(
-                f"Q-Feeds returned {len(domains)} domains (peak {anchor}); "
-                "implausible, keeping existing tier")
-            self._last_fetch_error = (
-                f"Feed returned {len(domains)} domains vs a peak of {anchor}; "
-                "refused as implausible.")
-            return -1
+        if count * 100 < anchor * _QFEEDS_MIN_RETAINED_PCT:
+            streak = self._shrink_streak(row, count)
+            if streak < _QFEEDS_STABLE_SHRINK_REFRESHES:
+                remaining = _QFEEDS_STABLE_SHRINK_REFRESHES - streak
+                logger.error(
+                    f"Q-Feeds returned {count} domains (peak {anchor}); keeping existing "
+                    f"tier unless the next {remaining} refresh(es) agree")
+                self._last_fetch_error = (
+                    f"Feed returned {count} domains vs a peak of {anchor}; accepted if "
+                    f"the next {remaining} refresh(es) return the same size.")
+                return -1
+            logger.warning(
+                f"Q-Feeds held at ~{count} domains (peak {anchor}) for {streak} "
+                "refreshes; accepting it as the new baseline")
+            anchor = count
         n = await self._replace_source(db, 'qfeeds', [{
             'slug': 'malware', 'name': 'Malware', 'category': None,
             'is_category_only': False,
             'domains': [(d, False) for d in sorted(domains)],
         }])
-        row.domain_count_high_water = max(anchor, len(domains))
+        row.domain_count_high_water = max(anchor, count)
+        row.shrink_candidate_count = None
+        row.shrink_streak = None
         logger.info(f"Loaded {len(domains)} Q-Feeds malware domains")
         return n
+
+    @staticmethod
+    def _shrink_streak(row, count: int) -> int:
+        """Record a refused smaller count and return how many consecutive refreshes
+        have now returned roughly that size."""
+        candidate = row.shrink_candidate_count
+        holds = candidate is not None and (
+            abs(count - candidate) * 100 <= candidate * _QFEEDS_STABLE_SHRINK_TOLERANCE_PCT)
+        streak = (row.shrink_streak or 0) + 1 if holds else 1
+        row.shrink_candidate_count = count
+        row.shrink_streak = streak
+        return streak
 
     async def refresh_feed(self, db: AsyncSession, row) -> int:
         """Fetch AdGuard services.json and replace the 'adguard' definitions.

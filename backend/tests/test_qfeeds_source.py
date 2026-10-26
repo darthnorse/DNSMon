@@ -77,6 +77,8 @@ class _Row:
         self.kind = 'qfeeds'
         self.name = 'Q-Feeds Malware Domains'
         self.domain_count_high_water = None
+        self.shrink_candidate_count = None
+        self.shrink_streak = None
 
 
 async def _returns(value):
@@ -355,6 +357,77 @@ async def test_a_modest_shrink_is_still_accepted(db_session, monkeypatch):
 
     monkeypatch.setattr(svc, '_safe_fetch', lambda url, what: _returns(feed(3600)))
     assert await svc.load_qfeeds(db_session, row) == 1
+    assert row.domain_count_high_water == 4000
+
+
+async def _seeded_qfeeds_row(db_session, monkeypatch, tag, peak=4000):
+    from backend.classification_service import ClassificationService
+
+    row = InsightSource(name='Q-Feeds', url=QFEEDS_FEED_URL + f'&t={tag}',
+                        kind='qfeeds', format='domains', enabled=True,
+                        api_key='tip_abc')
+    db_session.add(row)
+    await db_session.commit()
+    svc = ClassificationService()
+    _serve(svc, monkeypatch, peak)
+    assert await svc.load_qfeeds(db_session, row) == 1
+    return svc, row
+
+
+def _serve(svc, monkeypatch, n):
+    feed = "\n".join(f"evil{i}.example" for i in range(n))
+    monkeypatch.setattr(svc, '_safe_fetch', lambda url, what: _returns(feed))
+
+
+async def test_a_large_drop_is_accepted_once_it_holds(db_session, monkeypatch):
+    """An upstream cleanup is indistinguishable from a broken download on one
+    refresh, but a broken download rarely repeats at the same size."""
+    from sqlalchemy import select, func
+    from backend.models import AppDomain
+
+    svc, row = await _seeded_qfeeds_row(db_session, monkeypatch, 'hold')
+
+    for n in (1000, 1010):
+        _serve(svc, monkeypatch, n)
+        assert await svc.load_qfeeds(db_session, row) == -1
+        assert 'accepted if the next' in svc._last_fetch_error
+    assert row.shrink_streak == 2
+
+    _serve(svc, monkeypatch, 1005)
+    assert await svc.load_qfeeds(db_session, row) == 1
+    assert row.domain_count_high_water == 1005
+    assert row.shrink_candidate_count is None and row.shrink_streak is None
+    assert await db_session.scalar(select(func.count()).select_from(AppDomain)) == 1005
+
+
+async def test_a_drop_that_changes_size_restarts_the_streak(db_session, monkeypatch):
+    svc, row = await _seeded_qfeeds_row(db_session, monkeypatch, 'restart')
+
+    for n in (1000, 1000, 600, 600):
+        _serve(svc, monkeypatch, n)
+        assert await svc.load_qfeeds(db_session, row) == -1
+    assert row.shrink_candidate_count == 600
+    assert row.shrink_streak == 2
+    assert row.domain_count_high_water == 4000
+
+
+async def test_an_error_page_between_drops_restarts_the_streak(db_session, monkeypatch):
+    svc, row = await _seeded_qfeeds_row(db_session, monkeypatch, 'errpage')
+
+    for n in (1000, 1000, 5, 1000):
+        _serve(svc, monkeypatch, n)
+        assert await svc.load_qfeeds(db_session, row) == -1
+    assert row.shrink_streak == 1
+
+
+async def test_a_recovered_feed_clears_a_pending_drop(db_session, monkeypatch):
+    svc, row = await _seeded_qfeeds_row(db_session, monkeypatch, 'recover')
+
+    _serve(svc, monkeypatch, 1000)
+    assert await svc.load_qfeeds(db_session, row) == -1
+    _serve(svc, monkeypatch, 3900)
+    assert await svc.load_qfeeds(db_session, row) == 1
+    assert row.shrink_candidate_count is None and row.shrink_streak is None
     assert row.domain_count_high_water == 4000
 
 

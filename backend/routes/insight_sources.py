@@ -74,10 +74,12 @@ async def update_source(source_id: int, payload: InsightSourceUpdate,
     if toggled and not enabled:
         # Otherwise the panel keeps showing the last failure of a feed the admin
         # has deliberately turned off. Dropping the high-water mark also gives
-        # them the only way to accept a legitimately smaller feed.
+        # them an immediate way to accept a legitimately smaller feed.
         src.last_status = None
         src.last_error = None
         src.domain_count_high_water = None
+        src.shrink_candidate_count = None
+        src.shrink_streak = None
 
     await db.commit()
     await db.refresh(src)
