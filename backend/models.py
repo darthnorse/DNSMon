@@ -250,8 +250,8 @@ class PiholeServerModel(Base):
     is_source = Column(Boolean, default=False)  # Only one server should be the sync source
     sync_enabled = Column(Boolean, default=False)  # Whether to receive syncs (sync target)
     last_synced_at = Column(DateTime(timezone=True), nullable=True)  # When last synced
-    # Ingestion resumes here. Advanced only after a fetch completes, so a failed
-    # page re-fetches the whole gap instead of skipping it.
+    # Ingestion resumes here: the newest query the server returned, on the server's
+    # clock. Left alone when a page fails to fetch or store, so that range is fetched again.
     ingested_until = Column(DateTime(timezone=True), nullable=True)
 
     created_at = Column(DateTime(timezone=True), default=utcnow)
