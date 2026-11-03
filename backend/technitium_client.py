@@ -15,7 +15,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 
 import httpx
 
-from .dns_client import DNSBlockerClient, QueryFetchError, parse_query_time
+from .dns_client import DNSBlockerClient, QueryFetchError, QueryRangeTruncated, parse_query_time
 
 logger = logging.getLogger(__name__)
 
@@ -146,13 +146,7 @@ class TechnitiumClient(DNSBlockerClient):
         }
 
     async def get_queries(self, from_timestamp: int, until_timestamp: int) -> Optional[List[Dict[str, Any]]]:
-        try:
-            results = [q async for page in self.iter_query_pages(from_timestamp, until_timestamp) for q in page]
-        except QueryFetchError as e:
-            logger.error(str(e))
-            return None
-        logger.info(f"Retrieved {len(results)} queries from {self.server_name}")
-        return results
+        return await self._collect_pages(from_timestamp, until_timestamp)
 
     async def iter_query_pages(self, from_timestamp: int, until_timestamp: int) -> AsyncIterator[List[Dict[str, Any]]]:
         """Page the Query Logs DNS App oldest-first over [from, until]."""
@@ -166,18 +160,20 @@ class TechnitiumClient(DNSBlockerClient):
                 'classPath': self.log_app_class_path,
                 'pageNumber': page,
                 'entriesPerPage': per_page,
+                'descendingOrder': 'false',
                 'start': start_dt.strftime('%Y-%m-%dT%H:%M:%S.000Z'),
                 'end': end_dt.strftime('%Y-%m-%dT%H:%M:%S.000Z'),
             })
             if not data:
                 raise QueryFetchError(f"Failed to fetch query log page {page} from {self.server_name}")
 
-            entries = data.get('response', {}).get('entries', [])
+            entries = (data.get('response') or {}).get('entries') or []
             yield [q for q in map(self._transform_query, entries) if q is not None]
             if len(entries) < per_page:
                 return
 
-        raise QueryFetchError(f"Query log from {self.server_name} exceeds {MAX_LOG_PAGES} pages; range incomplete")
+        raise QueryRangeTruncated(
+            f"Query log walk on {self.server_name} stopped after {MAX_LOG_PAGES} pages; resuming from there next poll")
 
     async def get_blocking_status(self) -> Optional[bool]:
         data = await self._get('/api/settings/get')

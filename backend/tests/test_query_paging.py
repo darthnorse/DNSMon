@@ -4,7 +4,8 @@ import httpx
 import pytest
 
 from backend.adguard_client import AdGuardHomeClient
-from backend.dns_client import QueryFetchError
+from backend import adguard_client, technitium_client
+from backend.dns_client import QueryFetchError, QueryRangeTruncated
 from backend.pihole_client import PiholeClient
 from backend.technitium_client import TechnitiumClient
 
@@ -91,6 +92,25 @@ async def test_adguard_page_error_raises():
         await _pages(_adguard(fake), 0, int(T0.timestamp()))
 
 
+async def test_adguard_walk_is_capped(monkeypatch):
+    monkeypatch.setattr(adguard_client, "MAX_QUERYLOG_PAGES", 2)
+    fake = FakeQueryLog(total=5000)
+
+    with pytest.raises(QueryRangeTruncated):
+        await _pages(_adguard(fake), 0, int(T0.timestamp()))
+
+    assert len(fake.older_than_seen) == 2
+
+
+async def test_adguard_non_json_page_raises_fetch_error():
+    client = AdGuardHomeClient("http://adguard.test", "pw", "adguard1")
+    client.client = httpx.AsyncClient(transport=httpx.MockTransport(
+        lambda r: httpx.Response(200, text="<html>proxy login</html>")))
+
+    with pytest.raises(QueryFetchError):
+        await _pages(client, 0, int(T0.timestamp()))
+
+
 async def test_adguard_get_queries_collects_all_pages():
     fake = FakeQueryLog(total=2500)
 
@@ -120,6 +140,30 @@ async def test_technitium_page_failure_after_first_raises():
 
     with pytest.raises(QueryFetchError):
         await _pages(client, 0, 2**31)
+
+
+async def test_technitium_requests_oldest_first_and_caps_the_walk(monkeypatch):
+    monkeypatch.setattr(technitium_client, "MAX_LOG_PAGES", 1)
+    seen: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.params.get("descendingOrder"))
+        return httpx.Response(200, json={"status": "ok", "response": {"entries": [_tech_entry(i) for i in range(5000)]}})
+    client = TechnitiumClient("http://tech.test", "token", "tech1")
+    client.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+    with pytest.raises(QueryRangeTruncated):
+        await _pages(client, 0, 2**31)
+
+    assert seen == ["false"]
+
+
+async def test_technitium_null_response_is_an_empty_page():
+    client = TechnitiumClient("http://tech.test", "token", "tech1")
+    client.client = httpx.AsyncClient(transport=httpx.MockTransport(
+        lambda r: httpx.Response(200, json={"status": "ok", "response": None})))
+
+    assert await _pages(client, 0, 2**31) == [[]]
 
 
 def test_gap_recovery_capability():

@@ -5,13 +5,21 @@ This module defines the interface that all DNS blocker clients must implement,
 enabling support for multiple DNS ad-blocking solutions (Pi-hole, AdGuard Home, etc.)
 """
 
+import logging
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Dict, List, Optional
 
+logger = logging.getLogger(__name__)
+
 
 class QueryFetchError(Exception):
     """A query-log page could not be fetched, so the requested range is incomplete."""
+
+
+class QueryRangeTruncated(Exception):
+    """The walk hit its page cap. Every page yielded is complete, so ingestion may advance
+    to the newest query it saw instead of retrying a range that can never finish."""
 
 
 def parse_query_time(value: str) -> datetime:
@@ -306,6 +314,19 @@ class DNSBlockerClient(ABC):
     def supports_gap_recovery(self) -> bool:
         """Whether iter_query_pages can reach back through the server's whole retained log."""
         return False
+
+    async def _collect_pages(self, from_timestamp: int, until_timestamp: int) -> Optional[List[Dict[str, Any]]]:
+        """Every page of the range in one list, for callers that don't stream; None if a page failed."""
+        results: List[Dict[str, Any]] = []
+        try:
+            async for page in self.iter_query_pages(from_timestamp, until_timestamp):
+                results.extend(page)
+        except QueryFetchError as e:
+            logger.error(str(e))
+            return None
+        except QueryRangeTruncated as e:
+            logger.warning(str(e))
+        return results
 
     async def query_log_warning(self) -> Optional[str]:
         """Why DNSMon would get no usable queries from this server's log, or None when it can."""

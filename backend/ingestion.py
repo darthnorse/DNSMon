@@ -1,7 +1,7 @@
 import logging
 import time
 from datetime import datetime, timedelta, timezone
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 from dataclasses import dataclass
 from collections import defaultdict
 
@@ -12,7 +12,7 @@ from .models import Query, QueryStatsHourly, ClientStatsHourly, DomainStatsHourl
 from .database import async_session_maker, cleanup_old_queries
 from .utils import create_client_from_server
 from .config import get_settings_sync, PiholeServer
-from .dns_client import QueryFetchError
+from .dns_client import QueryRangeTruncated
 from .constants import BLOCKED_STATUSES, CACHE_STATUSES, BLOCKED_SQL_IN, CACHE_SQL_IN
 
 logger = logging.getLogger(__name__)
@@ -24,6 +24,10 @@ logger = logging.getLogger(__name__)
 RESUME_OVERLAP_SECONDS = 5
 
 QUERY_LOG_CHECK_SECONDS = 900
+
+
+class QueryStoreError(Exception):
+    """Queries were fetched but not written; the range must be fetched again."""
 
 
 @dataclass
@@ -46,6 +50,9 @@ class QueryIngestionService:
         self.settings = get_settings_sync()
         self._log_checked_at: dict[str, float] = {}
 
+    def _catchup_floor(self, now: int) -> int:
+        return now - self.settings.max_catchup_seconds
+
     async def _resume_point(self, server: PiholeServer, supports_gap_recovery: bool, now: int) -> int:
         """Where the next fetch starts: the cursor, else the newest stored query, else the lookback window."""
         async with async_session_maker() as session:
@@ -64,13 +71,29 @@ class QueryIngestionService:
                 start = int(newest) if newest else now - self.settings.query_lookback_seconds
 
         start -= RESUME_OVERLAP_SECONDS
-        floor = now - self.settings.max_catchup_seconds
+        floor = self._catchup_floor(now)
         if not supports_gap_recovery and start < floor:
             logger.warning(
                 f"Last ingest for {server.name} was {now - start}s ago, capping lookback to "
                 f"{self.settings.max_catchup_seconds}s (some queries may be missed)")
             return floor
         return start
+
+    async def _advance_cursor(self, server: PiholeServer, to: datetime, only_if_unset: bool = False) -> None:
+        """Move the cursor forward to `to`, never back. With only_if_unset, pin a starting point
+        before the first page is stored, so a failed first fetch can't fall back to that page's
+        newest row and skip everything older."""
+        if server.id is None:
+            return
+        stmt = update(PiholeServerModel).where(PiholeServerModel.id == server.id)
+        if only_if_unset:
+            stmt = stmt.where(PiholeServerModel.ingested_until.is_(None)).values(ingested_until=to)
+        else:
+            stmt = stmt.values(ingested_until=func.greatest(
+                func.coalesce(PiholeServerModel.ingested_until, to), to))
+        async with async_session_maker() as session:
+            await session.execute(stmt)
+            await session.commit()
 
     async def _check_query_log(self, client, server_name: str, now: int) -> None:
         if now - self._log_checked_at.get(server_name, 0) < QUERY_LOG_CHECK_SECONDS:
@@ -80,21 +103,15 @@ class QueryIngestionService:
         if warning:
             logger.warning(f"{server_name}: {warning}")
 
-    async def _set_cursor(self, server: PiholeServer, until_timestamp: int) -> None:
-        if server.id is None:
-            return
-        async with async_session_maker() as session:
-            await session.execute(
-                update(PiholeServerModel).where(PiholeServerModel.id == server.id)
-                .values(ingested_until=datetime.fromtimestamp(until_timestamp, tz=timezone.utc)))
-            await session.commit()
-
     async def ingest_from_server(self, server: PiholeServer) -> Tuple[int, List[IngestedQuery]]:
         """Ingest one server's queries since its resume point.
 
         Returns (stored count, the stored queries recent enough to alert on). Older
         backlog recovered after an outage is stored and counted in the hourly stats
         but never alerted on, so an outage doesn't end in a burst of stale alerts.
+
+        The cursor follows the newest query the server returned, in the server's own
+        clock, so clock skew between DNSMon and the server can't open a gap.
         """
         if not server.enabled:
             logger.debug(f"Server {server.name} is disabled, skipping")
@@ -102,10 +119,11 @@ class QueryIngestionService:
 
         try:
             now = int(time.time())
-            alert_floor = datetime.fromtimestamp(now - self.settings.max_catchup_seconds, tz=timezone.utc)
+            alert_floor = datetime.fromtimestamp(self._catchup_floor(now), tz=timezone.utc)
             total = 0
             alertable: List[IngestedQuery] = []
             backlog = 0
+            newest_seen: Optional[datetime] = None
 
             client = create_client_from_server(server)
             async with client:
@@ -115,6 +133,9 @@ class QueryIngestionService:
 
                 await self._check_query_log(client, server.name, now)
                 from_timestamp = await self._resume_point(server, client.supports_gap_recovery, now)
+                await self._advance_cursor(
+                    server, datetime.fromtimestamp(from_timestamp + RESUME_OVERLAP_SECONDS, tz=timezone.utc),
+                    only_if_unset=True)
                 logger.info(f"Ingesting queries from {server.name} (from {from_timestamp} to {now})")
 
                 try:
@@ -125,11 +146,17 @@ class QueryIngestionService:
                         recent = [q for q in stored if q.timestamp >= alert_floor]
                         backlog += len(stored) - len(recent)
                         alertable.extend(recent)
-                except QueryFetchError as e:
-                    logger.error(f"{e}; {server.name} will retry the whole range next poll")
+                        times = [q["timestamp"] for q in page if isinstance(q.get("timestamp"), datetime)]
+                        if times:
+                            newest_seen = max([newest_seen, *times] if newest_seen else times)
+                except QueryRangeTruncated as e:
+                    logger.warning(str(e))
+                except Exception as e:
+                    logger.error(f"Ingesting {server.name} stopped mid-range ({e}); retrying the range next poll")
                     return total, alertable
 
-            await self._set_cursor(server, now)
+            if newest_seen is not None:
+                await self._advance_cursor(server, newest_seen)
             if backlog:
                 logger.warning(
                     f"Recovered {backlog} queries for {server.name} from a {now - from_timestamp}s gap; "
@@ -263,8 +290,7 @@ class QueryIngestionService:
                 return total_inserted, ingested_queries
 
         except Exception as e:
-            logger.error(f"Error storing queries: {e}", exc_info=True)
-            return 0, []
+            raise QueryStoreError(f"Storing queries from {server_name} failed: {e}") from e
 
     async def update_hourly_stats(self, ingested_queries: List[IngestedQuery]) -> None:
         """Update pre-aggregated hourly stats tables from ingested queries."""

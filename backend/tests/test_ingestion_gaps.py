@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from backend import ingestion
 from backend.config import PiholeServer
-from backend.dns_client import QueryFetchError
+from backend.dns_client import QueryFetchError, QueryRangeTruncated
 from backend.ingestion import RESUME_OVERLAP_SECONDS, QueryIngestionService
 from backend.models import PiholeServerModel, Query, QueryStatsHourly
 
@@ -58,10 +58,7 @@ async def _cursor(db_session, server_id: int) -> datetime | None:
 
 @pytest.fixture
 def fake_client(monkeypatch):
-    holder: dict[str, FakeClient] = {}
-
     def install(client: FakeClient) -> FakeClient:
-        holder["c"] = client
         monkeypatch.setattr(ingestion, "create_client_from_server", lambda server: client)
         return client
     return install
@@ -81,13 +78,71 @@ async def test_gap_recovery_stores_whole_backlog_but_alerts_only_recent(db_sessi
     assert client.requested[0] == int((now - timedelta(days=3)).timestamp()) - RESUME_OVERLAP_SECONDS
 
 
-async def test_cursor_advances_after_a_complete_fetch(db_session, fake_client):
-    server = await _server(db_session, datetime.now(timezone.utc) - timedelta(minutes=1))
-    client = fake_client(FakeClient([[]]))
+async def test_cursor_follows_the_servers_clock(db_session, fake_client):
+    server_now = datetime.now(timezone.utc) - timedelta(seconds=60)
+    server = await _server(db_session, server_now - timedelta(minutes=1))
+    fake_client(FakeClient([[_q(server_now, "late.example.com")]]))
 
     await QueryIngestionService().ingest_from_server(server)
 
-    assert int((await _cursor(db_session, server.id)).timestamp()) == client.requested[1]
+    assert await _cursor(db_session, server.id) == server_now
+
+
+async def test_empty_poll_keeps_the_cursor(db_session, fake_client):
+    original = datetime.now(timezone.utc) - timedelta(minutes=1)
+    server = await _server(db_session, original)
+    fake_client(FakeClient([[]]))
+
+    await QueryIngestionService().ingest_from_server(server)
+
+    assert await _cursor(db_session, server.id) == original
+
+
+async def test_store_failure_does_not_advance_cursor(db_session, fake_client, monkeypatch):
+    original = datetime.now(timezone.utc) - timedelta(minutes=10)
+    server = await _server(db_session, original)
+    fake_client(FakeClient([[_q(original + timedelta(minutes=5), "a.example.com")]]))
+
+    def broken_insert(*args, **kwargs):
+        raise RuntimeError("connection reset")
+    monkeypatch.setattr(ingestion, "insert", broken_insert)
+
+    await QueryIngestionService().ingest_from_server(server)
+
+    assert await _cursor(db_session, server.id) == original
+
+
+async def test_failed_first_fetch_retries_from_the_original_start(db_session, fake_client):
+    server = await _server(db_session, None)
+    recent = datetime.now(timezone.utc) - timedelta(seconds=10)
+    client = fake_client(FakeClient([[_q(recent, "new.example.com")], QueryFetchError("boom")]))
+    service = QueryIngestionService()
+
+    await service.ingest_from_server(server)
+
+    assert await service._resume_point(server, True, int(time.time())) == client.requested[0]
+
+
+async def test_truncated_range_advances_to_newest_fetched(db_session, fake_client):
+    server = await _server(db_session, datetime.now(timezone.utc) - timedelta(days=5))
+    newest = datetime.now(timezone.utc) - timedelta(days=4)
+    fake_client(FakeClient([[_q(newest - timedelta(seconds=1), "a.example.com"), _q(newest, "b.example.com")],
+                            QueryRangeTruncated("too many pages")]))
+
+    await QueryIngestionService().ingest_from_server(server)
+
+    assert await _cursor(db_session, server.id) == newest
+
+
+async def test_unexpected_error_mid_walk_still_alerts_stored_pages(db_session, fake_client):
+    server = await _server(db_session, datetime.now(timezone.utc) - timedelta(minutes=1))
+    fake_client(FakeClient([[_q(datetime.now(timezone.utc) - timedelta(seconds=5), "a.example.com")],
+                            ValueError("not json")]))
+
+    count, alertable = await QueryIngestionService().ingest_from_server(server)
+
+    assert count == 1
+    assert [q.domain for q in alertable] == ["a.example.com"]
 
 
 async def test_cursor_not_advanced_when_a_page_fails(db_session, fake_client):

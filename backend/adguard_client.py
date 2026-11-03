@@ -10,7 +10,7 @@ import logging
 from typing import Any, AsyncIterator, Dict, List, Optional
 from base64 import b64encode
 
-from .dns_client import DNSBlockerClient, QueryFetchError, parse_query_time
+from .dns_client import DNSBlockerClient, QueryFetchError, QueryRangeTruncated, parse_query_time
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,9 @@ ADGUARD_DNS_SYNC_DENYLIST = frozenset({
 })
 
 QUERYLOG_PAGE_SIZE = 1000
+# Bounds one poll's walk (2M entries, days of a busy log) so a runaway or hostile
+# server can't stall ingestion for every other server.
+MAX_QUERYLOG_PAGES = 2000
 
 # GET <endpoint> reads the config; PUT <endpoint>/update writes it back unchanged.
 _SYNCED_CONFIG_ENDPOINTS = {
@@ -87,14 +90,10 @@ class AdGuardHomeClient(DNSBlockerClient):
             return False
 
     async def get_queries(self, from_timestamp: int, until_timestamp: int) -> Optional[List[Dict[str, Any]]]:
-        try:
-            return [q async for page in self.iter_query_pages(from_timestamp, until_timestamp) for q in page]
-        except QueryFetchError as e:
-            logger.error(str(e))
-            return None
+        return await self._collect_pages(from_timestamp, until_timestamp)
 
     async def query_log_warning(self) -> Optional[str]:
-        config = await self._get_json('/control/querylog/config', 'query log config')
+        config = await self._get_json(_SYNCED_CONFIG_ENDPOINTS['querylog_config'], 'query log config')
         if not isinstance(config, dict):
             return None
         if config.get('enabled') is False:
@@ -106,19 +105,19 @@ class AdGuardHomeClient(DNSBlockerClient):
     async def iter_query_pages(self, from_timestamp: int, until_timestamp: int) -> AsyncIterator[List[Dict[str, Any]]]:
         """Walk the query log newest-first with AdGuard's older_than cursor until it passes from_timestamp."""
         cursor: Optional[str] = None
-        while True:
+        for _ in range(MAX_QUERYLOG_PAGES):
             params: Dict[str, Any] = {"limit": QUERYLOG_PAGE_SIZE}
             if cursor:
                 params["older_than"] = cursor
             try:
                 response = await self.client.get(
                     f"{self.url}/control/querylog", params=params, headers=self._get_auth_header())
-            except httpx.HTTPError as e:
+                data = response.json() if response.status_code == 200 else None
+            except (httpx.HTTPError, ValueError) as e:
                 raise QueryFetchError(f"Query log request to {self.server_name} failed: {e}") from e
-            if response.status_code != 200:
+            if not isinstance(data, dict):
                 raise QueryFetchError(f"Query log page from {self.server_name} returned {response.status_code}")
 
-            data = response.json()
             rows = data.get("data") or []
             page = [q for q in map(self._transform_query, rows) if q is not None]
             yield [q for q in page if from_timestamp <= int(q["timestamp"].timestamp()) <= until_timestamp]
@@ -128,6 +127,10 @@ class AdGuardHomeClient(DNSBlockerClient):
             if not rows or not oldest or oldest == cursor or reached_start:
                 return
             cursor = oldest
+
+        raise QueryRangeTruncated(
+            f"Query log walk on {self.server_name} stopped after {MAX_QUERYLOG_PAGES} pages; "
+            f"entries older than {cursor} were not recovered")
 
     def _transform_query(self, raw_query: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
