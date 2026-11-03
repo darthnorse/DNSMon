@@ -138,6 +138,52 @@ class PdnsDomainResponse(BaseModel):
     has_answer_data: bool
 
 
+RESOLVE_BATCH_MAX = 200
+
+
+def _resolve_ip(value: str) -> str:
+    from .utils import normalize_ip
+    ip = normalize_ip(value)
+    if ip is None:
+        raise ValueError(f"not an IP address: {value[:64]}")
+    return ip
+
+
+class PdnsResolveItem(BaseModel):
+    client: Optional[str] = None
+    ip: str
+    at: Optional[datetime] = None
+
+    @field_validator('ip')
+    @classmethod
+    def validate_ip(cls, v: str) -> str:
+        return _resolve_ip(v)
+
+    @field_validator('client')
+    @classmethod
+    def validate_client(cls, v: Optional[str]) -> Optional[str]:
+        return None if v is None else _resolve_ip(v)
+
+
+class PdnsResolveRequest(BaseModel):
+    items: List[PdnsResolveItem] = PydanticField(max_length=RESOLVE_BATCH_MAX)
+
+
+class PdnsResolveResult(BaseModel):
+    match: Literal['client', 'any', 'none']
+    domain: Optional[str] = None
+    query_time: Optional[str] = None
+    age_seconds: Optional[int] = None
+    server: Optional[str] = None
+    client_ip: Optional[str] = None
+    cname_chain: Optional[List[str]] = None
+    geo: Optional[GeoInfo] = None
+
+
+class PdnsResolveResponse(BaseModel):
+    results: List[PdnsResolveResult]
+
+
 class QueryContextResponse(BaseModel):
     anchor: Optional[QueryResponse]
     center: str

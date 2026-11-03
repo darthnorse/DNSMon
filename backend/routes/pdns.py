@@ -2,6 +2,7 @@
 Passive DNS lookups: which domains resolved to an IP and which devices looked them up,
 and which IPs and CNAMEs a domain resolved to, from the answers stored on queries.
 """
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,6 +14,7 @@ from ..database import get_db
 from ..models import Query, User
 from ..schemas import (
     PdnsClientRow, PdnsCnameRow, PdnsDomainResponse, PdnsDomainRow, PdnsIpResponse, PdnsIpRow,
+    PdnsResolveRequest, PdnsResolveResponse, PdnsResolveResult,
 )
 from ..utils import ensure_utc, normalize_ip
 from .stats import _parse_iso_date
@@ -20,6 +22,8 @@ from .stats import _parse_iso_date
 router = APIRouter(prefix="/api/pdns", tags=["pdns"])
 
 PDNS_ROW_LIMIT = 500
+# netdash and DNSMon may run on different hosts; a slightly-ahead clock is not an error.
+RESOLVE_CLOCK_SKEW = timedelta(minutes=5)
 
 
 def _time_conditions(from_date: Optional[str], to_date: Optional[str]) -> List:
@@ -108,3 +112,55 @@ async def lookup_domain(
                 for c, first, last, n in cnames],
         has_answer_data=has_answer_data,
     )
+
+
+def _resolve_at(at: Optional[datetime]) -> datetime:
+    now = datetime.now(timezone.utc)
+    if at is None:
+        return now
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=timezone.utc)
+    if at > now + RESOLVE_CLOCK_SKEW:
+        raise HTTPException(status_code=400, detail="'at' is in the future")
+    return at
+
+
+async def _resolve(db: AsyncSession, client: Optional[str], ip: str, at: datetime) -> PdnsResolveResult:
+    """The newest lookup at or before `at` whose answer contained `ip`: the client's own if it has
+    one, else any device's. No lower time bound: a long-lived connection can be days old, and the
+    lookup that opened it is still its best explanation; age_seconds lets the caller judge."""
+    newest = (select(Query.domain, Query.timestamp, Query.server, Query.client_ip, Query.answer_cnames)
+              .where(Query.answer_ips.contains([ip]), Query.timestamp <= at)
+              .order_by(Query.timestamp.desc()).limit(1))
+    candidates = ([("client", newest.where(Query.client_ip == client))] if client else []) + [("any", newest)]
+    for match, stmt in candidates:
+        row = (await db.execute(stmt)).first()
+        if row is not None:
+            domain, ts, server, client_ip, cnames = row
+            return PdnsResolveResult(
+                match=match, domain=domain, query_time=ensure_utc(ts), age_seconds=int((at - ts).total_seconds()),
+                server=server, client_ip=client_ip, cname_chain=cnames or [])
+    return PdnsResolveResult(match="none")
+
+
+@router.get("/resolve", response_model=PdnsResolveResult)
+async def resolve_connection(
+    ip: str,
+    client: Optional[str] = None,
+    at: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Name a connection: which domain did `client` look up that resolved to `ip`, as of `at`."""
+    when = _resolve_at(_parse_iso_date(at, "at") if at else None)
+    return await _resolve(db, _parse_ip(client) if client else None, _parse_ip(ip), when)
+
+
+@router.post("/resolve", response_model=PdnsResolveResponse)
+async def resolve_connections(
+    request: PdnsResolveRequest,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    return PdnsResolveResponse(results=[
+        await _resolve(db, item.client, item.ip, _resolve_at(item.at)) for item in request.items])

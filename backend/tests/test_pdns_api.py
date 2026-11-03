@@ -98,3 +98,96 @@ async def test_readonly_user_can_look_up(async_readonly_client: AsyncClient):
 
 async def test_lookup_requires_login(async_client: AsyncClient):
     assert (await async_client.get("/api/pdns/domain/example.com")).status_code == 401
+
+
+async def _seed_resolve(db_session) -> None:
+    db_session.add_all([
+        Query(timestamp=NOW - timedelta(minutes=10), domain="mine.example.com", client_ip="192.168.1.67",
+              server="adguard1", answer_ips=["47.1.2.3"], answer_cnames=["mine.cdn.example", "edge.cdn.example"]),
+        Query(timestamp=NOW - timedelta(minutes=1), domain="theirs.example.com", client_ip="192.168.1.80",
+              server="adguard1", answer_ips=["47.1.2.3"], answer_cnames=[]),
+        Query(timestamp=NOW - timedelta(days=10), domain="ancient.example.com", client_ip="192.168.1.67",
+              server="adguard1", answer_ips=["8.8.4.4"], answer_cnames=[]),
+        Query(timestamp=NOW + timedelta(minutes=1), domain="later.example.com", client_ip="192.168.1.67",
+              server="adguard1", answer_ips=["47.1.2.3"], answer_cnames=[]),
+    ])
+    await db_session.commit()
+
+
+async def test_resolve_prefers_the_clients_own_lookup(async_admin_client: AsyncClient, db_session):
+    await _seed_resolve(db_session)
+
+    r = await async_admin_client.get("/api/pdns/resolve", params={
+        "client": "192.168.1.67", "ip": "47.1.2.3", "at": NOW.isoformat()})
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["match"] == "client"
+    assert body["domain"] == "mine.example.com"
+    assert body["cname_chain"] == ["mine.cdn.example", "edge.cdn.example"]
+    assert body["age_seconds"] == 600
+
+
+async def test_resolve_falls_back_to_any_device(async_admin_client: AsyncClient, db_session):
+    await _seed_resolve(db_session)
+
+    body = (await async_admin_client.get("/api/pdns/resolve", params={
+        "client": "192.168.1.99", "ip": "47.1.2.3", "at": NOW.isoformat()})).json()
+
+    assert body["match"] == "any" and body["domain"] == "theirs.example.com" and body["client_ip"] == "192.168.1.80"
+
+
+async def test_resolve_has_no_time_cutoff(async_admin_client: AsyncClient, db_session):
+    await _seed_resolve(db_session)
+
+    body = (await async_admin_client.get("/api/pdns/resolve", params={
+        "client": "192.168.1.67", "ip": "8.8.4.4", "at": NOW.isoformat()})).json()
+
+    assert body["domain"] == "ancient.example.com" and body["age_seconds"] == 864000
+
+
+async def test_resolve_with_no_match(async_admin_client: AsyncClient, db_session):
+    await _seed_resolve(db_session)
+
+    body = (await async_admin_client.get("/api/pdns/resolve", params={"ip": "203.0.113.9"})).json()
+
+    assert body["match"] == "none" and body["domain"] is None and body["age_seconds"] is None
+
+
+async def test_resolve_far_future_at_is_400(async_admin_client: AsyncClient):
+    r = await async_admin_client.get("/api/pdns/resolve", params={
+        "ip": "1.1.1.1", "at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()})
+
+    assert r.status_code == 400
+
+
+async def test_resolve_bad_ip_is_400(async_admin_client: AsyncClient):
+    assert (await async_admin_client.get("/api/pdns/resolve", params={"ip": "nope"})).status_code == 400
+
+
+async def test_resolve_batch_keeps_order(async_admin_client: AsyncClient, db_session):
+    await _seed_resolve(db_session)
+    at = NOW.isoformat()
+
+    r = await async_admin_client.post("/api/pdns/resolve", json={"items": [
+        {"client": "192.168.1.67", "ip": "8.8.4.4", "at": at},
+        {"client": "192.168.1.67", "ip": "203.0.113.9", "at": at},
+        {"client": "192.168.1.67", "ip": "47.1.2.3", "at": at},
+    ]})
+
+    assert r.status_code == 200, r.text
+    assert [x["domain"] for x in r.json()["results"]] == ["ancient.example.com", None, "mine.example.com"]
+
+
+async def test_resolve_batch_is_capped(async_admin_client: AsyncClient):
+    items = [{"ip": "1.1.1.1"}] * 201
+
+    assert (await async_admin_client.post("/api/pdns/resolve", json={"items": items})).status_code == 422
+
+
+async def test_resolve_batch_rejects_bad_ip(async_admin_client: AsyncClient):
+    assert (await async_admin_client.post("/api/pdns/resolve", json={"items": [{"ip": "x"}]})).status_code == 422
+
+
+async def test_resolve_open_to_readonly_users(async_readonly_client: AsyncClient):
+    assert (await async_readonly_client.post("/api/pdns/resolve", json={"items": []})).status_code == 200
