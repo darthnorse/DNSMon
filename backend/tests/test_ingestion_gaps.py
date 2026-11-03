@@ -26,6 +26,9 @@ class FakeClient:
     async def authenticate(self) -> bool:
         return True
 
+    async def query_log_warning(self):
+        return None
+
     async def iter_query_pages(self, from_timestamp: int, until_timestamp: int):
         self.requested = (from_timestamp, until_timestamp)
         for page in self.pages:

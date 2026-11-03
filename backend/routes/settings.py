@@ -291,10 +291,11 @@ async def test_pihole_connection(
         async with client:
             auth_success = await client.authenticate()
             if auth_success:
-                return {
-                    "success": True,
-                    "message": f"Successfully connected to {server_type_display} at {server_data.url}"
-                }
+                message = f"Successfully connected to {server_type_display} at {server_data.url}"
+                warning = await client.query_log_warning()
+                if warning:
+                    message += f". Warning: {warning}."
+                return {"success": True, "message": message}
             else:
                 return {
                     "success": False,

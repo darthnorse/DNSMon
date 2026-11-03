@@ -93,6 +93,16 @@ class AdGuardHomeClient(DNSBlockerClient):
             logger.error(str(e))
             return None
 
+    async def query_log_warning(self) -> Optional[str]:
+        config = await self._get_json('/control/querylog/config', 'query log config')
+        if not isinstance(config, dict):
+            return None
+        if config.get('enabled') is False:
+            return "Query log is disabled, so DNSMon receives no queries from this server"
+        if config.get('anonymize_client_ip'):
+            return "Query log anonymises client IPs, so DNSMon can't tell devices apart"
+        return None
+
     async def iter_query_pages(self, from_timestamp: int, until_timestamp: int) -> AsyncIterator[List[Dict[str, Any]]]:
         """Walk the query log newest-first with AdGuard's older_than cursor until it passes from_timestamp."""
         cursor: Optional[str] = None

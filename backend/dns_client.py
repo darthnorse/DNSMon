@@ -307,6 +307,10 @@ class DNSBlockerClient(ABC):
         """Whether iter_query_pages can reach back through the server's whole retained log."""
         return False
 
+    async def query_log_warning(self) -> Optional[str]:
+        """Why DNSMon would get no usable queries from this server's log, or None when it can."""
+        return None
+
     async def iter_query_pages(self, from_timestamp: int, until_timestamp: int) -> AsyncIterator[List[Dict[str, Any]]]:
         """Yield the range's queries in batches; raises QueryFetchError rather than yield a partial range."""
         queries = await self.get_queries(from_timestamp, until_timestamp)

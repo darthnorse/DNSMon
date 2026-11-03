@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 # by the queries unique key.
 RESUME_OVERLAP_SECONDS = 5
 
+QUERY_LOG_CHECK_SECONDS = 900
+
 
 @dataclass
 class IngestedQuery:
@@ -42,6 +44,7 @@ class QueryIngestionService:
 
     def __init__(self):
         self.settings = get_settings_sync()
+        self._log_checked_at: dict[str, float] = {}
 
     async def _resume_point(self, server: PiholeServer, supports_gap_recovery: bool, now: int) -> int:
         """Where the next fetch starts: the cursor, else the newest stored query, else the lookback window."""
@@ -68,6 +71,14 @@ class QueryIngestionService:
                 f"{self.settings.max_catchup_seconds}s (some queries may be missed)")
             return floor
         return start
+
+    async def _check_query_log(self, client, server_name: str, now: int) -> None:
+        if now - self._log_checked_at.get(server_name, 0) < QUERY_LOG_CHECK_SECONDS:
+            return
+        self._log_checked_at[server_name] = now
+        warning = await client.query_log_warning()
+        if warning:
+            logger.warning(f"{server_name}: {warning}")
 
     async def _set_cursor(self, server: PiholeServer, until_timestamp: int) -> None:
         if server.id is None:
@@ -102,6 +113,7 @@ class QueryIngestionService:
                     logger.error(f"Failed to authenticate with {server.name}")
                     return 0, []
 
+                await self._check_query_log(client, server.name, now)
                 from_timestamp = await self._resume_point(server, client.supports_gap_recovery, now)
                 logger.info(f"Ingesting queries from {server.name} (from {from_timestamp} to {now})")
 
