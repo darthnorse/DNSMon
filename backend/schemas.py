@@ -86,6 +86,58 @@ class QueryResponse(BaseModel):
         from_attributes = True
 
 
+class GeoInfo(BaseModel):
+    country: Optional[str] = None
+    country_name: Optional[str] = None
+    city: Optional[str] = None
+    asn: Optional[int] = None
+    org: Optional[str] = None
+
+
+class PdnsDomainRow(BaseModel):
+    domain: str
+    first_seen: str
+    last_seen: str
+    count: int
+    servers: List[str]
+
+
+class PdnsClientRow(BaseModel):
+    client_ip: str
+    client_hostname: Optional[str]
+    count: int
+    last_seen: str
+
+
+class PdnsIpResponse(BaseModel):
+    ip: str
+    domains: List[PdnsDomainRow]
+    clients: List[PdnsClientRow]
+    geo: Optional[GeoInfo] = None
+
+
+class PdnsIpRow(BaseModel):
+    ip: str
+    first_seen: str
+    last_seen: str
+    count: int
+    geo: Optional[GeoInfo] = None
+
+
+class PdnsCnameRow(BaseModel):
+    cname: str
+    first_seen: str
+    last_seen: str
+    count: int
+
+
+class PdnsDomainResponse(BaseModel):
+    domain: str
+    ips: List[PdnsIpRow]
+    cnames: List[PdnsCnameRow]
+    has_answer_data: bool
+
+
 class QueryContextResponse(BaseModel):
     anchor: Optional[QueryResponse]
     center: str

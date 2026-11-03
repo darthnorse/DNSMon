@@ -34,6 +34,7 @@ from .routes import (
     app_definitions_router,
     insight_sources_router,
     classify_router,
+    pdns_router,
 )
 
 logger = logging.getLogger(__name__)
@@ -125,6 +126,7 @@ app.include_router(insights_router)
 app.include_router(app_definitions_router)
 app.include_router(insight_sources_router)
 app.include_router(classify_router)
+app.include_router(pdns_router)
 
 
 @app.get("/api/health")

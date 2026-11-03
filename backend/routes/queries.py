@@ -1,8 +1,6 @@
 """
 Query search routes
 """
-import ipaddress
-
 from fastapi import APIRouter, Depends, HTTPException, Query as QueryParam
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_
@@ -13,7 +11,7 @@ from ..database import get_db
 from ..models import Query, User, DomainLabel
 from ..schemas import QueryContextResponse, QueryResponse
 from ..auth import get_current_user
-from ..utils import ensure_utc, split_csv
+from ..utils import ensure_utc, normalize_ip, split_csv
 from .stats import _parse_iso_date
 
 
@@ -54,17 +52,10 @@ def _to_response(row) -> QueryResponse:
     )
 
 
-def _as_ip(value: str) -> Optional[str]:
-    try:
-        return str(ipaddress.ip_address(value.strip()))
-    except ValueError:
-        return None
-
-
 def _answer_condition(value: str):
     """Queries whose answer contains `value`: an address (compared as inet, so any
     IPv6 spelling matches) or else a CNAME target."""
-    ip = _as_ip(value)
+    ip = normalize_ip(value)
     if ip is not None:
         return Query.answer_ips.contains([ip])
     return Query.answer_cnames.contains([value.strip().lower().rstrip('.')])
@@ -103,7 +94,7 @@ async def search_queries(
             Query.client_ip.ilike(search_pattern, escape='\\'),
             Query.client_hostname.ilike(search_pattern, escape='\\'),
         ]
-        if _as_ip(search) is not None:
+        if normalize_ip(search) is not None:
             matches.append(_answer_condition(search))
         conditions.append(or_(*matches))
 

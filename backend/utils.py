@@ -107,6 +107,14 @@ def split_csv(value: Optional[str]) -> list[str]:
     return [item.strip() for item in value.split(',') if item.strip()] if value else []
 
 
+def normalize_ip(value: str) -> Optional[str]:
+    """Canonical text of an IP address (so any IPv6 spelling compares equal), or None."""
+    try:
+        return str(ipaddress.ip_address(value.strip()))
+    except ValueError:
+        return None
+
+
 def ensure_utc(dt: Optional[datetime]) -> Optional[str]:
     """Ensure datetime is timezone-aware (UTC) and return ISO format"""
     if dt is None:
