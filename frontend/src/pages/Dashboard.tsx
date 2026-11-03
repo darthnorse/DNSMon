@@ -4,13 +4,10 @@ import { getErrorMessage } from '../utils/errors';
 import { formatDomainLabel } from '../utils/labels';
 import ThreatBadge from '../components/ThreatBadge';
 import ClassifyDomainModal from '../components/ClassifyDomainModal';
+import ClientDetailLink from '../components/ClientDetailLink';
+import { isBlockedStatus } from '../utils/queryStatus';
 import type { Stats, Query, ThreatSummary } from '../types';
 import { format } from 'date-fns';
-
-function isBlocked(query: Query): boolean {
-  const status = query.status?.toUpperCase() ?? '';
-  return status.includes('GRAVITY') || status.includes('BLACKLIST');
-}
 
 function Spinner({ className }: { className: string }) {
   return (
@@ -250,10 +247,9 @@ export default function Dashboard() {
                 ))}
                 {threats.top_clients.slice(0, 2).map((c) => (
                   <div key={c.client_ip} className="flex justify-between gap-2 text-xs">
-                    <span className="truncate text-gray-500 dark:text-gray-400"
-                          title={c.client_hostname ?? c.client_ip}>
+                    <ClientDetailLink clientIp={c.client_ip} className="truncate text-gray-500 dark:text-gray-400">
                       {c.client_hostname || c.client_ip}
-                    </span>
+                    </ClientDetailLink>
                     <span className="shrink-0 text-gray-500 dark:text-gray-400">
                       {c.count.toLocaleString()}
                     </span>
@@ -325,7 +321,7 @@ export default function Dashboard() {
               </div>
             ) : (
               paginatedQueries.map((query) => {
-                const blocked = isBlocked(query);
+                const blocked = isBlockedStatus(query.status);
                 const appLabel = formatDomainLabel(query.app_name, query.category);
                 return (
                 <div
@@ -360,7 +356,7 @@ export default function Dashboard() {
                     </span>
                   </div>
                   <div className="text-sm text-gray-600 dark:text-gray-300">
-                    <div className="truncate">{query.client_hostname || query.client_ip}</div>
+                    <ClientDetailLink clientIp={query.client_ip} className="block truncate">{query.client_hostname || query.client_ip}</ClientDetailLink>
                     {query.client_hostname && (
                       <div className="text-xs text-gray-500 dark:text-gray-400 truncate">{query.client_ip}</div>
                     )}
@@ -449,7 +445,7 @@ export default function Dashboard() {
                   </tr>
                 ) : (
                   paginatedQueries.map((query) => {
-                    const blocked = isBlocked(query);
+                    const blocked = isBlockedStatus(query.status);
                     const appLabel = formatDomainLabel(query.app_name, query.category);
                     return (
                       <tr
@@ -473,7 +469,7 @@ export default function Dashboard() {
                           )}
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-300">
-                          <div className="truncate">{query.client_hostname || query.client_ip}</div>
+                          <ClientDetailLink clientIp={query.client_ip} className="block truncate">{query.client_hostname || query.client_ip}</ClientDetailLink>
                           {query.client_hostname && (
                             <div className="text-xs text-gray-500 dark:text-gray-400 truncate">{query.client_ip}</div>
                           )}

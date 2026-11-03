@@ -3,6 +3,7 @@ import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { authApi } from '../utils/api';
 import { getErrorMessage } from '../utils/errors';
+import { savePostLoginPath, takePostLoginPath } from '../utils/postLoginRedirect';
 import type { OIDCProviderPublic } from '../types';
 
 export default function Login() {
@@ -18,7 +19,8 @@ export default function Login() {
   const location = useLocation();
   const [searchParams] = useSearchParams();
 
-  const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/';
+  const fromLocation = (location.state as { from?: { pathname: string; search?: string } })?.from;
+  const from = fromLocation ? `${fromLocation.pathname}${fromLocation.search ?? ''}` : '/';
 
   // Apply dark mode on mount (default to dark if not set)
   useEffect(() => {
@@ -73,7 +75,9 @@ export default function Login() {
     try {
       setLoading(true);
       await login(username.trim(), password);
-      navigate(from, { replace: true });
+      // An OIDC attempt that bounced back here with ?error loses router state; the parked path survives it.
+      const parked = takePostLoginPath();
+      navigate(from !== '/' ? from : parked ?? '/', { replace: true });
     } catch (err: unknown) {
       setError(getErrorMessage(err, 'Login failed'));
     } finally {
@@ -82,6 +86,7 @@ export default function Login() {
   };
 
   const handleOidcLogin = (providerName: string) => {
+    savePostLoginPath(from);
     window.location.href = authApi.getOIDCAuthorizeUrl(providerName);
   };
 

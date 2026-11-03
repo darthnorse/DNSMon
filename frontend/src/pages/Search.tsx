@@ -1,11 +1,21 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { format } from 'date-fns';
 import { queryApi, domainApi } from '../utils/api';
 import ThreatBadge from '../components/ThreatBadge';
+import ClientDetailLink from '../components/ClientDetailLink';
 import { getErrorMessage } from '../utils/errors';
+import { parseClientLink, toLocalDatetimeString } from '../utils/clientLink';
 import type { Query, QuerySearchParams } from '../types';
 
+/** A linked bound is queried exactly until the user edits that input — the input only holds minutes. */
+function toIsoBound(input: string, linked: Date | null): string {
+  return linked && input === toLocalDatetimeString(linked) ? linked.toISOString() : new Date(input).toISOString();
+}
+
 export default function Search() {
+  const [urlParams] = useSearchParams();
+  const [link] = useState(() => parseClientLink(urlParams));
   const [queries, setQueries] = useState<Query[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -13,16 +23,20 @@ export default function Search() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
-  const [searchParams, setSearchParams] = useState<QuerySearchParams>({
+  const [searchParams, setSearchParams] = useState<QuerySearchParams>(() => ({
     domain: '',
-    client_ip: '',
+    client_ip: link.client ?? '',
     client_hostname: '',
     server: '',
-    from_date: '',
-    to_date: '',
+    from_date: link.from ? toLocalDatetimeString(link.from) : '',
+    to_date: link.to ? toLocalDatetimeString(link.to) : '',
     limit: 100,
     offset: 0,
-  });
+  }));
+
+  useEffect(() => {
+    if (link.client) handleSearch(0);
+  }, []);
 
   const handleSearch = async (offset = 0) => {
     try {
@@ -38,8 +52,8 @@ export default function Search() {
       if (searchParams.client_ip) params.client_ip = searchParams.client_ip;
       if (searchParams.client_hostname) params.client_hostname = searchParams.client_hostname;
       if (searchParams.server) params.server = searchParams.server;
-      if (searchParams.from_date) params.from_date = new Date(searchParams.from_date).toISOString();
-      if (searchParams.to_date) params.to_date = new Date(searchParams.to_date).toISOString();
+      if (searchParams.from_date) params.from_date = toIsoBound(searchParams.from_date, link.from);
+      if (searchParams.to_date) params.to_date = toIsoBound(searchParams.to_date, link.to);
 
       const [results, count] = await Promise.all([
         queryApi.search(params),
@@ -277,7 +291,7 @@ export default function Search() {
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-300">
-                      {query.client_ip}
+                      <ClientDetailLink clientIp={query.client_ip}>{query.client_ip}</ClientDetailLink>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
                       {query.client_hostname || '-'}

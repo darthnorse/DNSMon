@@ -8,6 +8,7 @@ from backend.utils import (
     ensure_utc,
     registrable_domain,
     resolve_url_safety,
+    split_csv,
     validate_url_safety,
 )
 
@@ -109,3 +110,12 @@ def test_resolve_url_safety_safe_returns_pinned_ip():
     reason, ip = resolve_url_safety("http://8.8.8.8/x")
     assert reason is None
     assert ip == "8.8.8.8"
+
+
+def test_split_csv_trims_and_drops_empty_items():
+    assert split_csv(" pihole1, ,pihole2 ,") == ["pihole1", "pihole2"]
+
+
+def test_split_csv_none_and_empty_give_empty_list():
+    assert split_csv(None) == []
+    assert split_csv("") == []

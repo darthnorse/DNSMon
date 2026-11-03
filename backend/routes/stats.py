@@ -12,6 +12,7 @@ from ..schemas import StatsResponse, StatisticsResponse
 from ..auth import get_current_user
 from ..config import get_settings_sync
 from ..constants import BLOCKED_STATUSES, CACHE_STATUSES
+from ..utils import split_csv
 
 router = APIRouter(prefix="/api", tags=["stats"])
 
@@ -153,9 +154,7 @@ async def get_statistics_clients(
     """
     period_start, period_end = _resolve_period(period, from_date, to_date)
 
-    server_list = None
-    if servers:
-        server_list = [s.strip() for s in servers.split(',') if s.strip()]
+    server_list = split_csv(servers)
 
     stmt = (
         select(
@@ -214,8 +213,8 @@ async def get_statistics(
     else:
         time_granularity = 'day'
 
-    server_list = [s.strip() for s in servers.split(',') if s.strip()] if servers else []
-    client_list = [c.strip() for c in clients.split(',') if c.strip()] if clients else []
+    server_list = split_csv(servers)
+    client_list = split_csv(clients)
 
     today_start = now - timedelta(hours=24)
     week_start = now - timedelta(days=7)

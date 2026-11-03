@@ -103,6 +103,10 @@ def registrable_domain(fqdn: str) -> str:
     return fqdn
 
 
+def split_csv(value: Optional[str]) -> list[str]:
+    return [item.strip() for item in value.split(',') if item.strip()] if value else []
+
+
 def ensure_utc(dt: Optional[datetime]) -> Optional[str]:
     """Ensure datetime is timezone-aware (UTC) and return ISO format"""
     if dt is None:

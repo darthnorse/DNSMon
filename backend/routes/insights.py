@@ -9,13 +9,10 @@ from ..models import User, DomainLabel, DomainStatsHourly, Query
 from ..schemas import AppUsage, CategoryUsage, DomainUsage
 from ..auth import get_current_user
 from ..constants import BLOCKED_STATUSES, UNCATEGORIZED_LABEL
+from ..utils import split_csv
 from .stats import _resolve_period
 
 router = APIRouter(prefix="/api/insights", tags=["insights"])
-
-
-def _server_list(servers: Optional[str]) -> list[str]:
-    return [s.strip() for s in servers.split(',') if s.strip()] if servers else []
 
 
 @router.get("/apps", response_model=List[AppUsage])
@@ -27,8 +24,8 @@ async def get_app_usage(
     """Top apps by query volume. Uses the domain_stats_hourly rollup, or raw
     queries when a client filter is supplied (the rollup lacks client_ip)."""
     start, end = _resolve_period(period, from_date, to_date)
-    server_list = _server_list(servers)
-    client_list = _server_list(clients)
+    server_list = split_csv(servers)
+    client_list = split_csv(clients)
 
     if client_list:
         stmt = (
@@ -70,8 +67,8 @@ async def get_category_usage(
     db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user),
 ):
     start, end = _resolve_period(period, from_date, to_date)
-    server_list = _server_list(servers)
-    client_list = _server_list(clients)
+    server_list = split_csv(servers)
+    client_list = split_csv(clients)
     cat = func.coalesce(DomainLabel.category, UNCATEGORIZED_LABEL).label('category')
 
     if client_list:
@@ -112,7 +109,7 @@ async def get_app_domains(
 ):
     """Drill-down: the matched domains behind one app, with counts."""
     start, end = _resolve_period(period, from_date, to_date)
-    server_list = _server_list(servers)
+    server_list = split_csv(servers)
     T = DomainStatsHourly
     stmt = (
         select(T.domain, func.sum(T.total).label('total'), func.sum(T.blocked).label('blocked'),
@@ -149,7 +146,7 @@ async def get_uncategorized_domains(
     )
     if end:
         stmt = stmt.where(T.hour <= end)
-    server_list = _server_list(servers)
+    server_list = split_csv(servers)
     if server_list:
         stmt = stmt.where(T.server.in_(server_list))
     rows = await db.execute(stmt)
@@ -168,8 +165,8 @@ async def get_threats(
     Reads raw queries rather than the hourly rollup because the rollup carries no
     client_ip and this breaks down by client."""
     start, end = _resolve_period(period, from_date, to_date)
-    server_list = _server_list(servers)
-    client_list = _server_list(clients)
+    server_list = split_csv(servers)
+    client_list = split_csv(clients)
 
     def base(*columns):
         stmt = (select(*columns)

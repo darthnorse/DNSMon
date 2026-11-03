@@ -11,7 +11,7 @@ from ..database import get_db
 from ..models import Query, User, DomainLabel
 from ..schemas import QueryResponse
 from ..auth import get_current_user
-from ..utils import ensure_utc
+from ..utils import ensure_utc, split_csv
 
 
 def escape_sql_like(value: str) -> str:
@@ -29,6 +29,7 @@ async def search_queries(
     client_ip: Optional[str] = QueryParam(None, max_length=45),
     client_hostname: Optional[str] = QueryParam(None, max_length=255),
     server: Optional[str] = QueryParam(None, max_length=100),
+    servers: Optional[str] = QueryParam(None, max_length=1000),
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
     limit: int = QueryParam(100, le=1000, ge=1),
@@ -40,6 +41,7 @@ async def search_queries(
     Search DNS queries with flexible filtering.
     - search: searches across domain, client_ip, and client_hostname (OR)
     - domain/client_ip/client_hostname: specific field filters (AND)
+    - server: substring match; servers: comma-separated exact names, as /api/statistics takes them
     """
     stmt = select(Query, DomainLabel.app_name, DomainLabel.category,
                   DomainLabel.threat_type).outerjoin(
@@ -70,6 +72,10 @@ async def search_queries(
     if server:
         escaped_server = escape_sql_like(server)
         conditions.append(Query.server.ilike(f"%{escaped_server}%", escape='\\'))
+
+    server_list = split_csv(servers)
+    if server_list:
+        conditions.append(Query.server.in_(server_list))
 
     from_dt = None
     to_dt = None

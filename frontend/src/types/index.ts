@@ -56,6 +56,7 @@ export interface QuerySearchParams {
   client_ip?: string;
   client_hostname?: string;
   server?: string;
+  servers?: string;
   from_date?: string;
   to_date?: string;
   limit?: number;

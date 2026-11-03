@@ -1,10 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { statisticsApi, settingsApi } from '../utils/api';
-import { getErrorMessage } from '../utils/errors';
-import { formatDomainLabel } from '../utils/labels';
-import ThreatBadge from '../components/ThreatBadge';
-import ClassifyDomainModal from '../components/ClassifyDomainModal';
-import type { Statistics, PiholeServer, ClientInfo } from '../types';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { format } from 'date-fns';
 import {
   PieChart,
@@ -22,6 +17,16 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 
+import { statisticsApi, settingsApi, queryApi } from '../utils/api';
+import { getErrorMessage } from '../utils/errors';
+import { formatDomainLabel } from '../utils/labels';
+import { buildClientLink, parseClientLink, toLocalDatetimeString } from '../utils/clientLink';
+import { isBlockedStatus } from '../utils/queryStatus';
+import ThreatBadge from '../components/ThreatBadge';
+import ClassifyDomainModal from '../components/ClassifyDomainModal';
+import ClientDetailLink, { clientDetailPath } from '../components/ClientDetailLink';
+import type { Statistics, PiholeServer, ClientInfo, Query, QuerySearchParams } from '../types';
+
 type Period = '24h' | '7d' | '30d' | 'custom';
 
 const TOOLTIP_CONTENT_STYLE = {
@@ -33,27 +38,36 @@ const TOOLTIP_CONTENT_STYLE = {
 const TOOLTIP_LABEL_STYLE = { color: '#9CA3AF' };
 const TOOLTIP_ITEM_STYLE = { color: '#fff' };
 
-function toLocalDatetimeString(date: Date): string {
-  const pad = (n: number) => n.toString().padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
+const PRESET_PERIOD_MS: Record<'24h' | '7d' | '30d', number> = {
+  '24h': 24 * 60 * 60 * 1000,
+  '7d': 7 * 24 * 60 * 60 * 1000,
+  '30d': 30 * 24 * 60 * 60 * 1000,
+};
+const RECENT_QUERIES_LIMIT = 100;
 
 export default function StatisticsPage() {
+  const [urlParams] = useSearchParams();
+  const navigate = useNavigate();
+  const [link] = useState(() => parseClientLink(urlParams));
+  const linkClientRef = useRef(link.client);
+
   const [stats, setStats] = useState<Statistics | null>(null);
+  const [recentQueries, setRecentQueries] = useState<Query[] | null>(null);
   const [servers, setServers] = useState<PiholeServer[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [period, setPeriod] = useState<Period>('24h');
+  const [period, setPeriod] = useState<Period>(link.from ? 'custom' : '24h');
   const [selectedServers, setSelectedServers] = useState<string[]>([]);
   const [serverDropdownOpen, setServerDropdownOpen] = useState(false);
   const serverDropdownRef = useRef<HTMLDivElement>(null);
 
   const [showCustomPanel, setShowCustomPanel] = useState(false);
-  const [customFrom, setCustomFrom] = useState(() => toLocalDatetimeString(new Date(Date.now() - 24 * 60 * 60 * 1000)));
-  const [customTo, setCustomTo] = useState(() => toLocalDatetimeString(new Date()));
-  const [appliedFrom, setAppliedFrom] = useState<string | null>(null);
-  const [appliedTo, setAppliedTo] = useState<string | null>(null);
+  const [customFrom, setCustomFrom] = useState(() => toLocalDatetimeString(link.from ?? new Date(Date.now() - PRESET_PERIOD_MS['24h'])));
+  const [customTo, setCustomTo] = useState(() => toLocalDatetimeString(link.to ?? new Date()));
+  // Kept as Dates, not the minute-precision input strings, so a linked range is queried exactly.
+  const [appliedFrom, setAppliedFrom] = useState<Date | null>(link.from);
+  const [appliedTo, setAppliedTo] = useState<Date | null>(link.to);
 
   const [classifyTarget, setClassifyTarget] = useState<string | null>(null);
 
@@ -61,6 +75,7 @@ export default function StatisticsPage() {
   const [selectedClients, setSelectedClients] = useState<string[]>([]);
   const [pendingClients, setPendingClients] = useState<string[]>([]);
   const totalClientsRef = useRef(0);
+  const statsRequestRef = useRef(0);
   const [clientDropdownOpen, setClientDropdownOpen] = useState(false);
   const [clientSearch, setClientSearch] = useState('');
   const clientDropdownRef = useRef<HTMLDivElement>(null);
@@ -84,6 +99,7 @@ export default function StatisticsPage() {
   }, [selectedClients]);
 
   const applyClientSelection = useCallback(() => {
+    linkClientRef.current = null;
     if (clientSearch) {
       const s = clientSearch.toLowerCase();
       const matching = clients.filter(c =>
@@ -129,16 +145,11 @@ export default function StatisticsPage() {
   /** Build the period/date params shared by both loadClients and loadStats.
    *  Returns null if custom range is selected but not yet applied. */
   const buildPeriodParams = (): { period?: string; from_date?: string; to_date?: string } | null => {
-    if (period === 'custom' && appliedFrom && appliedTo) {
-      return {
-        from_date: new Date(appliedFrom).toISOString(),
-        to_date: new Date(appliedTo).toISOString(),
-      };
-    }
     if (period !== 'custom') {
       return { period };
     }
-    return null; // Custom not yet applied
+    const range = getQueryRange();
+    return range ? { from_date: range.from.toISOString(), to_date: range.to.toISOString() } : null;
   };
 
   const loadClients = async () => {
@@ -150,11 +161,17 @@ export default function StatisticsPage() {
         params.servers = selectedServers.join(',');
       }
       const clientList = await statisticsApi.getClients(params);
+      const linkClient = linkClientRef.current;
+      if (linkClient && !clientList.some(c => c.client_ip === linkClient)) {
+        // A linked client with no queries in range still gets selected, so the page
+        // shows its (empty) activity rather than silently falling back to all clients.
+        clientList.push({ client_ip: linkClient, client_hostname: null, count: 0 });
+      }
       setClients(clientList);
       totalClientsRef.current = clientList.length;
-      const allIps = clientList.map(c => c.client_ip);
-      setSelectedClients(allIps);
-      setPendingClients(allIps);
+      const initialSelection = linkClient ? [linkClient] : clientList.map(c => c.client_ip);
+      setSelectedClients(initialSelection);
+      setPendingClients(initialSelection);
     } catch (err: unknown) {
       setError(getErrorMessage(err, 'Failed to load statistics'));
       setLoading(false);
@@ -162,6 +179,10 @@ export default function StatisticsPage() {
   };
 
   const loadStats = async () => {
+    // Stats requests overlap (mount fires one before loadClients narrows the selection);
+    // only the latest may write state, or a slower all-clients response clobbers a linked client's.
+    const requestId = ++statsRequestRef.current;
+    const isLatest = () => requestId === statsRequestRef.current;
     try {
       setLoading(true);
       const periodParams = buildPeriodParams();
@@ -177,14 +198,41 @@ export default function StatisticsPage() {
       if (selectedClients.length > 0 && selectedClients.length < totalClientsRef.current) {
         params.clients = selectedClients.join(',');
       }
-      const data = await statisticsApi.get(params);
+      const singleClient = selectedClients.length === 1 ? selectedClients[0] : null;
+      const [data, recent] = await Promise.all([
+        statisticsApi.get(params),
+        singleClient ? loadRecentQueries(singleClient) : Promise.resolve(null),
+      ]);
+      if (!isLatest()) return;
       setStats(data);
+      setRecentQueries(recent);
       setError(null);
     } catch (err: unknown) {
-      setError(getErrorMessage(err, 'Failed to load statistics'));
+      if (isLatest()) setError(getErrorMessage(err, 'Failed to load statistics'));
     } finally {
-      setLoading(false);
+      if (isLatest()) setLoading(false);
     }
+  };
+
+  const getQueryRange = (): { from: Date; to: Date } | null => {
+    if (period === 'custom') {
+      return appliedFrom && appliedTo ? { from: appliedFrom, to: appliedTo } : null;
+    }
+    const to = new Date();
+    return { from: new Date(to.getTime() - PRESET_PERIOD_MS[period]), to };
+  };
+
+  const loadRecentQueries = async (clientIp: string): Promise<Query[]> => {
+    const range = getQueryRange();
+    const params: QuerySearchParams = { client_ip: clientIp, limit: RECENT_QUERIES_LIMIT };
+    if (range) {
+      params.from_date = range.from.toISOString();
+      params.to_date = range.to.toISOString();
+    }
+    if (selectedServers.length > 0) {
+      params.servers = selectedServers.join(',');
+    }
+    return queryApi.search(params);
   };
 
   const toggleServer = (serverName: string) => {
@@ -235,8 +283,8 @@ export default function StatisticsPage() {
       return;
     }
     setError(null);
-    setAppliedFrom(customFrom);
-    setAppliedTo(customTo);
+    setAppliedFrom(from);
+    setAppliedTo(to);
     setPeriod('custom');
   };
 
@@ -251,9 +299,7 @@ export default function StatisticsPage() {
 
   const getCustomLabel = (): string => {
     if (appliedFrom && appliedTo) {
-      const from = new Date(appliedFrom);
-      const to = new Date(appliedTo);
-      return `${format(from, 'MMM d HH:mm')} - ${format(to, 'MMM d HH:mm')}`;
+      return `${format(appliedFrom, 'MMM d HH:mm')} - ${format(appliedTo, 'MMM d HH:mm')}`;
     }
     return 'Custom';
   };
@@ -703,12 +749,21 @@ export default function StatisticsPage() {
             items={stats.top_clients.map((c, i) => ({
               rank: i + 1,
               label: c.client_hostname || c.client_ip,
+              target: c.client_ip,
               sublabel: c.client_hostname ? c.client_ip : undefined,
               value: c.count,
             }))}
+            onItemClick={(ip) => navigate(clientDetailPath(ip))}
           />
         </div>
       </div>
+
+      {recentQueries && selectedClients.length === 1 && (
+        <RecentQueries
+          queries={recentQueries}
+          searchLink={buildClientLink('/search', { client: selectedClients[0], ...getQueryRange() })}
+        />
+      )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
@@ -776,9 +831,9 @@ export default function StatisticsPage() {
               <div className="py-3">
                 <span className="text-gray-600 dark:text-gray-400 block mb-2">Most Active Client</span>
                 <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
-                  <div className="font-semibold text-gray-900 dark:text-white">
+                  <ClientDetailLink clientIp={stats.most_active_client.client_ip} className="block font-semibold text-gray-900 dark:text-white">
                     {stats.most_active_client.client_hostname || stats.most_active_client.client_ip}
-                  </div>
+                  </ClientDetailLink>
                   {stats.most_active_client.client_hostname && (
                     <div className="text-sm text-gray-500 dark:text-gray-400">
                       {stats.most_active_client.client_ip}
@@ -831,6 +886,7 @@ function StatCard({ label, value, highlight }: { label: string; value: string; h
 interface TopListItem {
   rank: number;
   label: string;
+  target?: string;
   sublabel?: string;
   threatType?: string | null;
   value: number;
@@ -865,7 +921,7 @@ function TopList({ items, highlight, onItemClick }: { items: TopListItem[]; high
               {onItemClick ? (
                 <button
                   type="button"
-                  onClick={() => onItemClick(item.label)}
+                  onClick={() => onItemClick(item.target ?? item.label)}
                   className={`${labelClassName} text-left hover:underline`}
                   title={item.label}
                 >
@@ -897,6 +953,67 @@ function TopList({ items, highlight, onItemClick }: { items: TopListItem[]; high
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+function RecentQueries({ queries, searchLink }: { queries: Query[]; searchLink: string }) {
+  return (
+    <div className="bg-white dark:bg-gray-800 shadow rounded-lg">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+          Recent Queries
+          <span className="ml-2 text-sm font-normal text-gray-500 dark:text-gray-400">
+            newest first{queries.length === RECENT_QUERIES_LIMIT ? `, latest ${RECENT_QUERIES_LIMIT}` : ''}
+          </span>
+        </h2>
+        <Link to={searchLink} className="text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline">
+          Open full log in Search &rarr;
+        </Link>
+      </div>
+      {queries.length === 0 ? (
+        <div className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
+          No queries in this time range
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+            <thead className="bg-gray-50 dark:bg-gray-700">
+              <tr>
+                {['Time', 'Domain', 'Status', 'Server'].map((h) => (
+                  <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+              {queries.map((query) => {
+                const blocked = isBlockedStatus(query.status);
+                return (
+                  <tr key={query.id} className={blocked ? 'bg-red-50 dark:bg-red-900/20' : ''}>
+                    <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                      {format(new Date(query.timestamp), 'MMM dd HH:mm:ss')}
+                    </td>
+                    <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-200 break-all">
+                      <span className="flex items-center gap-1.5">
+                        {query.domain}
+                        <ThreatBadge threatType={query.threat_type} />
+                      </span>
+                    </td>
+                    <td className={`px-4 py-2 whitespace-nowrap text-sm ${blocked ? 'text-red-700 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'}`}>
+                      {query.status || 'unknown'}
+                    </td>
+                    <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                      {query.server}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useState, useEffect, useRef } from 'react';
 import Dashboard from './pages/Dashboard';
 import Search from './pages/Search';
@@ -15,6 +15,7 @@ import UpdateBanner from './components/UpdateBanner';
 import { APP_VERSION } from './version';
 import { blockingApi } from './utils/api';
 import type { BlockingStatus } from './types';
+import { takePostLoginPath } from './utils/postLoginRedirect';
 
 const DURATION_OPTIONS = [
   { label: '1 minute', value: 1 },
@@ -350,6 +351,7 @@ function Navigation({ darkMode, toggleDarkMode }: { darkMode: boolean; toggleDar
 }
 
 function AppLayout() {
+  const location = useLocation();
   const [darkMode, setDarkMode] = useState(() => {
     const saved = localStorage.getItem('darkMode');
     return saved !== null ? JSON.parse(saved) : true;
@@ -374,9 +376,12 @@ function AppLayout() {
       <Navigation darkMode={darkMode} toggleDarkMode={toggleDarkMode} />
       <main className="max-w-[1400px] mx-auto py-4 px-4 sm:py-6 sm:px-6 lg:px-8">
         <Routes>
-          <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-          <Route path="/search" element={<ProtectedRoute><Search /></ProtectedRoute>} />
-          <Route path="/statistics" element={<ProtectedRoute><Statistics /></ProtectedRoute>} />
+          <Route path="/" element={<ProtectedRoute><HomeRoute /></ProtectedRoute>} />
+          {/* Keyed per navigation: these pages read ?client/from/to once at mount and never write
+              state back to the URL, so following a client link — even to the URL already shown —
+              must remount them. */}
+          <Route path="/search" element={<ProtectedRoute><Search key={location.key} /></ProtectedRoute>} />
+          <Route path="/statistics" element={<ProtectedRoute><Statistics key={location.key} /></ProtectedRoute>} />
           <Route path="/insights" element={<ProtectedRoute><Insights /></ProtectedRoute>} />
           <Route path="/lists" element={<ProtectedRoute requireAdmin><Lists /></ProtectedRoute>} />
           <Route path="/alerts" element={<ProtectedRoute requireAdmin><AlertRules /></ProtectedRoute>} />
@@ -385,6 +390,24 @@ function AppLayout() {
       </main>
     </div>
   );
+}
+
+/** Where `/` should send the user instead of the Dashboard, or null to stay. Never returns a `/` path,
+ *  so HomeRoute can't redirect to itself. */
+function resolveHomeRedirect(path: string): string | null {
+  const url = new URL(path, window.location.origin);
+  // `/?client=<ip>` is the short link external dashboards (netdash) use for a client.
+  if (url.pathname === '/') {
+    return url.searchParams.has('client') ? `/statistics${url.search}` : null;
+  }
+  return `${url.pathname}${url.search}`;
+}
+
+function HomeRoute() {
+  const location = useLocation();
+  const [parkedPath] = useState(takePostLoginPath);
+  const target = resolveHomeRedirect(parkedPath ?? `${location.pathname}${location.search}`);
+  return target ? <Navigate to={target} replace /> : <Dashboard />;
 }
 
 function App() {
