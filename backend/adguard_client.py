@@ -15,6 +15,24 @@ from .dns_client import DNSBlockerClient, parse_query_time
 logger = logging.getLogger(__name__)
 
 
+# dns_info keys never copied to a sync target: its own protection toggle (DNSMon
+# toggles blocking per server), a read-only computed field, and a file path that
+# only exists on the source host. Everything else syncs, so settings added in new
+# AdGuard releases sync by default, matching the Pi-hole denylist approach.
+ADGUARD_DNS_SYNC_DENYLIST = frozenset({
+    'protection_enabled',
+    'protection_disabled_until',
+    'default_local_ptr_upstreams',
+    'upstream_dns_file',
+})
+
+# GET <endpoint> reads the config; PUT <endpoint>/update writes it back unchanged.
+_SYNCED_CONFIG_ENDPOINTS = {
+    'querylog_config': '/control/querylog/config',
+    'stats_config': '/control/stats/config',
+}
+
+
 class AdGuardHomeClient(DNSBlockerClient):
     """Client for interacting with AdGuard Home REST API"""
 
@@ -441,21 +459,19 @@ class AdGuardHomeClient(DNSBlockerClient):
             if filtering is not None:
                 config['user_rules'] = filtering.get('user_rules') or []
                 config['filtering_enabled'] = filtering.get('enabled', True)
-                config['filtering_interval'] = filtering.get('filtering_interval') or filtering.get('interval') or 24
+                interval = filtering.get('interval', filtering.get('filtering_interval'))
+                config['filtering_interval'] = 24 if interval is None else interval
                 config['filters'] = filtering.get('filters') or []
                 config['whitelist_filters'] = filtering.get('whitelist_filters') or []
 
             dns_data = await self._get_json('/control/dns_info', 'DNS config')
             if dns_data is not None:
-                config['dns'] = {
-                    'upstream_dns': dns_data.get('upstream_dns') or [],
-                    'bootstrap_dns': dns_data.get('bootstrap_dns') or [],
-                    'ratelimit': dns_data.get('ratelimit') or 0,
-                    'blocking_mode': dns_data.get('blocking_mode') or 'default',
-                    'edns_cs_enabled': dns_data.get('edns_cs_enabled') or False,
-                    'dnssec_enabled': dns_data.get('dnssec_enabled') or False,
-                    'disable_ipv6': dns_data.get('disable_ipv6') or False,
-                }
+                config['dns'] = {k: v for k, v in dns_data.items() if k not in ADGUARD_DNS_SYNC_DENYLIST}
+
+            for key, endpoint in _SYNCED_CONFIG_ENDPOINTS.items():
+                body = await self._get_json(endpoint, key)
+                if body is not None:
+                    config[key] = body
 
             rewrites = await self._get_json('/control/rewrite/list', 'rewrites')
             if rewrites is not None:
@@ -550,6 +566,17 @@ class AdGuardHomeClient(DNSBlockerClient):
                     success = False
                 else:
                     logger.info(f"Applied DNS config to {self.server_name}")
+
+            for key, endpoint in _SYNCED_CONFIG_ENDPOINTS.items():
+                if config.get(key) is not None:
+                    response = await self.client.put(
+                        f"{self.url}{endpoint}/update",
+                        json=config[key],
+                        headers=self._get_auth_header()
+                    )
+                    if response.status_code != 200:
+                        logger.error(f"Failed to set {key} on {self.server_name}: {response.status_code}")
+                        success = False
 
             if 'filtering_enabled' in config:
                 response = await self.client.post(
