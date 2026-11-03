@@ -1,0 +1,47 @@
+name: Security audit
+
+# Dependabot alerts only see the pins in requirements.txt, not transitive Python
+# packages (starlette arrives via fastapi). pip-audit resolves the full tree.
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - requirements.txt
+      - frontend/package.json
+      - frontend/package-lock.json
+      - .github/workflows/security-audit.yml
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install pip-audit
+        run: pip install pip-audit==2.10.1
+
+      - name: Audit production dependencies
+        run: pip-audit -r requirements.txt --progress-spinner off
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Audit shipped bundle
+        working-directory: frontend
+        run: npm audit --omit=dev
