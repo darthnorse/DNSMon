@@ -45,6 +45,10 @@ const PRESET_PERIOD_MS: Record<'24h' | '7d' | '30d', number> = {
 };
 const RECENT_QUERIES_LIMIT = 100;
 
+function isPresetPeriod(value: string | null): value is '24h' | '7d' | '30d' {
+  return value !== null && value in PRESET_PERIOD_MS;
+}
+
 export default function StatisticsPage() {
   const [urlParams] = useSearchParams();
   const navigate = useNavigate();
@@ -57,8 +61,12 @@ export default function StatisticsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [period, setPeriod] = useState<Period>(link.from ? 'custom' : '24h');
-  const [selectedServers, setSelectedServers] = useState<string[]>([]);
+  const [period, setPeriod] = useState<Period>(() => {
+    if (link.from) return 'custom';
+    const fromUrl = urlParams.get('period');
+    return isPresetPeriod(fromUrl) ? fromUrl : '24h';
+  });
+  const [selectedServers, setSelectedServers] = useState<string[]>(link.servers);
   const [serverDropdownOpen, setServerDropdownOpen] = useState(false);
   const serverDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -304,6 +312,36 @@ export default function StatisticsPage() {
     return 'Custom';
   };
 
+  const focusedClient = selectedClients.length === 1 && (clients.length > 1 || selectedClients[0] === link.client)
+    ? clients.find(c => c.client_ip === selectedClients[0]) ?? { client_ip: selectedClients[0], client_hostname: null, count: 0 }
+    : null;
+
+  const focusedClientIp = focusedClient?.client_ip ?? null;
+  const linkPath = buildClientLink('/statistics', {
+    client: focusedClientIp,
+    servers: selectedServers,
+    ...(period === 'custom' && appliedFrom && appliedTo ? { from: appliedFrom, to: appliedTo } : {}),
+  });
+  const viewPath = period === '7d' || period === '30d'
+    ? `${linkPath}${linkPath.includes('?') ? '&' : '?'}period=${period}`
+    : linkPath;
+
+  // Mirror the view into the address bar so reload and copy-link reproduce it. history.replaceState
+  // rather than the router: a router navigation changes location.key, which remounts this page.
+  useEffect(() => {
+    if (!stats) return;
+    if (`${window.location.pathname}${window.location.search}` !== viewPath) {
+      window.history.replaceState(window.history.state, '', viewPath);
+    }
+  }, [stats, viewPath]);
+
+  const showAllClients = () => {
+    linkClientRef.current = null;
+    const allIps = clients.map(c => c.client_ip);
+    setSelectedClients(allIps);
+    setPendingClients(allIps);
+  };
+
   const getClientLabel = () => {
     if (clients.length === 0) return 'No Clients';
     if (selectedClients.length === 0) return 'None Selected';
@@ -389,7 +427,21 @@ export default function StatisticsPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Statistics</h1>
+        <div className="min-w-0">
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white break-all">
+            Statistics
+            {focusedClient && (
+              <span className="font-normal text-gray-500 dark:text-gray-400">
+                {' '}&ndash; {focusedClient.client_hostname ? `${focusedClient.client_hostname} (${focusedClient.client_ip})` : focusedClient.client_ip}
+              </span>
+            )}
+          </h1>
+          {focusedClient && (
+            <button type="button" onClick={showAllClients} className="mt-1 text-sm text-blue-600 dark:text-blue-400 hover:underline">
+              &larr; Show all clients
+            </button>
+          )}
+        </div>
 
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex rounded-lg overflow-hidden border border-gray-300 dark:border-gray-600">
