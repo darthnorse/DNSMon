@@ -1,6 +1,8 @@
 """
 Query search routes
 """
+import ipaddress
+
 from fastapi import APIRouter, Depends, HTTPException, Query as QueryParam
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_
@@ -47,13 +49,32 @@ def _to_response(row) -> QueryResponse:
         app_name=app_name,
         category=category,
         threat_type=threat_type,
+        answer_ips=[str(ip) for ip in q.answer_ips] if q.answer_ips is not None else None,
+        answer_cnames=q.answer_cnames,
     )
+
+
+def _as_ip(value: str) -> Optional[str]:
+    try:
+        return str(ipaddress.ip_address(value.strip()))
+    except ValueError:
+        return None
+
+
+def _answer_condition(value: str):
+    """Queries whose answer contains `value`: an address (compared as inet, so any
+    IPv6 spelling matches) or else a CNAME target."""
+    ip = _as_ip(value)
+    if ip is not None:
+        return Query.answer_ips.contains([ip])
+    return Query.answer_cnames.contains([value.strip().lower().rstrip('.')])
 
 
 @router.get("/queries", response_model=List[QueryResponse])
 async def search_queries(
     search: Optional[str] = QueryParam(None, max_length=255),
     domain: Optional[str] = QueryParam(None, max_length=255),
+    answer: Optional[str] = QueryParam(None, max_length=255),
     client_ip: Optional[str] = QueryParam(None, max_length=45),
     client_hostname: Optional[str] = QueryParam(None, max_length=255),
     server: Optional[str] = QueryParam(None, max_length=100),
@@ -77,11 +98,17 @@ async def search_queries(
     if search:
         escaped_search = escape_sql_like(search)
         search_pattern = f"%{escaped_search}%"
-        conditions.append(or_(
+        matches = [
             Query.domain.ilike(search_pattern, escape='\\'),
             Query.client_ip.ilike(search_pattern, escape='\\'),
-            Query.client_hostname.ilike(search_pattern, escape='\\')
-        ))
+            Query.client_hostname.ilike(search_pattern, escape='\\'),
+        ]
+        if _as_ip(search) is not None:
+            matches.append(_answer_condition(search))
+        conditions.append(or_(*matches))
+
+    if answer:
+        conditions.append(_answer_condition(answer))
 
     if domain:
         escaped_domain = escape_sql_like(domain)
@@ -217,6 +244,7 @@ async def query_context(
 @router.get("/queries/count")
 async def count_queries(
     domain: Optional[str] = None,
+    answer: Optional[str] = QueryParam(None, max_length=255),
     client_ip: Optional[str] = None,
     client_hostname: Optional[str] = None,
     server: Optional[str] = None,
@@ -233,6 +261,8 @@ async def count_queries(
     if domain:
         escaped_domain = escape_sql_like(domain)
         conditions.append(Query.domain.ilike(f"%{escaped_domain}%", escape='\\'))
+    if answer:
+        conditions.append(_answer_condition(answer))
     if client_ip:
         conditions.append(Query.client_ip == client_ip)
     if client_hostname:

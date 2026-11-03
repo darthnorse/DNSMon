@@ -79,6 +79,8 @@ class QueryResponse(BaseModel):
     app_name: Optional[str] = None
     category: Optional[str] = None
     threat_type: Optional[str] = None
+    answer_ips: Optional[List[str]] = None
+    answer_cnames: Optional[List[str]] = None
 
     class Config:
         from_attributes = True
