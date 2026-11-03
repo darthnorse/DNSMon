@@ -165,6 +165,16 @@ async def test_match_status_blocked_matches_blocked_queries():
             _q(domain="google.com", status=blocked_status), [rule], cached) == [rule.id]
 
 
+async def test_status_only_rule_matches_every_blocked_query():
+    e = AlertEngine()
+    rule = _rule(match_status="blocked")
+    cached = {rule.id: await e._get_cached_patterns(rule)}
+    assert e._evaluate_query_against_rules(
+        _q(domain="ads.example.net", status="BLOCKED"), [rule], cached) == [rule.id]
+    assert e._evaluate_query_against_rules(
+        _q(domain="ads.example.net", status="OK"), [rule], cached) == []
+
+
 async def test_match_status_allowed_skips_blocked_queries():
     e = AlertEngine()
     rule = _rule(domain_pattern="google", match_status="allowed")
@@ -292,6 +302,24 @@ async def test_try_record_alert_no_cooldown_always_records(db_session: AsyncSess
 async def test_evaluate_queries_empty_list():
     e = AlertEngine()
     assert await e.evaluate_queries([]) == []
+
+
+async def test_broad_rule_hitting_its_cap_does_not_starve_other_rules(db_session):
+    broad = AlertRule(name="every allowed", match_status="allowed", cooldown_minutes=5, enabled=True)
+    narrow = AlertRule(name="tracker", domain_pattern="tracker.example", cooldown_minutes=5, enabled=True)
+    db_session.add_all([broad, narrow])
+    await db_session.commit()
+
+    # More allowed queries than the cap, then one the narrow rule wants at the very end.
+    queries = [_q(domain=f"site{i}.example.com") for i in range(1005)] + [_q(domain="tracker.example")]
+    matches = await AlertEngine().evaluate_queries(queries)
+
+    matched_by_rule: dict[int, list[str]] = {}
+    for query, rule_ids in matches:
+        for rid in rule_ids:
+            matched_by_rule.setdefault(rid, []).append(query.domain)
+    assert len(matched_by_rule[broad.id]) == 1000
+    assert matched_by_rule[narrow.id] == ["tracker.example"]
 
 
 # ---------------------------------------------------------------------------

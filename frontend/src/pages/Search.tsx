@@ -4,8 +4,10 @@ import { format } from 'date-fns';
 import { queryApi, domainApi } from '../utils/api';
 import ThreatBadge from '../components/ThreatBadge';
 import ClientDetailLink from '../components/ClientDetailLink';
+import StatusBadge from '../components/StatusBadge';
 import { getErrorMessage } from '../utils/errors';
 import { parseClientLink, toLocalDatetimeString } from '../utils/clientLink';
+import { queryRowClass } from '../utils/queryStatus';
 import type { Query, QuerySearchParams } from '../types';
 
 /** A linked bound is queried exactly until the user edits that input — the input only holds minutes. */
@@ -299,6 +301,9 @@ export default function Search() {
                     Client Hostname
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    Status
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                     Server
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
@@ -308,7 +313,7 @@ export default function Search() {
               </thead>
               <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                 {queries.map((query) => (
-                  <tr key={query.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
+                  <tr key={query.id} className={queryRowClass(query.status)}>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-300">
                       {format(new Date(query.timestamp), 'MMM dd, yyyy HH:mm:ss')}
                     </td>
@@ -323,6 +328,9 @@ export default function Search() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
                       {query.client_hostname || '-'}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      <StatusBadge status={query.status} />
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
                       {query.server}

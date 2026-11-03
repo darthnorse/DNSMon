@@ -21,10 +21,11 @@ import { statisticsApi, settingsApi, queryApi } from '../utils/api';
 import { getErrorMessage } from '../utils/errors';
 import { formatDomainLabel } from '../utils/labels';
 import { buildClientLink, parseClientLink, toLocalDatetimeString } from '../utils/clientLink';
-import { isBlockedStatus } from '../utils/queryStatus';
+import { queryRowClass } from '../utils/queryStatus';
 import ThreatBadge from '../components/ThreatBadge';
 import ClassifyDomainModal from '../components/ClassifyDomainModal';
 import ClientDetailLink, { clientDetailPath } from '../components/ClientDetailLink';
+import StatusBadge from '../components/StatusBadge';
 import type { Statistics, PiholeServer, ClientInfo, Query, QuerySearchParams } from '../types';
 
 type Period = '24h' | '7d' | '30d' | 'custom';
@@ -1040,28 +1041,25 @@ function RecentQueries({ queries, searchLink }: { queries: Query[]; searchLink: 
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-              {queries.map((query) => {
-                const blocked = isBlockedStatus(query.status);
-                return (
-                  <tr key={query.id} className={blocked ? 'bg-red-50 dark:bg-red-900/20' : ''}>
-                    <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                      {format(new Date(query.timestamp), 'MMM dd HH:mm:ss')}
-                    </td>
-                    <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-200 break-all">
-                      <span className="flex items-center gap-1.5">
-                        {query.domain}
-                        <ThreatBadge threatType={query.threat_type} />
-                      </span>
-                    </td>
-                    <td className={`px-4 py-2 whitespace-nowrap text-sm ${blocked ? 'text-red-700 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'}`}>
-                      {query.status || 'unknown'}
-                    </td>
-                    <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                      {query.server}
-                    </td>
-                  </tr>
-                );
-              })}
+              {queries.map((query) => (
+                <tr key={query.id} className={queryRowClass(query.status)}>
+                  <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                    {format(new Date(query.timestamp), 'MMM dd HH:mm:ss')}
+                  </td>
+                  <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-200 break-all">
+                    <span className="flex items-center gap-1.5">
+                      {query.domain}
+                      <ThreatBadge threatType={query.threat_type} />
+                    </span>
+                  </td>
+                  <td className="px-4 py-2 text-sm">
+                    <StatusBadge status={query.status} />
+                  </td>
+                  <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                    {query.server}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

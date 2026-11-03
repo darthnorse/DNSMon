@@ -3,13 +3,17 @@ import json
 import re
 import asyncio
 import ipaddress
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict
 from sqlalchemy import select, and_
 from .models import Query, AlertRule, AlertHistory
 from .database import async_session_maker
 from .constants import BLOCKED_STATUSES
+
+# Per rule, not per batch: a broad rule (e.g. status-only, matching every allowed query)
+# must not use up a shared budget and starve narrower rules of the rest of the batch.
+MAX_MATCHES_PER_RULE = 1000
 
 logger = logging.getLogger(__name__)
 
@@ -500,8 +504,6 @@ class AlertEngine:
         if not queries:
             return []
 
-        max_matches = 1000  # Prevent unbounded growth
-
         try:
             async with async_session_maker() as session:
                 rules_stmt = select(AlertRule).where(AlertRule.enabled == True)
@@ -517,16 +519,26 @@ class AlertEngine:
 
                 threat_domains = self._resolve_threats(rules, queries)
                 matches = []
+                matches_per_rule: Counter = Counter()
+                active_rules = list(rules)
 
                 for query in queries:
-                    if len(matches) >= max_matches:
-                        logger.warning(f"Reached matches limit ({max_matches}), stopping evaluation")
+                    if not active_rules:
                         break
 
                     rule_ids = self._evaluate_query_against_rules(
-                        query, rules, cached_patterns, threat_domains)
-                    if rule_ids:
-                        matches.append((query, rule_ids))
+                        query, active_rules, cached_patterns, threat_domains)
+                    if not rule_ids:
+                        continue
+
+                    matches.append((query, rule_ids))
+                    matches_per_rule.update(rule_ids)
+                    capped = {rid for rid in rule_ids if matches_per_rule[rid] >= MAX_MATCHES_PER_RULE}
+                    if capped:
+                        logger.warning(
+                            f"Rules {sorted(capped)} reached {MAX_MATCHES_PER_RULE} matches this batch; "
+                            f"skipping them for the rest of it")
+                        active_rules = [r for r in active_rules if r.id not in capped]
 
                 return matches
 

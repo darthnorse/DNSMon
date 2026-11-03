@@ -123,9 +123,13 @@ export default function AlertRules() {
       errors.push('Cooldown must be between 0 and 10080 minutes (7 days)');
     }
 
-    if (!formData.match_threat &&
-        !formData.domain_pattern && !formData.client_ip_pattern && !formData.client_hostname_pattern) {
-      errors.push('At least one pattern (domain, IP, or hostname) must be specified');
+    const hasPattern = Boolean(formData.domain_pattern || formData.client_ip_pattern || formData.client_hostname_pattern);
+    const unscoped = !formData.match_threat && !hasPattern;
+    if (unscoped && formData.match_status === 'any') {
+      errors.push('Specify at least one pattern (domain, IP, or hostname), or set Match Status to Blocked or Allowed');
+    } else if (unscoped && cooldown === 0) {
+      // A status-only rule matches on nearly every poll, so with no cooldown it alerts about once a minute.
+      errors.push('A rule without patterns matches nearly every poll, so it needs a cooldown above 0');
     }
 
     if (errors.length > 0) {

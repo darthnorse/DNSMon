@@ -26,7 +26,8 @@ def test_blocked_and_cache_are_disjoint():
 def test_blocked_statuses_contain_known_codes():
     # Spot-check codes from both Pi-hole and AdGuard family.
     for code in ("GRAVITY", "GRAVITY_CNAME", "BLACKLIST", "BLOCKED",
-                 "EXTERNAL_BLOCKED_NULL", "EXTERNAL_BLOCKED_NXRA"):
+                 "EXTERNAL_BLOCKED_NULL", "EXTERNAL_BLOCKED_NXRA",
+                 "DENYLIST", "DENYLIST_CNAME", "EXTERNAL_BLOCKED_EDE15"):
         assert code in BLOCKED_STATUSES, f"{code} should be classified as blocked"
 
 

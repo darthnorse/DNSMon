@@ -191,3 +191,13 @@ async def test_match_threat_defaults_to_false(async_admin_client):
     r = await async_admin_client.post("/api/alert-rules",
                                       json={"name": "plain", "domain_pattern": "x"})
     assert r.json()["match_threat"] is False
+
+
+async def test_create_status_only_rule(async_admin_client: AsyncClient):
+    r = await async_admin_client.post("/api/alert-rules", json={
+        "name": "every block", "match_status": "blocked", "cooldown_minutes": 15,
+    })
+    assert r.status_code == 200, r.text
+    rule = r.json()
+    assert rule["match_status"] == "blocked"
+    assert rule["domain_pattern"] is None

@@ -5,7 +5,8 @@ import { formatDomainLabel } from '../utils/labels';
 import ThreatBadge from '../components/ThreatBadge';
 import ClassifyDomainModal from '../components/ClassifyDomainModal';
 import ClientDetailLink from '../components/ClientDetailLink';
-import { isBlockedStatus } from '../utils/queryStatus';
+import StatusBadge from '../components/StatusBadge';
+import { isBlockedStatus, queryRowClass } from '../utils/queryStatus';
 import type { Stats, Query, ThreatSummary } from '../types';
 import { format } from 'date-fns';
 
@@ -345,15 +346,7 @@ export default function Dashboard() {
                         {format(new Date(query.timestamp), 'MMM dd, HH:mm:ss')}
                       </div>
                     </div>
-                    <span
-                      className={`ml-2 px-2 py-1 rounded-full text-xs whitespace-nowrap ${
-                        blocked
-                          ? 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200'
-                          : 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200'
-                      }`}
-                    >
-                      {query.status || 'unknown'}
-                    </span>
+                    <StatusBadge status={query.status} className="ml-2" />
                   </div>
                   <div className="text-sm text-gray-600 dark:text-gray-300">
                     <ClientDetailLink clientIp={query.client_ip} className="block truncate">{query.client_hostname || query.client_ip}</ClientDetailLink>
@@ -445,17 +438,9 @@ export default function Dashboard() {
                   </tr>
                 ) : (
                   paginatedQueries.map((query) => {
-                    const blocked = isBlockedStatus(query.status);
                     const appLabel = formatDomainLabel(query.app_name, query.category);
                     return (
-                      <tr
-                        key={query.id}
-                        className={`${
-                          blocked
-                            ? 'bg-red-50 dark:bg-red-900/30 hover:bg-red-100 dark:hover:bg-red-900/40'
-                            : 'hover:bg-gray-50 dark:hover:bg-gray-700'
-                        }`}
-                      >
+                      <tr key={query.id} className={queryRowClass(query.status)}>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-300">
                           {format(new Date(query.timestamp), 'MMM dd, HH:mm:ss')}
                         </td>
@@ -475,15 +460,7 @@ export default function Dashboard() {
                           )}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm">
-                          <span
-                            className={`px-2 py-1 rounded-full text-xs ${
-                              blocked
-                                ? 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200'
-                                : 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200'
-                            }`}
-                          >
-                            {query.status || 'unknown'}
-                          </span>
+                          <StatusBadge status={query.status} />
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
                           {query.server}
