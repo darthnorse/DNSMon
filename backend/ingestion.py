@@ -41,6 +41,8 @@ class IngestedQuery:
     query_type: str
     status: str
     server: str
+    answer_ips: Optional[List[str]] = None
+    answer_cnames: Optional[List[str]] = None
 
 
 class QueryIngestionService:
@@ -177,8 +179,9 @@ class QueryIngestionService:
 
         try:
             async with async_session_maker() as session:
-                values_list = []
-                ingested_queries = []  # For alert checking
+                # One row per unique key; an A and an HTTPS lookup can still share a
+                # microsecond, and the one carrying addresses is the one worth keeping.
+                by_key: dict[tuple, tuple[dict, IngestedQuery]] = {}
                 skipped_untimed = 0
 
                 for query_data in queries:
@@ -225,7 +228,12 @@ class QueryIngestionService:
                     if client_hostname and len(client_hostname) > 255:
                         client_hostname = client_hostname[:255]
 
-                    values_list.append({
+                    answer_ips = query_data.get("answer_ips")
+                    answer_cnames = query_data.get("answer_cnames")
+                    key = (timestamp, domain, client_ip, server_name)
+                    if key in by_key and not answer_ips:
+                        continue
+                    by_key[key] = ({
                         'timestamp': timestamp,
                         'domain': domain,
                         'client_ip': client_ip,
@@ -234,11 +242,9 @@ class QueryIngestionService:
                         'status': status,
                         'server': server_name,
                         'created_at': datetime.now(timezone.utc),
-                    })
-
-                    # Create lightweight query object for alert checking
-                    # ID is 0 placeholder - will be looked up if needed for alert history
-                    ingested_queries.append(IngestedQuery(
+                        'answer_ips': answer_ips,
+                        'answer_cnames': answer_cnames,
+                    }, IngestedQuery(
                         id=0,
                         domain=domain,
                         client_ip=client_ip,
@@ -247,18 +253,21 @@ class QueryIngestionService:
                         query_type=query_type,
                         status=status,
                         server=server_name,
+                        answer_ips=answer_ips,
+                        answer_cnames=answer_cnames,
                     ))
 
                 if skipped_untimed:
                     logger.warning(f"Skipped {skipped_untimed} queries from {server_name} with no usable time")
 
+                values_list = [values for values, _ in by_key.values()]
+                ingested_queries = [ingested for _, ingested in by_key.values()]
+
                 if not values_list:
                     return 0, []
 
-                # Use PostgreSQL INSERT ... ON CONFLICT DO NOTHING for efficient duplicate handling
-                # Batch insert in chunks to avoid PostgreSQL parameter limit (32767)
-                # Each query has 8 columns, so max ~4000 queries per batch
-                batch_size = 4000
+                # 10 columns per row; 3000 rows stays under PostgreSQL's 32767 bind parameters.
+                batch_size = 3000
                 total_inserted = 0
                 inserted_keys: set = set()
 

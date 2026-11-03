@@ -11,7 +11,7 @@ from .notifications import NotificationService, AlertContext
 from .sync_service import PiholeSyncService
 from .classification_service import ClassificationService
 from .auth import cleanup_expired_sessions
-from .database import async_session_maker
+from .database import async_session_maker, ensure_answer_indexes
 
 logger = logging.getLogger(__name__)
 memory_logger = logging.getLogger('dnsmon.memory')
@@ -242,6 +242,12 @@ class DNSMonService:
         except Exception as e:
             logger.error(f"Error in initial ingestion: {e}", exc_info=True)
 
+    async def _build_answer_indexes(self):
+        try:
+            await ensure_answer_indexes()
+        except Exception as e:
+            logger.error(f"Building the answer indexes failed; answer searches will be slow until restart: {e}")
+
     async def startup(self):
         """Run on application startup (idempotent)"""
         if self._started:
@@ -254,6 +260,7 @@ class DNSMonService:
 
         self.start_scheduler()
 
+        self._answer_index_task = asyncio.create_task(self._build_answer_indexes())
         self._initial_ingestion_task = asyncio.create_task(self._run_initial_ingestion())
 
         def _handle_initial_ingestion_done(task):

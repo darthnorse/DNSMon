@@ -128,6 +128,10 @@ async def _run_migrations(conn):
                   col_type='TIMESTAMP WITH TIME ZONE', default=None, nullable=True),
         Migration(table='servers', column='ingested_until',
                   col_type='TIMESTAMP WITH TIME ZONE', default=None, nullable=True),
+        Migration(table='queries', column='answer_ips',
+                  col_type='INET[]', default=None, nullable=True),
+        Migration(table='queries', column='answer_cnames',
+                  col_type='TEXT[]', default=None, nullable=True),
     ]
     for m in migrations:
         result = await conn.execute(text(
@@ -231,6 +235,32 @@ async def ensure_insight_sources() -> int:
     if added:  # don't log on every boot once seeded
         logger.info(f"Ensured insight sources ({added} added)")
     return added
+
+
+_ANSWER_INDEXES = {
+    'idx_queries_answer_ips': 'answer_ips',
+    'idx_queries_answer_cnames': 'answer_cnames',
+}
+
+
+async def ensure_answer_indexes() -> None:
+    """Build the answer GIN indexes on an upgraded install.
+
+    CONCURRENTLY so a build over a large queries table never blocks ingestion; that
+    needs autocommit, so it runs outside init_db's transaction. An interrupted
+    concurrent build leaves an INVALID index that IF NOT EXISTS would skip forever,
+    so those are dropped and rebuilt.
+    """
+    async with engine.connect() as conn:
+        conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
+        for name, column in _ANSWER_INDEXES.items():
+            invalid = (await conn.execute(text(
+                "SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
+                "WHERE c.relname = :name AND NOT i.indisvalid"), {'name': name})).scalar()
+            if invalid:
+                await conn.execute(text(f'DROP INDEX CONCURRENTLY IF EXISTS "{name}"'))
+            await conn.execute(text(
+                f'CREATE INDEX CONCURRENTLY IF NOT EXISTS "{name}" ON queries USING gin ({column})'))
 
 
 async def init_db():

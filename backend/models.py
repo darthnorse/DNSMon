@@ -1,6 +1,7 @@
 import hashlib
 from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Index, BigInteger, ForeignKey, JSON, text
+from sqlalchemy.dialects.postgresql import ARRAY, INET
 from sqlalchemy.orm import declarative_base
 
 from .constants import THREAT_SOURCES
@@ -26,6 +27,10 @@ class Query(Base):
     status = Column(String(50), nullable=True)  # blocked, allowed, etc.
     server = Column(String(100), nullable=False)
     created_at = Column(DateTime(timezone=True), default=utcnow)
+    # NULL: the server can't report answers (Pi-hole, or rows from before answers were
+    # stored). Empty: it answered with no addresses (NXDOMAIN, NODATA, blocked).
+    answer_ips = Column(ARRAY(INET), nullable=True)
+    answer_cnames = Column(ARRAY(Text), nullable=True)
 
     # Composite indexes for common query patterns
     __table_args__ = (
@@ -34,6 +39,8 @@ class Query(Base):
         Index('idx_queries_pihole_timestamp', 'server', 'timestamp'),
         Index('idx_queries_timestamp_status', 'timestamp', 'status'),
         Index('idx_queries_unique', 'timestamp', 'domain', 'client_ip', 'server', unique=True),
+        Index('idx_queries_answer_ips', 'answer_ips', postgresql_using='gin'),
+        Index('idx_queries_answer_cnames', 'answer_cnames', postgresql_using='gin'),
     )
 
     def to_dict(self):
@@ -46,6 +53,8 @@ class Query(Base):
             'query_type': self.query_type,
             'status': self.status,
             'server': self.server,
+            'answer_ips': [str(ip) for ip in self.answer_ips] if self.answer_ips is not None else None,
+            'answer_cnames': self.answer_cnames,
         }
 
 

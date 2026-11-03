@@ -10,6 +10,7 @@ import logging
 from typing import Any, AsyncIterator, Dict, List, Optional
 from base64 import b64encode
 
+from .answers import adguard_answers
 from .dns_client import DNSBlockerClient, QueryFetchError, QueryRangeTruncated, parse_query_time
 
 logger = logging.getLogger(__name__)
@@ -157,6 +158,7 @@ class AdGuardHomeClient(DNSBlockerClient):
         client_info = raw_query.get("client_info", {})
         client_name = client_info.get("name", "") if isinstance(client_info, dict) else ""
 
+        answers = adguard_answers(raw_query, status)
         return {
             "timestamp": timestamp,
             "domain": domain,
@@ -165,7 +167,9 @@ class AdGuardHomeClient(DNSBlockerClient):
                 "name": client_name
             },
             "type": query_type,
-            "status": status
+            "status": status,
+            "answer_ips": answers.ips,
+            "answer_cnames": answers.cnames,
         }
 
     def _map_status(self, reason: str) -> str:

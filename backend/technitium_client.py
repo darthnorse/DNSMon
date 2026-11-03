@@ -15,6 +15,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 
 import httpx
 
+from .answers import technitium_answers
 from .dns_client import DNSBlockerClient, QueryFetchError, QueryRangeTruncated, parse_query_time
 
 logger = logging.getLogger(__name__)
@@ -137,12 +138,16 @@ class TechnitiumClient(DNSBlockerClient):
             logger.warning(f"Unparseable timestamp {ts_str!r} from {self.server_name}, skipping entry")
             return None
 
+        status = self._map_status(raw.get('responseType', ''))
+        answers = technitium_answers(raw.get('answer'), status)
         return {
             'timestamp': timestamp,
             'domain': raw.get('qname', '').rstrip('.'),
             'client': {'ip': raw.get('clientIpAddress', ''), 'name': ''},
             'type': raw.get('qtype', ''),
-            'status': self._map_status(raw.get('responseType', '')),
+            'status': status,
+            'answer_ips': answers.ips,
+            'answer_cnames': answers.cnames,
         }
 
     async def get_queries(self, from_timestamp: int, until_timestamp: int) -> Optional[List[Dict[str, Any]]]:
