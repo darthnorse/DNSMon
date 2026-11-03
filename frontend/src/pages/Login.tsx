@@ -86,7 +86,9 @@ export default function Login() {
   };
 
   const handleOidcLogin = (providerName: string) => {
-    savePostLoginPath(from);
+    // A retry after a failed OIDC round-trip arrives without router state; keep the path the first attempt parked.
+    const isOidcRetry = from === '/' && searchParams.has('error');
+    if (!isOidcRetry) savePostLoginPath(from);
     window.location.href = authApi.getOIDCAuthorizeUrl(providerName);
   };
 

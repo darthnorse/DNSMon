@@ -131,6 +131,7 @@ async def count_queries(
     client_ip: Optional[str] = None,
     client_hostname: Optional[str] = None,
     server: Optional[str] = None,
+    servers: Optional[str] = QueryParam(None, max_length=1000),
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
@@ -151,6 +152,9 @@ async def count_queries(
     if server:
         escaped_server = escape_sql_like(server)
         conditions.append(Query.server.ilike(f"%{escaped_server}%", escape='\\'))
+    server_list = split_csv(servers)
+    if server_list:
+        conditions.append(Query.server.in_(server_list))
 
     from_dt = None
     to_dt = None
