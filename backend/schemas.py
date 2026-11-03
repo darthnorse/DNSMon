@@ -84,6 +84,18 @@ class QueryResponse(BaseModel):
         from_attributes = True
 
 
+class QueryContextResponse(BaseModel):
+    anchor: Optional[QueryResponse]
+    center: str
+    client_ip: str
+    scope: str
+    window: int
+    before: List[QueryResponse]
+    after: List[QueryResponse]
+    truncated_before: bool
+    truncated_after: bool
+
+
 class QuerySearchParams(BaseModel):
     domain: Optional[str] = None
     client_ip: Optional[str] = None

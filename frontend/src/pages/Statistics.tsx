@@ -25,6 +25,7 @@ import { queryRowClass } from '../utils/queryStatus';
 import ThreatBadge from '../components/ThreatBadge';
 import ClassifyDomainModal from '../components/ClassifyDomainModal';
 import ClientDetailLink, { clientDetailPath } from '../components/ClientDetailLink';
+import ContextLink from '../components/ContextLink';
 import StatusBadge from '../components/StatusBadge';
 import type { Statistics, PiholeServer, ClientInfo, Query, QuerySearchParams } from '../types';
 
@@ -1033,7 +1034,7 @@ function RecentQueries({ queries, searchLink }: { queries: Query[]; searchLink: 
           <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
             <thead className="bg-gray-50 dark:bg-gray-700">
               <tr>
-                {['Time', 'Domain', 'Status', 'Server'].map((h) => (
+                {['Time', 'Domain', 'Status', 'Server', 'Context'].map((h) => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                     {h}
                   </th>
@@ -1057,6 +1058,9 @@ function RecentQueries({ queries, searchLink }: { queries: Query[]; searchLink: 
                   </td>
                   <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
                     {query.server}
+                  </td>
+                  <td className="px-4 py-2 whitespace-nowrap text-sm">
+                    <ContextLink queryId={query.id} />
                   </td>
                 </tr>
               ))}

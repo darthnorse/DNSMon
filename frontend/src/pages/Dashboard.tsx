@@ -5,6 +5,7 @@ import { formatDomainLabel } from '../utils/labels';
 import ThreatBadge from '../components/ThreatBadge';
 import ClassifyDomainModal from '../components/ClassifyDomainModal';
 import ClientDetailLink from '../components/ClientDetailLink';
+import ContextLink from '../components/ContextLink';
 import StatusBadge from '../components/StatusBadge';
 import { isBlockedStatus, queryRowClass } from '../utils/queryStatus';
 import type { Stats, Query, ThreatSummary } from '../types';
@@ -397,6 +398,7 @@ export default function Dashboard() {
                           </svg>
                         )}
                       </button>
+                      <ContextLink queryId={query.id} />
                     </div>
                   </div>
                 </div>
@@ -505,6 +507,7 @@ export default function Dashboard() {
                                 </svg>
                               )}
                             </button>
+                            <ContextLink queryId={query.id} />
                           </div>
                         </td>
                       </tr>

@@ -5,6 +5,8 @@ import type {
   AlertRuleCreate,
   Stats,
   QuerySearchParams,
+  QueryContext,
+  QueryContextParams,
   SettingsResponse,
   PiholeServer,
   PiholeServerCreate,
@@ -84,6 +86,11 @@ export const queryApi = {
   count: async (params: QuerySearchParams): Promise<number> => {
     const response = await api.get<{ count: number }>('/queries/count', { params });
     return response.data.count;
+  },
+
+  context: async (params: QueryContextParams): Promise<QueryContext> => {
+    const response = await api.get<QueryContext>('/queries/context', { params });
+    return response.data;
   },
 };
 

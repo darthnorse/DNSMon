@@ -12,6 +12,29 @@ export interface Query {
   threat_type: string | null;
 }
 
+export type ContextScope = 'device' | 'all';
+
+export interface QueryContext {
+  anchor: Query | null;
+  center: string;
+  client_ip: string;
+  scope: ContextScope;
+  window: number;
+  before: Query[];
+  after: Query[];
+  truncated_before: boolean;
+  truncated_after: boolean;
+}
+
+export interface QueryContextParams {
+  query_id?: number;
+  client_ip?: string;
+  at?: string;
+  domain?: string;
+  window: number;
+  scope: ContextScope;
+}
+
 export type MatchStatus = 'any' | 'blocked' | 'allowed';
 
 export interface AlertRule {

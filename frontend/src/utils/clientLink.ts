@@ -5,7 +5,7 @@ export interface ClientLink {
   servers: string[];
 }
 
-const MAX_CLIENT_LENGTH = 45;
+export const MAX_CLIENT_LENGTH = 45;
 const MAX_SERVER_NAME_LENGTH = 100;
 // Matches the `servers` max_length on /api/queries; a longer list would be rejected with a 422.
 const MAX_SERVERS_PARAM_LENGTH = 1000;

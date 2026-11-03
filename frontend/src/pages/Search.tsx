@@ -4,6 +4,7 @@ import { format } from 'date-fns';
 import { queryApi, domainApi } from '../utils/api';
 import ThreatBadge from '../components/ThreatBadge';
 import ClientDetailLink from '../components/ClientDetailLink';
+import ContextLink from '../components/ContextLink';
 import StatusBadge from '../components/StatusBadge';
 import { getErrorMessage } from '../utils/errors';
 import { parseClientLink, toLocalDatetimeString } from '../utils/clientLink';
@@ -371,6 +372,7 @@ export default function Search() {
                             </svg>
                           )}
                         </button>
+                        <ContextLink queryId={query.id} />
                       </div>
                     </td>
                   </tr>
