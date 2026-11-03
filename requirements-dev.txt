@@ -8,3 +8,6 @@
 # Testing
 pytest==9.0.3
 pytest-asyncio==1.4.0
+
+# Vulnerability audit (scripts/security-audit.sh)
+pip-audit==2.10.1

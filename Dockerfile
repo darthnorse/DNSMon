@@ -3,7 +3,7 @@
 # Multi-stage:
 #   - frontend-builder: produces frontend/build/
 #   - production: minimal runtime image (default for CI / docker-publish)
-#   - test: extends production with pytest + backend/tests/ + pyproject.toml
+#   - test: extends production with pytest + pip-audit + backend/tests/ + pyproject.toml
 #
 # Local dev (`docker compose up`) builds `test` so `docker exec dnsmon-app pytest`
 # works out of the box. CI's docker-publish workflow targets `production`.
@@ -50,6 +50,9 @@ CMD ["python", "-m", "backend.main"]
 # ---------- test: production + pytest + backend/tests/
 FROM production AS test
 USER root
+# Snapshot the production package set before dev deps land on top, so
+# scripts/security-audit.sh audits what ships rather than the test tooling.
+RUN pip freeze --exclude-editable > /app/production-packages.txt
 COPY requirements-dev.txt .
 RUN pip install --no-cache-dir -r requirements-dev.txt
 COPY backend/tests/ ./backend/tests/
