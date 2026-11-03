@@ -761,7 +761,7 @@ export default function StatisticsPage() {
       {recentQueries && selectedClients.length === 1 && (
         <RecentQueries
           queries={recentQueries}
-          searchLink={buildClientLink('/search', { client: selectedClients[0], ...getQueryRange() })}
+          searchLink={buildClientLink('/search', { client: selectedClients[0], servers: selectedServers, ...getQueryRange() })}
         />
       )}
 

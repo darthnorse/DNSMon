@@ -16,6 +16,7 @@ function toIsoBound(input: string, linked: Date | null): string {
 export default function Search() {
   const [urlParams] = useSearchParams();
   const [link] = useState(() => parseClientLink(urlParams));
+  const [linkServers, setLinkServers] = useState<string[]>(link.servers);
   const [queries, setQueries] = useState<Query[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,7 +39,7 @@ export default function Search() {
     if (link.client) handleSearch(0);
   }, []);
 
-  const handleSearch = async (offset = 0) => {
+  const handleSearch = async (offset = 0, servers = linkServers) => {
     try {
       setLoading(true);
       setError(null);
@@ -52,6 +53,7 @@ export default function Search() {
       if (searchParams.client_ip) params.client_ip = searchParams.client_ip;
       if (searchParams.client_hostname) params.client_hostname = searchParams.client_hostname;
       if (searchParams.server) params.server = searchParams.server;
+      if (servers.length > 0) params.servers = servers.join(',');
       if (searchParams.from_date) params.from_date = toIsoBound(searchParams.from_date, link.from);
       if (searchParams.to_date) params.to_date = toIsoBound(searchParams.to_date, link.to);
 
@@ -71,7 +73,13 @@ export default function Search() {
     }
   };
 
+  const removeLinkServers = () => {
+    setLinkServers([]);
+    if (queries.length > 0 || totalCount > 0) handleSearch(0, []);
+  };
+
   const handleClear = () => {
+    setLinkServers([]);
     setSearchParams({
       domain: '',
       client_ip: '',
@@ -215,6 +223,26 @@ export default function Search() {
             />
           </div>
         </div>
+
+        {linkServers.length > 0 && (
+          <div className="mt-4">
+            <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 dark:bg-blue-900/40 py-1 pl-3 pr-1 text-sm text-blue-800 dark:text-blue-200">
+              Servers: {linkServers.join(', ')}
+              <button
+                type="button"
+                onClick={removeLinkServers}
+                disabled={loading}
+                title="Remove server filter"
+                aria-label="Remove server filter"
+                className="inline-flex h-5 w-5 items-center justify-center rounded-full hover:bg-blue-200 dark:hover:bg-blue-800 disabled:opacity-50"
+              >
+                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </span>
+          </div>
+        )}
 
         <div className="mt-4 flex space-x-3">
           <button
