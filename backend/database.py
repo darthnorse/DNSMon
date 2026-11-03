@@ -126,6 +126,8 @@ async def _run_migrations(conn):
                   col_type='INTEGER', default=None, nullable=True),
         Migration(table='insight_sources', column='shrink_candidate_since',
                   col_type='TIMESTAMP WITH TIME ZONE', default=None, nullable=True),
+        Migration(table='servers', column='ingested_until',
+                  col_type='TIMESTAMP WITH TIME ZONE', default=None, nullable=True),
     ]
     for m in migrations:
         result = await conn.execute(text(

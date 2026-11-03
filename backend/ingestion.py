@@ -5,16 +5,23 @@ from typing import List, Tuple
 from dataclasses import dataclass
 from collections import defaultdict
 
-from sqlalchemy import select, func, text, BigInteger
+from sqlalchemy import select, func, text, update, BigInteger
 from sqlalchemy.dialects.postgresql import insert
 
-from .models import Query, QueryStatsHourly, ClientStatsHourly, DomainStatsHourly
+from .models import Query, QueryStatsHourly, ClientStatsHourly, DomainStatsHourly, PiholeServerModel
 from .database import async_session_maker, cleanup_old_queries
 from .utils import create_client_from_server
 from .config import get_settings_sync, PiholeServer
+from .dns_client import QueryFetchError
 from .constants import BLOCKED_STATUSES, CACHE_STATUSES, BLOCKED_SQL_IN, CACHE_SQL_IN
 
 logger = logging.getLogger(__name__)
+
+
+# Re-read this much before the resume point: a query can land in the server's log
+# after a poll whose range already covered its timestamp. Duplicates are dropped
+# by the queries unique key.
+RESUME_OVERLAP_SECONDS = 5
 
 
 @dataclass
@@ -36,41 +43,47 @@ class QueryIngestionService:
     def __init__(self):
         self.settings = get_settings_sync()
 
-    async def _get_last_query_timestamp(self, server_name: str) -> int:
-        """Get the timestamp of the last query for a server from the database.
-
-        Caps the lookback to max_catchup_seconds to prevent fetching huge amounts
-        of data after extended downtime.
-        """
-        now = int(time.time())
-        max_lookback = self.settings.max_catchup_seconds
-        min_allowed_timestamp = now - max_lookback
-
+    async def _resume_point(self, server: PiholeServer, supports_gap_recovery: bool, now: int) -> int:
+        """Where the next fetch starts: the cursor, else the newest stored query, else the lookback window."""
         async with async_session_maker() as session:
-            stmt = (
-                select(func.floor(func.extract('epoch', func.max(Query.timestamp))).cast(BigInteger))
-                .where(Query.server == server_name)
-            )
-            result = await session.execute(stmt)
-            epoch_timestamp = result.scalar()
-
-            if epoch_timestamp:
-                last_timestamp = int(epoch_timestamp)
-                # Cap lookback to max_catchup_seconds
-                if last_timestamp < min_allowed_timestamp:
-                    logger.warning(
-                        f"Last query for {server_name} was {now - last_timestamp}s ago, "
-                        f"capping lookback to {max_lookback}s (some queries may be missed)"
-                    )
-                    return min_allowed_timestamp
-                return last_timestamp
+            cursor = None
+            if server.id is not None:
+                cursor = (await session.execute(
+                    select(PiholeServerModel.ingested_until).where(PiholeServerModel.id == server.id)
+                )).scalar_one_or_none()
+            if cursor is not None:
+                start = int(cursor.timestamp())
             else:
-                # No queries yet, use lookback period
-                return now - self.settings.query_lookback_seconds
+                newest = (await session.execute(
+                    select(func.floor(func.extract('epoch', func.max(Query.timestamp))).cast(BigInteger))
+                    .where(Query.server == server.name)
+                )).scalar()
+                start = int(newest) if newest else now - self.settings.query_lookback_seconds
+
+        start -= RESUME_OVERLAP_SECONDS
+        floor = now - self.settings.max_catchup_seconds
+        if not supports_gap_recovery and start < floor:
+            logger.warning(
+                f"Last ingest for {server.name} was {now - start}s ago, capping lookback to "
+                f"{self.settings.max_catchup_seconds}s (some queries may be missed)")
+            return floor
+        return start
+
+    async def _set_cursor(self, server: PiholeServer, until_timestamp: int) -> None:
+        if server.id is None:
+            return
+        async with async_session_maker() as session:
+            await session.execute(
+                update(PiholeServerModel).where(PiholeServerModel.id == server.id)
+                .values(ingested_until=datetime.fromtimestamp(until_timestamp, tz=timezone.utc)))
+            await session.commit()
 
     async def ingest_from_server(self, server: PiholeServer) -> Tuple[int, List[IngestedQuery]]:
-        """Ingest queries from a single Pi-hole server.
-        Returns (count, list of IngestedQuery objects).
+        """Ingest one server's queries since its resume point.
+
+        Returns (stored count, the stored queries recent enough to alert on). Older
+        backlog recovered after an outage is stored and counted in the hourly stats
+        but never alerted on, so an outage doesn't end in a burst of stale alerts.
         """
         if not server.enabled:
             logger.debug(f"Server {server.name} is disabled, skipping")
@@ -78,11 +91,10 @@ class QueryIngestionService:
 
         try:
             now = int(time.time())
-            last_poll = await self._get_last_query_timestamp(server.name)
-            from_timestamp = last_poll
-            until_timestamp = now
-
-            logger.info(f"Ingesting queries from {server.name} (from {from_timestamp} to {until_timestamp})")
+            alert_floor = datetime.fromtimestamp(now - self.settings.max_catchup_seconds, tz=timezone.utc)
+            total = 0
+            alertable: List[IngestedQuery] = []
+            backlog = 0
 
             client = create_client_from_server(server)
             async with client:
@@ -90,20 +102,28 @@ class QueryIngestionService:
                     logger.error(f"Failed to authenticate with {server.name}")
                     return 0, []
 
-                queries = await client.get_queries(from_timestamp, until_timestamp)
+                from_timestamp = await self._resume_point(server, client.supports_gap_recovery, now)
+                logger.info(f"Ingesting queries from {server.name} (from {from_timestamp} to {now})")
 
-                if queries is None:
-                    logger.error(f"Failed to retrieve queries from {server.name}")
-                    return 0, []
+                try:
+                    async for page in client.iter_query_pages(from_timestamp, now):
+                        count, stored = await self._store_queries(page, server.name)
+                        total += count
+                        await self.update_hourly_stats(stored)
+                        recent = [q for q in stored if q.timestamp >= alert_floor]
+                        backlog += len(stored) - len(recent)
+                        alertable.extend(recent)
+                except QueryFetchError as e:
+                    logger.error(f"{e}; {server.name} will retry the whole range next poll")
+                    return total, alertable
 
-                if not queries:
-                    logger.info(f"No new queries from {server.name}")
-                    return 0, []
-
-                query_count, ingested = await self._store_queries(queries, server.name)
-
-                logger.info(f"Ingested {query_count} queries from {server.name}")
-                return query_count, ingested
+            await self._set_cursor(server, now)
+            if backlog:
+                logger.warning(
+                    f"Recovered {backlog} queries for {server.name} from a {now - from_timestamp}s gap; "
+                    f"alerts not sent for them")
+            logger.info(f"Ingested {total} queries from {server.name}")
+            return total, alertable
 
         except Exception as e:
             logger.error(f"Error ingesting from {server.name}: {e}", exc_info=True)
@@ -392,9 +412,6 @@ class QueryIngestionService:
             count, queries = await self.ingest_from_server(server)
             total_count += count
             all_queries.extend(queries)
-
-        if total_count > 0:
-            await self.update_hourly_stats(all_queries)
 
         return total_count, all_queries
 

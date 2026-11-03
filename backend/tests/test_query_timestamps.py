@@ -94,15 +94,3 @@ async def test_query_without_time_is_skipped_not_stamped_now(db_session):
 
     assert count == 0
     assert (await db_session.execute(select(Query))).first() is None
-
-
-async def test_resume_point_rounds_down_to_whole_second(db_session):
-    db_session.add(Query(timestamp=datetime(2026, 11, 3, 19, 46, 48, 900000, tzinfo=timezone.utc),
-                         domain="example.com", client_ip="192.168.1.5", server="pihole1"))
-    await db_session.commit()
-
-    service = QueryIngestionService()
-    service.settings.max_catchup_seconds = 10**9
-
-    assert await service._get_last_query_timestamp("pihole1") == int(
-        datetime(2026, 11, 3, 19, 46, 48, tzinfo=timezone.utc).timestamp())
