@@ -25,6 +25,8 @@ RESUME_OVERLAP_SECONDS = 5
 
 QUERY_LOG_CHECK_SECONDS = 900
 
+POSTGRES_MAX_BIND_PARAMS = 32767
+
 
 class QueryStoreError(Exception):
     """Queries were fetched but not written; the range must be fetched again."""
@@ -179,8 +181,9 @@ class QueryIngestionService:
 
         try:
             async with async_session_maker() as session:
-                # One row per unique key; an A and an HTTPS lookup can still share a
-                # microsecond, and the one carrying addresses is the one worth keeping.
+                # One row per unique key within this batch; an A and an HTTPS lookup can
+                # still share a microsecond, and the one carrying addresses is worth keeping.
+                # Across batches ON CONFLICT DO NOTHING keeps whichever arrived first.
                 by_key: dict[tuple, tuple[dict, IngestedQuery]] = {}
                 skipped_untimed = 0
 
@@ -266,8 +269,7 @@ class QueryIngestionService:
                 if not values_list:
                     return 0, []
 
-                # 10 columns per row; 3000 rows stays under PostgreSQL's 32767 bind parameters.
-                batch_size = 3000
+                batch_size = POSTGRES_MAX_BIND_PARAMS // len(values_list[0])
                 total_inserted = 0
                 inserted_keys: set = set()
 

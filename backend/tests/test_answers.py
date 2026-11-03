@@ -1,6 +1,8 @@
 import pytest
 
-from backend.answers import EMPTY, Answers, adguard_answers, technitium_answers
+from backend.answers import Answers, adguard_answers, technitium_answers
+
+EMPTY = Answers([], [])
 
 WEATHERKIT_IPS = ["23.217.9.57", "23.217.9.56", "23.217.9.37", "23.217.9.47", "23.217.9.50", "23.217.9.58",
                   "23.217.9.52", "23.217.9.39", "23.217.9.40", "23.217.9.41", "23.217.9.48", "23.217.9.49"]
@@ -85,3 +87,20 @@ def test_technitium_special_values_are_empty(value):
 
 def test_technitium_blocked_any_address_stores_nothing():
     assert technitium_answers("A 0.0.0.0", "BLOCKED") == EMPTY
+
+
+def test_technitium_quoted_txt_cannot_forge_answers():
+    a = technitium_answers('TXT "prefix, A 1.2.3.4, CNAME evil.example., suffix", A 5.6.7.8', "ALLOWED")
+
+    assert a == Answers(["5.6.7.8"], [])
+
+
+def test_technitium_escaped_quote_inside_txt():
+    assert technitium_answers('TXT "say \\"hi, A 1.2.3.4\\"", A 9.9.9.9', "ALLOWED").ips == ["9.9.9.9"]
+
+
+def test_empty_answers_are_not_shared():
+    adguard_answers({}, "BLOCKED").ips.append("1.1.1.1")
+
+    assert adguard_answers({}, "BLOCKED") == Answers([], [])
+    assert technitium_answers(None, "ALLOWED") == Answers([], [])

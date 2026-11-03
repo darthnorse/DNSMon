@@ -30,6 +30,7 @@ class DNSMonService:
         self.sync_service = PiholeSyncService()
         self._started = False
         self._initial_ingestion_task = None
+        self._answer_index_task = None
 
     async def ingest_and_alert(self):
         """Poll Pihole servers and check for alerts"""
@@ -284,6 +285,15 @@ class DNSMonService:
                 await self._initial_ingestion_task
             except asyncio.CancelledError:
                 logger.info("Initial ingestion task cancelled")
+
+        if self._answer_index_task and not self._answer_index_task.done():
+            # Cancelling makes asyncpg cancel the CREATE INDEX server-side; otherwise the
+            # build outlives the app and the next start would mistake it for a failed one.
+            self._answer_index_task.cancel()
+            try:
+                await self._answer_index_task
+            except asyncio.CancelledError:
+                logger.info("Answer index build cancelled; it resumes on next start")
 
         self.scheduler.shutdown()
         await self.alert_engine.invalidate_cache()

@@ -237,10 +237,11 @@ async def ensure_insight_sources() -> int:
     return added
 
 
-_ANSWER_INDEXES = {
-    'idx_queries_answer_ips': 'answer_ips',
-    'idx_queries_answer_cnames': 'answer_cnames',
-}
+def _answer_indexes() -> dict[str, str]:
+    """GIN index name -> column, as declared on Query, so upgrades build what fresh installs get."""
+    from .models import Query
+    return {ix.name: next(iter(ix.columns)).name for ix in Query.__table__.indexes
+            if ix.dialect_options['postgresql'].get('using') == 'gin'}
 
 
 async def ensure_answer_indexes() -> None:
@@ -253,10 +254,12 @@ async def ensure_answer_indexes() -> None:
     """
     async with engine.connect() as conn:
         conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
-        for name, column in _ANSWER_INDEXES.items():
+        for name, column in _answer_indexes().items():
             invalid = (await conn.execute(text(
                 "SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
-                "WHERE c.relname = :name AND NOT i.indisvalid"), {'name': name})).scalar()
+                "WHERE c.relname = :name AND NOT i.indisvalid AND NOT EXISTS ("
+                "SELECT 1 FROM pg_stat_progress_create_index p WHERE p.index_relid = i.indexrelid)"),
+                {'name': name})).scalar()
             if invalid:
                 await conn.execute(text(f'DROP INDEX CONCURRENTLY IF EXISTS "{name}"'))
             await conn.execute(text(
