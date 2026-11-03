@@ -414,8 +414,12 @@ class PiholeClient(DNSBlockerClient):
 
     async def logout(self):
         """Logout from Pi-hole API"""
+        if not self.session_info["sid"]:
+            return
         try:
-            response = await self.client.delete(f"{self.url}/api/auth")
+            # The sid header, not the cookie: FTL rejects cookie-authenticated
+            # non-GET requests that lack X-CSRF-Token with a 401.
+            response = await self.client.delete(f"{self.url}/api/auth", headers=self.get_auth_headers())
             if response.status_code not in [200, 204]:
                 logger.warning(f"Logout returned {response.status_code} for {self.server_name}")
         except Exception as e:
