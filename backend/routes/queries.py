@@ -132,7 +132,7 @@ async def query_context(
     client_ip: Optional[str] = QueryParam(None, max_length=45),
     at: Optional[str] = QueryParam(None, max_length=64),
     domain: Optional[str] = QueryParam(None, max_length=255),
-    window: int = 5,
+    window: int = 2,
     scope: Literal['device', 'all'] = 'device',
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user)

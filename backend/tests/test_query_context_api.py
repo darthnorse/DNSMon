@@ -69,7 +69,7 @@ async def test_cap_keeps_the_lookups_closest_to_the_anchor(async_admin_client: A
     await db_session.commit()
     hit = await _add(db_session, 0, "bad.example")
 
-    body = (await async_admin_client.get("/api/queries/context", params={"query_id": hit.id})).json()
+    body = (await async_admin_client.get("/api/queries/context", params={"query_id": hit.id, "window": 5})).json()
 
     assert body["truncated_before"] is True
     assert len(body["before"]) == 500
@@ -143,6 +143,17 @@ async def test_rejects_unsupported_window(async_admin_client: AsyncClient):
 async def test_rejects_bad_time(async_admin_client: AsyncClient):
     r = await async_admin_client.get("/api/queries/context", params={"client_ip": LAPTOP, "at": "yesterday"})
     assert r.status_code == 400
+
+
+async def test_default_window_is_two_minutes(async_admin_client: AsyncClient, db_session):
+    await _add(db_session, -150, "outside.example")
+    await _add(db_session, -100, "inside.example")
+    hit = await _add(db_session, 0, "bad.example")
+
+    body = (await async_admin_client.get("/api/queries/context", params={"query_id": hit.id})).json()
+
+    assert body["window"] == 2
+    assert _domains(body["before"]) == ["inside.example"]
 
 
 async def test_requires_login(async_client: AsyncClient):

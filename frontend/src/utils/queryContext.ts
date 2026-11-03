@@ -2,7 +2,7 @@ import type { ContextScope, Query, QueryContextParams } from '../types';
 import { MAX_CLIENT_LENGTH } from './clientLink';
 
 export const CONTEXT_WINDOWS = [1, 2, 5, 15] as const;
-export const DEFAULT_CONTEXT_WINDOW = 5;
+export const DEFAULT_CONTEXT_WINDOW = 2;
 
 const MAX_DOMAIN_LENGTH = 255;
 const HAS_ZONE = /(Z|[+-]\d{2}:?\d{2})$/i;
