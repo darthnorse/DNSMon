@@ -7,7 +7,11 @@ enabling support for multiple DNS ad-blocking solutions (Pi-hole, AdGuard Home, 
 
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from typing import Optional, Dict, List, Any
+from typing import Any, AsyncIterator, Dict, List, Optional
+
+
+class QueryFetchError(Exception):
+    """A query-log page could not be fetched, so the requested range is incomplete."""
 
 
 def parse_query_time(value: str) -> datetime:
@@ -297,3 +301,15 @@ class DNSBlockerClient(ABC):
     def supports_sync(self) -> bool:
         """Whether this blocker supports cross-instance configuration sync."""
         return False
+
+    @property
+    def supports_gap_recovery(self) -> bool:
+        """Whether iter_query_pages can reach back through the server's whole retained log."""
+        return False
+
+    async def iter_query_pages(self, from_timestamp: int, until_timestamp: int) -> AsyncIterator[List[Dict[str, Any]]]:
+        """Yield the range's queries in batches; raises QueryFetchError rather than yield a partial range."""
+        queries = await self.get_queries(from_timestamp, until_timestamp)
+        if queries is None:
+            raise QueryFetchError(f"Failed to fetch queries from {self.server_name}")
+        yield queries

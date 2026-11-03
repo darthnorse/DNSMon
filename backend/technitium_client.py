@@ -11,13 +11,15 @@ so the API token appears in request URLs. Ensure proxy/debug logs are secured.
 
 import logging
 from datetime import datetime, timezone
-from typing import Optional, Dict, List, Any
+from typing import Any, AsyncIterator, Dict, List, Optional
 
 import httpx
 
-from .dns_client import DNSBlockerClient, parse_query_time
+from .dns_client import DNSBlockerClient, QueryFetchError, parse_query_time
 
 logger = logging.getLogger(__name__)
+
+MAX_LOG_PAGES = 200
 
 _BLOCKED_TYPES = {'Blocked', 'UpstreamBlocked', 'CacheBlocked'}
 _CACHED_TYPES = {'Cached'}
@@ -61,6 +63,10 @@ class TechnitiumClient(DNSBlockerClient):
 
     @property
     def supports_sync(self) -> bool:
+        return True
+
+    @property
+    def supports_gap_recovery(self) -> bool:
         return True
 
     async def __aenter__(self):
@@ -140,16 +146,21 @@ class TechnitiumClient(DNSBlockerClient):
         }
 
     async def get_queries(self, from_timestamp: int, until_timestamp: int) -> Optional[List[Dict[str, Any]]]:
-        """Fetch query logs from the Technitium Query Logs DNS App."""
+        try:
+            results = [q async for page in self.iter_query_pages(from_timestamp, until_timestamp) for q in page]
+        except QueryFetchError as e:
+            logger.error(str(e))
+            return None
+        logger.info(f"Retrieved {len(results)} queries from {self.server_name}")
+        return results
+
+    async def iter_query_pages(self, from_timestamp: int, until_timestamp: int) -> AsyncIterator[List[Dict[str, Any]]]:
+        """Page the Query Logs DNS App oldest-first over [from, until]."""
         start_dt = datetime.fromtimestamp(from_timestamp, tz=timezone.utc)
         end_dt = datetime.fromtimestamp(until_timestamp, tz=timezone.utc)
-
-        results: List[Dict[str, Any]] = []
-        page = 1
         per_page = 5000
-        max_pages = 200
 
-        while page <= max_pages:
+        for page in range(1, MAX_LOG_PAGES + 1):
             data = await self._get('/api/logs/query', {
                 'name': self.log_app_name,
                 'classPath': self.log_app_class_path,
@@ -158,32 +169,15 @@ class TechnitiumClient(DNSBlockerClient):
                 'start': start_dt.strftime('%Y-%m-%dT%H:%M:%S.000Z'),
                 'end': end_dt.strftime('%Y-%m-%dT%H:%M:%S.000Z'),
             })
-
             if not data:
-                if page == 1:
-                    logger.error(f"Failed to fetch query logs from {self.server_name}")
-                    return None
-                logger.warning(f"Failed to fetch page {page} from {self.server_name}, returning {len(results)} queries (results may be incomplete)")
-                break
+                raise QueryFetchError(f"Failed to fetch query log page {page} from {self.server_name}")
 
             entries = data.get('response', {}).get('entries', [])
-            if not entries:
-                break
-
-            for entry in entries:
-                transformed = self._transform_query(entry)
-                if transformed is not None:
-                    results.append(transformed)
-
+            yield [q for q in map(self._transform_query, entries) if q is not None]
             if len(entries) < per_page:
-                break
-            page += 1
+                return
 
-        if page > max_pages:
-            logger.warning(f"Hit max page limit ({max_pages}) for {self.server_name}, results truncated")
-
-        logger.info(f"Retrieved {len(results)} queries from {self.server_name}")
-        return results
+        raise QueryFetchError(f"Query log from {self.server_name} exceeds {MAX_LOG_PAGES} pages; range incomplete")
 
     async def get_blocking_status(self) -> Optional[bool]:
         data = await self._get('/api/settings/get')

@@ -7,10 +7,10 @@ allowing DNSMon to monitor and manage AdGuard Home instances.
 
 import httpx
 import logging
-from typing import Optional, Dict, List, Any
+from typing import Any, AsyncIterator, Dict, List, Optional
 from base64 import b64encode
 
-from .dns_client import DNSBlockerClient, parse_query_time
+from .dns_client import DNSBlockerClient, QueryFetchError, parse_query_time
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +25,8 @@ ADGUARD_DNS_SYNC_DENYLIST = frozenset({
     'default_local_ptr_upstreams',
     'upstream_dns_file',
 })
+
+QUERYLOG_PAGE_SIZE = 1000
 
 # GET <endpoint> reads the config; PUT <endpoint>/update writes it back unchanged.
 _SYNCED_CONFIG_ENDPOINTS = {
@@ -85,52 +87,37 @@ class AdGuardHomeClient(DNSBlockerClient):
             return False
 
     async def get_queries(self, from_timestamp: int, until_timestamp: int) -> Optional[List[Dict[str, Any]]]:
-        """
-        Get queries from AdGuard Home query log.
-
-        Note: AdGuard Home's query log API returns queries in reverse chronological order
-        and uses a different pagination approach than Pi-hole.
-        """
         try:
-            # AdGuard Home query log endpoint
-            # The limit parameter controls how many entries to fetch
-            params = {
-                "limit": 5000,
-            }
-
-            response = await self.client.get(
-                f"{self.url}/control/querylog",
-                params=params,
-                headers=self._get_auth_header()
-            )
-
-            if response.status_code == 200:
-                data = response.json()
-                queries = data.get("data", [])
-
-                if len(queries) >= 5000:
-                    logger.warning(
-                        f"Retrieved maximum number of queries (5000) from {self.server_name}. "
-                        f"Some queries in the time window may be missed."
-                    )
-
-                filtered = []
-                for q in queries:
-                    transformed = self._transform_query(q)
-                    if transformed is None:
-                        continue
-                    if from_timestamp <= int(transformed["timestamp"].timestamp()) <= until_timestamp:
-                        filtered.append(transformed)
-
-                logger.info(f"Retrieved {len(filtered)} queries from {self.server_name}")
-                return filtered
-
-            logger.error(f"Failed to get queries from {self.server_name}: {response.status_code}")
+            return [q async for page in self.iter_query_pages(from_timestamp, until_timestamp) for q in page]
+        except QueryFetchError as e:
+            logger.error(str(e))
             return None
 
-        except Exception as e:
-            logger.error(f"Error getting queries from {self.server_name}: {e}")
-            return None
+    async def iter_query_pages(self, from_timestamp: int, until_timestamp: int) -> AsyncIterator[List[Dict[str, Any]]]:
+        """Walk the query log newest-first with AdGuard's older_than cursor until it passes from_timestamp."""
+        cursor: Optional[str] = None
+        while True:
+            params: Dict[str, Any] = {"limit": QUERYLOG_PAGE_SIZE}
+            if cursor:
+                params["older_than"] = cursor
+            try:
+                response = await self.client.get(
+                    f"{self.url}/control/querylog", params=params, headers=self._get_auth_header())
+            except httpx.HTTPError as e:
+                raise QueryFetchError(f"Query log request to {self.server_name} failed: {e}") from e
+            if response.status_code != 200:
+                raise QueryFetchError(f"Query log page from {self.server_name} returned {response.status_code}")
+
+            data = response.json()
+            rows = data.get("data") or []
+            page = [q for q in map(self._transform_query, rows) if q is not None]
+            yield [q for q in page if from_timestamp <= int(q["timestamp"].timestamp()) <= until_timestamp]
+
+            oldest = data.get("oldest") or ""
+            reached_start = bool(page) and int(page[-1]["timestamp"].timestamp()) < from_timestamp
+            if not rows or not oldest or oldest == cursor or reached_start:
+                return
+            cursor = oldest
 
     def _transform_query(self, raw_query: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
@@ -729,4 +716,8 @@ class AdGuardHomeClient(DNSBlockerClient):
     @property
     def supports_sync(self) -> bool:
         """AdGuard supports config-based sync to other AdGuard instances."""
+        return True
+
+    @property
+    def supports_gap_recovery(self) -> bool:
         return True
