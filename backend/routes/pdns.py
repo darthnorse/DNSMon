@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import distinct, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import get_current_user
@@ -61,10 +61,17 @@ async def lookup_ip(
     where = [Query.answer_ips.contains([ip]), *_time_conditions(from_date, to_date)]
     last_seen = func.max(Query.timestamp)
 
+    # Grouping by (domain, server) first keeps the aggregate parallel-safe, which
+    # array_agg(DISTINCT server) is not: 0.9 s vs 1.25 s for an IP in 500k rows
+    # (scripts/bench-pdns.sql).
+    per_server = (select(Query.domain, Query.server, func.min(Query.timestamp).label("first_seen"),
+                         func.max(Query.timestamp).label("last_seen"), func.count().label("n"))
+                  .where(*where).group_by(Query.domain, Query.server).subquery())
+    domain_last_seen = func.max(per_server.c.last_seen)
     domains = (await db.execute(
-        select(Query.domain, func.min(Query.timestamp), last_seen, func.count(),
-               func.array_agg(distinct(Query.server)))
-        .where(*where).group_by(Query.domain).order_by(last_seen.desc()).limit(PDNS_ROW_LIMIT)
+        select(per_server.c.domain, func.min(per_server.c.first_seen), domain_last_seen,
+               func.sum(per_server.c.n), func.array_agg(per_server.c.server))
+        .group_by(per_server.c.domain).order_by(domain_last_seen.desc()).limit(PDNS_ROW_LIMIT)
     )).all()
     clients = (await db.execute(
         select(Query.client_ip, func.max(Query.client_hostname), func.count(), last_seen)
@@ -74,7 +81,7 @@ async def lookup_ip(
     return PdnsIpResponse(
         ip=ip,
         domains=[PdnsDomainRow(domain=d, first_seen=ensure_utc(first), last_seen=ensure_utc(last),
-                               count=n, servers=sorted(servers)) for d, first, last, n, servers in domains],
+                               count=int(n), servers=sorted(servers)) for d, first, last, n, servers in domains],
         clients=[PdnsClientRow(client_ip=c, client_hostname=host, count=n, last_seen=ensure_utc(last))
                  for c, host, n, last in clients],
     )
