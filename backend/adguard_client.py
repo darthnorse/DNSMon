@@ -543,6 +543,15 @@ class AdGuardHomeClient(DNSBlockerClient):
             logger.error(f"Partial {label} sync to {self.server_name}: target may be in inconsistent state")
         return ok
 
+    async def _write(self, method: str, endpoint: str, body: Any, label: str) -> bool:
+        response = await self.client.request(
+            method, f"{self.url}{endpoint}", json=body, headers=self._get_auth_header())
+        if response.status_code != 200:
+            logger.error(f"Failed to set {label} on {self.server_name}: {response.status_code}")
+            return False
+        logger.info(f"Applied {label} to {self.server_name}")
+        return True
+
     async def patch_config(self, config: Dict[str, Any]) -> bool:
         """Apply configuration to AdGuard Home."""
         try:
@@ -555,41 +564,18 @@ class AdGuardHomeClient(DNSBlockerClient):
                 else:
                     logger.info(f"Applied {len(config['user_rules'])} user rules to {self.server_name}")
 
-            if 'dns' in config and config['dns'] is not None:
-                response = await self.client.post(
-                    f"{self.url}/control/dns_config",
-                    json=config['dns'],
-                    headers=self._get_auth_header()
-                )
-                if response.status_code != 200:
-                    logger.error(f"Failed to set DNS config on {self.server_name}: {response.status_code}")
-                    success = False
-                else:
-                    logger.info(f"Applied DNS config to {self.server_name}")
+            if config.get('dns') is not None:
+                success &= await self._write('POST', '/control/dns_config', config['dns'], 'DNS config')
 
             for key, endpoint in _SYNCED_CONFIG_ENDPOINTS.items():
                 if config.get(key) is not None:
-                    response = await self.client.put(
-                        f"{self.url}{endpoint}/update",
-                        json=config[key],
-                        headers=self._get_auth_header()
-                    )
-                    if response.status_code != 200:
-                        logger.error(f"Failed to set {key} on {self.server_name}: {response.status_code}")
-                        success = False
+                    success &= await self._write('PUT', f"{endpoint}/update", config[key], key)
 
             if 'filtering_enabled' in config:
-                response = await self.client.post(
-                    f"{self.url}/control/filtering/config",
-                    json={
-                        'enabled': config.get('filtering_enabled', True),
-                        'interval': config.get('filtering_interval', 24)
-                    },
-                    headers=self._get_auth_header()
-                )
-                if response.status_code != 200:
-                    logger.error(f"Failed to set filtering config on {self.server_name}: {response.status_code}")
-                    success = False
+                success &= await self._write('POST', '/control/filtering/config', {
+                    'enabled': config.get('filtering_enabled', True),
+                    'interval': config.get('filtering_interval', 24),
+                }, 'filtering config')
 
             if 'rewrites' in config and config['rewrites'] is not None:
                 try:

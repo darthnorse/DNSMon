@@ -163,9 +163,9 @@ class PiholeSyncService:
                 dns = config['dns']
                 if 'upstream_dns' in dns and dns['upstream_dns']:
                     summary['upstream_dns'] = len(dns['upstream_dns'])
-            interval = (config.get('querylog_config') or {}).get('interval')
-            if interval is not None:
-                summary['querylog_retention_days'] = interval // 86_400_000
+            querylog = config.get('querylog_config') or {}
+            if querylog.get('enabled') and querylog.get('interval') is not None:
+                summary['querylog_retention_hours'] = int(querylog['interval'] // 3_600_000)
         elif server_type == 'technitium':
             if config.get('blockListUrls'):
                 summary['block_lists'] = len(config['blockListUrls'])

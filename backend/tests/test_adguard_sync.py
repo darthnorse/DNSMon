@@ -89,7 +89,14 @@ async def test_querylog_config_failure_marks_sync_failed():
     assert await _client(target).patch_config(cfg) is False
 
 
-async def test_sync_summary_reports_querylog_retention():
-    cfg = await _client(FakeAdGuard()).get_config()
+def _summary(querylog_config: dict) -> dict:
+    return PiholeSyncService()._get_config_summary({'querylog_config': querylog_config}, 'adguard')
 
-    assert PiholeSyncService()._get_config_summary(cfg, 'adguard')['querylog_retention_days'] == 7
+
+def test_sync_summary_reports_querylog_retention_in_hours():
+    assert _summary(QUERYLOG_CONFIG)['querylog_retention_hours'] == 168
+    assert _summary({**QUERYLOG_CONFIG, 'interval': 21_600_000})['querylog_retention_hours'] == 6
+
+
+def test_sync_summary_omits_retention_when_query_log_disabled():
+    assert 'querylog_retention_hours' not in _summary({**QUERYLOG_CONFIG, 'enabled': False})
