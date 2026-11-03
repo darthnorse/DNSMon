@@ -15,7 +15,7 @@ from typing import Optional, Dict, List, Any
 
 import httpx
 
-from .dns_client import DNSBlockerClient
+from .dns_client import DNSBlockerClient, parse_query_time
 
 logger = logging.getLogger(__name__)
 
@@ -126,11 +126,8 @@ class TechnitiumClient(DNSBlockerClient):
     def _transform_query(self, raw: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         ts_str = raw.get('timestamp', '')
         try:
-            ts = datetime.fromisoformat(ts_str)
-            if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
-            timestamp = int(ts.timestamp())
-        except (ValueError, TypeError):
+            timestamp = parse_query_time(ts_str)
+        except (ValueError, TypeError, AttributeError):
             logger.warning(f"Unparseable timestamp {ts_str!r} from {self.server_name}, skipping entry")
             return None
 

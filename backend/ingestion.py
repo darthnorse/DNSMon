@@ -48,7 +48,7 @@ class QueryIngestionService:
 
         async with async_session_maker() as session:
             stmt = (
-                select(func.extract('epoch', func.max(Query.timestamp)).cast(BigInteger))
+                select(func.floor(func.extract('epoch', func.max(Query.timestamp))).cast(BigInteger))
                 .where(Query.server == server_name)
             )
             result = await session.execute(stmt)
@@ -120,6 +120,7 @@ class QueryIngestionService:
             async with async_session_maker() as session:
                 values_list = []
                 ingested_queries = []  # For alert checking
+                skipped_untimed = 0
 
                 for query_data in queries:
                     # Extract client information
@@ -134,21 +135,17 @@ class QueryIngestionService:
                         client_ip = str(client_data)
                         client_hostname = None
 
-                    # Pi-hole provides Unix timestamps which are UTC by definition
                     timestamp = query_data.get("timestamp")
-                    if timestamp:
-                        if isinstance(timestamp, int):
-                            # Unix timestamp - convert to UTC timezone-aware datetime
-                            timestamp = datetime.fromtimestamp(timestamp, tz=timezone.utc)
-                        else:
-                            # ISO format string
-                            timestamp = datetime.fromisoformat(str(timestamp))
-                            # Ensure it's timezone-aware (assume UTC if naive)
-                            if timestamp.tzinfo is None:
-                                timestamp = timestamp.replace(tzinfo=timezone.utc)
-                    else:
-                        # Fallback to current UTC time
-                        timestamp = datetime.now(timezone.utc)
+                    if isinstance(timestamp, (int, float)):
+                        timestamp = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+                    elif isinstance(timestamp, str):
+                        timestamp = datetime.fromisoformat(timestamp)
+                    if not isinstance(timestamp, datetime):
+                        # Stamping "now" instead hid for months that Pi-hole rows never carried their real time.
+                        skipped_untimed += 1
+                        continue
+                    if timestamp.tzinfo is None:
+                        timestamp = timestamp.replace(tzinfo=timezone.utc)
 
                     # Validate and truncate field lengths to prevent database constraint violations
                     domain = query_data.get("domain", "")
@@ -192,6 +189,9 @@ class QueryIngestionService:
                         status=status,
                         server=server_name,
                     ))
+
+                if skipped_untimed:
+                    logger.warning(f"Skipped {skipped_untimed} queries from {server_name} with no usable time")
 
                 if not values_list:
                     return 0, []

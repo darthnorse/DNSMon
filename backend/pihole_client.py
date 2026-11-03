@@ -2,6 +2,7 @@ import httpx
 import hashlib
 import time
 import json
+from datetime import datetime, timezone
 from typing import Optional, Dict, List, Any
 from urllib.parse import quote
 import logging
@@ -140,6 +141,15 @@ class PiholeClient(DNSBlockerClient):
             logger.error(f"Error in challenge-response auth for {self.server_name}: {e}")
             return False
 
+    @staticmethod
+    def _with_query_time(queries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Expose FTL's epoch-float `time` as the `timestamp` datetime ingestion reads."""
+        for q in queries:
+            t = q.get("time")
+            if isinstance(t, (int, float)):
+                q["timestamp"] = datetime.fromtimestamp(t, tz=timezone.utc)
+        return queries
+
     async def get_queries(self, from_timestamp: int, until_timestamp: int) -> Optional[List[Dict[str, Any]]]:
         """Get queries from Pi-hole API"""
         try:
@@ -168,7 +178,7 @@ class PiholeClient(DNSBlockerClient):
 
             if response.status_code == 200:
                 data = response.json()
-                queries = data.get("queries", [])
+                queries = self._with_query_time(data.get("queries", []))
                 query_count = len(queries)
                 logger.info(f"Successfully retrieved {query_count} queries from {self.server_name}")
 
@@ -184,7 +194,7 @@ class PiholeClient(DNSBlockerClient):
                     response = await self.client.get(endpoint, params=params, headers=headers)
                     if response.status_code == 200:
                         data = response.json()
-                        queries = data.get("queries", [])
+                        queries = self._with_query_time(data.get("queries", []))
                         query_count = len(queries)
                         logger.info(f"Successfully retrieved {query_count} queries from {self.server_name} (after re-auth)")
 

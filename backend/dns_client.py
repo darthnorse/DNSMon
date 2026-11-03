@@ -6,7 +6,21 @@ enabling support for multiple DNS ad-blocking solutions (Pi-hole, AdGuard Home, 
 """
 
 from abc import ABC, abstractmethod
+from datetime import datetime, timezone
 from typing import Optional, Dict, List, Any
+
+
+def parse_query_time(value: str) -> datetime:
+    """Parse an ISO-8601 query-log time to an aware UTC datetime, keeping sub-second precision.
+
+    The precision matters: the queries unique key has no query_type, so an A and an HTTPS
+    lookup for the same name in the same second would otherwise collide and one be dropped.
+    Raises ValueError/TypeError on unparseable input; naive times are taken as UTC.
+    """
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 class DNSBlockerClient(ABC):

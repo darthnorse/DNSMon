@@ -8,10 +8,9 @@ allowing DNSMon to monitor and manage AdGuard Home instances.
 import httpx
 import logging
 from typing import Optional, Dict, List, Any
-from datetime import datetime, timezone
 from base64 import b64encode
 
-from .dns_client import DNSBlockerClient
+from .dns_client import DNSBlockerClient, parse_query_time
 
 logger = logging.getLogger(__name__)
 
@@ -99,19 +98,11 @@ class AdGuardHomeClient(DNSBlockerClient):
 
                 filtered = []
                 for q in queries:
-                    ts = q.get("time", "")
-                    if ts:
-                        try:
-                            query_time = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                            query_timestamp = int(query_time.timestamp())
-
-                            if from_timestamp <= query_timestamp <= until_timestamp:
-                                transformed = self._transform_query(q)
-                                if transformed is not None:
-                                    filtered.append(transformed)
-                        except (ValueError, TypeError) as e:
-                            logger.warning(f"Failed to parse timestamp {ts}: {e}")
-                            continue
+                    transformed = self._transform_query(q)
+                    if transformed is None:
+                        continue
+                    if from_timestamp <= int(transformed["timestamp"].timestamp()) <= until_timestamp:
+                        filtered.append(transformed)
 
                 logger.info(f"Retrieved {len(filtered)} queries from {self.server_name}")
                 return filtered
@@ -135,8 +126,8 @@ class AdGuardHomeClient(DNSBlockerClient):
 
         ts = raw_query.get("time", "")
         try:
-            timestamp = int(datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp())
-        except (ValueError, TypeError):
+            timestamp = parse_query_time(ts)
+        except (ValueError, TypeError, AttributeError):
             logger.warning(f"Unparseable timestamp {ts!r} from {self.server_name}, skipping entry")
             return None
 
