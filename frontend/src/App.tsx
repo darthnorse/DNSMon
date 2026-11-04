@@ -7,6 +7,7 @@ import AlertRules from './pages/AlertRules';
 import Statistics from './pages/Statistics';
 import Insights from './pages/Insights';
 import Context from './pages/Context';
+import Pdns from './pages/Pdns';
 import Settings from './pages/Settings';
 import Login from './pages/Login';
 import Setup from './pages/Setup';
@@ -44,6 +45,7 @@ function Navigation({ darkMode, toggleDarkMode }: { darkMode: boolean; toggleDar
   const navItems = [
     { path: '/', label: 'Dashboard' },
     { path: '/search', label: 'Search' },
+    { path: '/pdns', label: 'Lookup' },
     { path: '/statistics', label: 'Statistics' },
     { path: '/insights', label: 'Insights' },
     ...(user?.is_admin ? [
@@ -384,6 +386,7 @@ function AppLayout() {
           <Route path="/search" element={<ProtectedRoute><Search key={location.key} /></ProtectedRoute>} />
           <Route path="/statistics" element={<ProtectedRoute><Statistics key={location.key} /></ProtectedRoute>} />
           <Route path="/context" element={<ProtectedRoute><Context /></ProtectedRoute>} />
+          <Route path="/pdns" element={<ProtectedRoute><Pdns /></ProtectedRoute>} />
           <Route path="/insights" element={<ProtectedRoute><Insights /></ProtectedRoute>} />
           <Route path="/lists" element={<ProtectedRoute requireAdmin><Lists /></ProtectedRoute>} />
           <Route path="/alerts" element={<ProtectedRoute requireAdmin><AlertRules /></ProtectedRoute>} />

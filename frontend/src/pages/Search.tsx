@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { Fragment, useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { format } from 'date-fns';
 import { queryApi, domainApi } from '../utils/api';
+import AnswerList from '../components/AnswerList';
 import ThreatBadge from '../components/ThreatBadge';
 import ClientDetailLink from '../components/ClientDetailLink';
 import ContextLink from '../components/ContextLink';
@@ -26,9 +27,11 @@ export default function Search() {
   const [totalCount, setTotalCount] = useState(0);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());
 
   const [searchParams, setSearchParams] = useState<QuerySearchParams>(() => ({
     domain: '',
+    answer: '',
     client_ip: link.client ?? '',
     client_hostname: '',
     server: '',
@@ -53,6 +56,7 @@ export default function Search() {
       };
 
       if (searchParams.domain) params.domain = searchParams.domain;
+      if (searchParams.answer) params.answer = searchParams.answer;
       if (searchParams.client_ip) params.client_ip = searchParams.client_ip;
       if (searchParams.client_hostname) params.client_hostname = searchParams.client_hostname;
       if (searchParams.server) params.server = searchParams.server;
@@ -66,6 +70,7 @@ export default function Search() {
       ]);
 
       setQueries(results);
+      setExpanded(new Set());
       setTotalCount(count);
       setSearchParams({ ...searchParams, offset });
     } catch (err: unknown) {
@@ -85,6 +90,7 @@ export default function Search() {
     setLinkServers([]);
     setSearchParams({
       domain: '',
+      answer: '',
       client_ip: '',
       client_hostname: '',
       server: '',
@@ -95,6 +101,14 @@ export default function Search() {
     });
     setQueries([]);
     setTotalCount(0);
+  };
+
+  const toggleExpanded = (id: number) => {
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
   };
 
   const handleNextPage = () => {
@@ -154,6 +168,20 @@ export default function Search() {
               placeholder="e.g., google.com"
               value={searchParams.domain}
               onChange={(e) => setSearchParams({ ...searchParams, domain: e.target.value })}
+              className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm px-3 py-2 border"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="answer" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              Resolved to
+            </label>
+            <input
+              type="text"
+              id="answer"
+              placeholder="IP or CNAME, e.g., 17.253.23.205"
+              value={searchParams.answer}
+              onChange={(e) => setSearchParams({ ...searchParams, answer: e.target.value })}
               className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm px-3 py-2 border"
             />
           </div>
@@ -289,6 +317,7 @@ export default function Search() {
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
               <thead className="bg-gray-50 dark:bg-gray-700">
                 <tr>
+                  <th className="w-10 px-2 py-3"><span className="sr-only">Answers</span></th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                     Timestamp
                   </th>
@@ -314,7 +343,22 @@ export default function Search() {
               </thead>
               <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                 {queries.map((query) => (
-                  <tr key={query.id} className={queryRowClass(query.status)}>
+                  <Fragment key={query.id}>
+                  <tr className={queryRowClass(query.status)}>
+                    <td className="px-2 py-4">
+                      <button
+                        type="button"
+                        onClick={() => toggleExpanded(query.id)}
+                        aria-expanded={expanded.has(query.id)}
+                        aria-label={`Show answers for ${query.domain}`}
+                        title="Show answers"
+                        className="inline-flex items-center justify-center w-6 h-6 rounded text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600"
+                      >
+                        <svg aria-hidden="true" className={`w-4 h-4 transition-transform ${expanded.has(query.id) ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
+                      </button>
+                    </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-300">
                       {format(new Date(query.timestamp), 'MMM dd, yyyy HH:mm:ss')}
                     </td>
@@ -376,6 +420,15 @@ export default function Search() {
                       </div>
                     </td>
                   </tr>
+                  {expanded.has(query.id) && (
+                    <tr className="bg-gray-50 dark:bg-gray-900/40">
+                      <td />
+                      <td colSpan={7} className="px-6 py-3">
+                        <AnswerList ips={query.answer_ips} cnames={query.answer_cnames} />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>

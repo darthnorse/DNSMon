@@ -7,6 +7,8 @@ import type {
   QuerySearchParams,
   QueryContext,
   QueryContextParams,
+  PdnsDomainResponse,
+  PdnsIpResponse,
   SettingsResponse,
   PiholeServer,
   PiholeServerCreate,
@@ -76,6 +78,18 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+export const pdnsApi = {
+  ip: async (ip: string): Promise<PdnsIpResponse> => {
+    const response = await api.get<PdnsIpResponse>(`/pdns/ip/${encodeURIComponent(ip)}`);
+    return response.data;
+  },
+
+  domain: async (domain: string): Promise<PdnsDomainResponse> => {
+    const response = await api.get<PdnsDomainResponse>(`/pdns/domain/${encodeURIComponent(domain)}`);
+    return response.data;
+  },
+};
 
 export const queryApi = {
   search: async (params: QuerySearchParams): Promise<Query[]> => {

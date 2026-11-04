@@ -10,6 +10,8 @@ export interface Query {
   app_name: string | null;
   category: string | null;
   threat_type: string | null;
+  answer_ips: string[] | null;
+  answer_cnames: string[] | null;
 }
 
 export type ContextScope = 'device' | 'all';
@@ -73,9 +75,62 @@ export interface Stats {
   blocks_last_24h: number;
 }
 
+export interface GeoInfo {
+  country: string | null;
+  country_name: string | null;
+  city: string | null;
+  asn: number | null;
+  org: string | null;
+}
+
+export interface PdnsDomainRow {
+  domain: string;
+  first_seen: string;
+  last_seen: string;
+  count: number;
+  servers: string[];
+}
+
+export interface PdnsClientRow {
+  client_ip: string;
+  client_hostname: string | null;
+  count: number;
+  last_seen: string;
+}
+
+export interface PdnsIpResponse {
+  ip: string;
+  domains: PdnsDomainRow[];
+  clients: PdnsClientRow[];
+  geo: GeoInfo | null;
+}
+
+export interface PdnsIpRow {
+  ip: string;
+  first_seen: string;
+  last_seen: string;
+  count: number;
+  geo: GeoInfo | null;
+}
+
+export interface PdnsCnameRow {
+  cname: string;
+  first_seen: string;
+  last_seen: string;
+  count: number;
+}
+
+export interface PdnsDomainResponse {
+  domain: string;
+  ips: PdnsIpRow[];
+  cnames: PdnsCnameRow[];
+  has_answer_data: boolean;
+}
+
 export interface QuerySearchParams {
   search?: string;
   domain?: string;
+  answer?: string;
   client_ip?: string;
   client_hostname?: string;
   server?: string;
