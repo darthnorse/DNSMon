@@ -97,6 +97,10 @@ export interface GeoipStatus {
   last_error: string | null;
 }
 
+export interface GeoipUpdateResult extends GeoipStatus {
+  refresh_started: boolean;
+}
+
 export interface GeoipUpdate {
   account_id?: string;
   license_key?: string;

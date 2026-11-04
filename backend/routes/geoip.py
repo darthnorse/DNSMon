@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..models import User, GeoipSettings, SettingsChangelog
-from ..schemas import GeoipStatus, GeoipUpdate
+from ..schemas import GeoipStatus, GeoipUpdate, GeoipUpdateResult
 from ..auth import get_current_user, require_admin
 from ..geoip import GEOIP_ROW_ID, start_clear, start_refresh
 
@@ -22,12 +23,7 @@ def _to_status(row: GeoipSettings | None) -> GeoipStatus:
         configured=row.configured,
         account_id=row.account_id,
         has_license_key=bool(row.license_key),
-        last_checked_at=row.last_checked_at,
-        last_updated_at=row.last_updated_at,
-        city_build=row.city_build,
-        asn_build=row.asn_build,
-        last_status=row.last_status,
-        last_error=row.last_error,
+        **{column: getattr(row, column) for column in STATUS_COLUMNS},
     )
 
 
@@ -46,17 +42,15 @@ async def get_geoip(db: AsyncSession = Depends(get_db),
     return _to_status(await db.get(GeoipSettings, GEOIP_ROW_ID))
 
 
-@router.put("", response_model=GeoipStatus)
+@router.put("", response_model=GeoipUpdateResult)
 async def update_geoip(payload: GeoipUpdate,
                        db: AsyncSession = Depends(get_db),
                        _: User = Depends(require_admin)):
     new_key = _clean_license_key(payload.license_key)
+    await db.execute(insert(GeoipSettings).values(id=GEOIP_ROW_ID).on_conflict_do_nothing())
     # Locked so a refresh recording its outcome can't land between this read and the commit:
     # the ORM skips None-to-None columns, so a clear would leave that status behind.
     row = await db.get(GeoipSettings, GEOIP_ROW_ID, with_for_update=True)
-    if row is None:
-        row = GeoipSettings(id=GEOIP_ROW_ID)
-        db.add(row)
 
     old = (row.account_id, row.license_key)
 
@@ -82,11 +76,12 @@ async def update_geoip(payload: GeoipUpdate,
 
     await db.commit()
     await db.refresh(row)
+    refresh_started = not payload.clear and new != old and row.configured
     if payload.clear:
         start_clear()
-    elif new != old and row.configured:
+    elif refresh_started:
         start_refresh()
-    return _to_status(row)
+    return GeoipUpdateResult(**_to_status(row).model_dump(), refresh_started=refresh_started)
 
 
 @router.post("/refresh", status_code=202)

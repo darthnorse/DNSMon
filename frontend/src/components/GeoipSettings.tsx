@@ -35,6 +35,7 @@ export default function GeoipSettings({ onError, onSuccess }: Props) {
 
   const mountedRef = useRef(true);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollGenerationRef = useRef(0);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -64,27 +65,33 @@ export default function GeoipSettings({ onError, onSuccess }: Props) {
   const stopPolling = () => {
     if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
     pollTimerRef.current = null;
+    pollGenerationRef.current += 1;
     setPolling(false);
   };
 
   const pollUntilChecked = (previousCheck: string | null) => {
     if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+    // A tick already awaiting its response when polling stops must not schedule another.
+    const generation = ++pollGenerationRef.current;
     setPolling(true);
     setStillRunning(false);
     let attempts = 0;
     const tick = async () => {
       if (!mountedRef.current) return;
       attempts += 1;
+      let next: GeoipStatus | null = null;
       try {
-        const next = await geoipApi.get();
-        if (!mountedRef.current) return;
+        next = await geoipApi.get();
+      } catch {
+        // A missed poll is retried; the bounded loop still ends.
+      }
+      if (!mountedRef.current || generation !== pollGenerationRef.current) return;
+      if (next) {
         setStatus(next);
         if (next.last_checked_at !== previousCheck) {
           stopPolling();
           return;
         }
-      } catch {
-        // A missed poll is retried; the bounded loop still ends.
       }
       if (attempts >= POLL_LIMIT) {
         stopPolling();
@@ -108,7 +115,7 @@ export default function GeoipSettings({ onError, onSuccess }: Props) {
       });
       applyStatus(next);
       setLicenseKey('');
-      if (next.configured && (trimmedKey || trimmedAccount !== (status?.account_id ?? ''))) {
+      if (next.refresh_started) {
         onSuccess('Saved. Downloading the databases in the background.');
         pollUntilChecked(status?.last_checked_at ?? null);
       } else {

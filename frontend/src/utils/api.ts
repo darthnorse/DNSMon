@@ -54,6 +54,7 @@ import type {
   ClassifySuggestions,
   GeoipStatus,
   GeoipUpdate,
+  GeoipUpdateResult,
   CountryStat,
 } from '../types';
 
@@ -135,9 +136,16 @@ export const statisticsApi = {
 
 export const geoipApi = {
   get: async (): Promise<GeoipStatus> => (await api.get<GeoipStatus>('/geoip')).data,
-  update: async (patch: GeoipUpdate): Promise<GeoipStatus> =>
-    (await api.put<GeoipStatus>('/geoip', patch)).data,
+  update: async (patch: GeoipUpdate): Promise<GeoipUpdateResult> =>
+    (await api.put<GeoipUpdateResult>('/geoip', patch)).data,
   refresh: async (): Promise<void> => { await api.post('/geoip/refresh'); },
+  isConfigured: async (): Promise<boolean> => {
+    try {
+      return (await geoipApi.get()).configured;
+    } catch {
+      return false;
+    }
+  },
 };
 
 export const alertRuleApi = {

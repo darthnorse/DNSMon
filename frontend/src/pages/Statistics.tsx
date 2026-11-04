@@ -98,7 +98,7 @@ export default function StatisticsPage() {
 
   // Assigned before the stats effect below runs, so the first load can wait on it.
   useEffect(() => {
-    geoipConfiguredRef.current = geoipApi.get().then((status) => status.configured, () => false);
+    geoipConfiguredRef.current = geoipApi.isConfigured();
   }, []);
 
   // Load clients when period or servers change (or when custom range is applied).
@@ -225,14 +225,18 @@ export default function StatisticsPage() {
         params.clients = selectedClients.join(',');
       }
       const singleClient = selectedClients.length === 1 ? selectedClients[0] : null;
-      const [data, recent, countryStats] = await Promise.all([
+      // Not awaited with the rest: countries scan raw rows, the main stats read hourly aggregates.
+      const applyCountries = async () => {
+        const countryStats = await loadCountries(params);
+        if (isLatest()) setCountries(countryStats);
+      };
+      applyCountries();
+      const [data, recent] = await Promise.all([
         statisticsApi.get(params),
         singleClient ? loadRecentQueries(singleClient) : Promise.resolve(null),
-        loadCountries(params),
       ]);
       if (!isLatest()) return;
       setStats(data);
-      setCountries(countryStats);
       setRecentQueries(recent);
       setError(null);
     } catch (err: unknown) {

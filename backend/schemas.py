@@ -109,6 +109,10 @@ class GeoipStatus(BaseModel):
     last_error: Optional[str] = None
 
 
+class GeoipUpdateResult(GeoipStatus):
+    refresh_started: bool = False
+
+
 class GeoipUpdate(BaseModel):
     account_id: Optional[str] = PydanticField(default=None, max_length=20)
     # No max_length or pattern: pydantic's 422 echoes the rejected input, and

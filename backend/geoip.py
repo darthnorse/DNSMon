@@ -233,7 +233,8 @@ class GeoIPService:
         return GeoInfo(**fields) if fields else None
 
     def countries(self, ips: Iterable[str]) -> list[str]:
-        codes = (info.country for info in map(self.lookup, ips) if info)
+        addresses = filter(None, map(_public_address, ips))
+        codes = (self._record(CITY_EDITION, address, _city_fields).get('country') for address in addresses)
         return list(dict.fromkeys(code for code in codes if code))
 
     def _open_existing(self, edition: str) -> Reader | None:
@@ -345,18 +346,21 @@ class GeoIPService:
         async with self._lock:
             await self._refresh_locked(account_id, license_key, transport=transport)
 
+    def _clear_locked(self) -> None:
+        readers, self._readers = self._readers, {}
+        for reader in readers.values():
+            reader.close()
+        for edition in EDITIONS:
+            for path in (self._mmdb_path(edition), self._sidecar_path(edition),
+                         self._tmp_mmdb_path(edition), self._tmp_archive_path(edition)):
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError as e:
+                    logger.error(f'Could not delete {path.name}: {type(e).__name__}')
+
     async def clear(self) -> None:
         async with self._lock:
-            readers, self._readers = self._readers, {}
-            for reader in readers.values():
-                reader.close()
-            for edition in EDITIONS:
-                for path in (self._mmdb_path(edition), self._sidecar_path(edition),
-                             self._tmp_mmdb_path(edition), self._tmp_archive_path(edition)):
-                    try:
-                        path.unlink(missing_ok=True)
-                    except OSError as e:
-                        logger.error(f'Could not delete {path.name}: {type(e).__name__}')
+            self._clear_locked()
 
 
 _service: GeoIPService | None = None
@@ -412,7 +416,6 @@ async def refresh_from_settings(*, service: GeoIPService | None = None,
 
 _background_tasks: set[asyncio.Task] = set()
 _refreshes: list[asyncio.Task] = []
-_clears: set[asyncio.Task] = set()
 
 
 async def logged_refresh() -> None:
@@ -423,8 +426,15 @@ async def logged_refresh() -> None:
 
 
 async def _logged_clear() -> None:
+    service = get_geoip()
     try:
-        await get_geoip().clear()
+        async with service._lock:
+            async with async_session_maker() as db:
+                row = await db.get(GeoipSettings, GEOIP_ROW_ID)
+            # New credentials saved while this waited: deleting now would remove what the
+            # refresh they started installs, and that refresh replaces these files anyway.
+            if row is None or not row.configured:
+                service._clear_locked()
     except Exception as e:
         logger.error(f'GeoIP clear failed: {type(e).__name__}')
 
@@ -437,9 +447,8 @@ def _track(task: asyncio.Task) -> asyncio.Task:
 
 def start_refresh() -> asyncio.Task:
     # A queued refresh reads the credentials when its turn comes, so one waiting behind a
-    # running one covers every later request. More would only spend download quota. Not past
-    # a queued clear, though: it would delete what that refresh installs for the new key.
-    if len(_refreshes) >= 2 and not _clears:
+    # running one covers every later request. More would only spend download quota.
+    if len(_refreshes) >= 2:
         return _refreshes[-1]
     task = _track(asyncio.create_task(logged_refresh()))
     _refreshes.append(task)
@@ -448,10 +457,7 @@ def start_refresh() -> asyncio.Task:
 
 
 def start_clear() -> asyncio.Task:
-    task = _track(asyncio.create_task(_logged_clear()))
-    _clears.add(task)
-    task.add_done_callback(_clears.discard)
-    return task
+    return _track(asyncio.create_task(_logged_clear()))
 
 
 async def open_at_startup() -> None:

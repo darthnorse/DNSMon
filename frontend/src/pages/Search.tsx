@@ -46,12 +46,8 @@ export default function Search() {
   useEffect(() => {
     let cancelled = false;
     const loadGeoip = async () => {
-      try {
-        const status = await geoipApi.get();
-        if (!cancelled) setGeoipConfigured(status.configured);
-      } catch {
-        if (!cancelled) setGeoipConfigured(false);
-      }
+      const configured = await geoipApi.isConfigured();
+      if (!cancelled) setGeoipConfigured(configured);
     };
     loadGeoip();
     return () => { cancelled = true; };
@@ -61,7 +57,7 @@ export default function Search() {
     if (link.client) handleSearch(0);
   }, []);
 
-  const countryInvalid = geoipConfigured && !!searchParams.country && searchParams.country.length !== 2;
+  const countryInvalid = !!searchParams.country && searchParams.country.length !== 2;
 
   const handleSearch = async (offset = 0, servers = linkServers) => {
     if (countryInvalid) {
@@ -79,7 +75,7 @@ export default function Search() {
 
       if (searchParams.domain) params.domain = searchParams.domain;
       if (searchParams.answer) params.answer = searchParams.answer;
-      if (geoipConfigured && searchParams.country) params.country = searchParams.country;
+      if (searchParams.country) params.country = searchParams.country;
       if (searchParams.client_ip) params.client_ip = searchParams.client_ip;
       if (searchParams.client_hostname) params.client_hostname = searchParams.client_hostname;
       if (searchParams.server) params.server = searchParams.server;
@@ -465,7 +461,7 @@ export default function Search() {
                     <tr className="bg-gray-50 dark:bg-gray-900/40">
                       <td />
                       <td colSpan={7} className="px-6 py-3">
-                        <AnswerList ips={query.answer_ips} cnames={query.answer_cnames} geo={query.answer_geo ?? undefined} />
+                        <AnswerList ips={query.answer_ips} cnames={query.answer_cnames} geo={query.answer_geo} />
                       </td>
                     </tr>
                   )}

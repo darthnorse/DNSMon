@@ -3,7 +3,7 @@ import PdnsLink from './PdnsLink';
 import { hasGeo } from '../utils/geo';
 import type { GeoInfo } from '../types';
 
-function AnswerLinks({ values, geo }: { values: string[]; geo?: Record<string, GeoInfo | null> }) {
+function AnswerLinks({ values, geo }: { values: string[]; geo?: Record<string, GeoInfo> | null }) {
   return (
     <>
       {values.map((value) => {
@@ -24,7 +24,7 @@ function AnswerLinks({ values, geo }: { values: string[]; geo?: Record<string, G
 export default function AnswerList({ ips, cnames, geo, compact = false }: {
   ips: string[] | null;
   cnames: string[] | null;
-  geo?: Record<string, GeoInfo | null>;
+  geo?: Record<string, GeoInfo> | null;
   compact?: boolean;
 }) {
   const unavailable = ips === null && cnames === null;

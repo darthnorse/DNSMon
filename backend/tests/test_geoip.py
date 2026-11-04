@@ -25,10 +25,17 @@ from backend.geoip import (
 )
 from backend.schemas import GeoInfo
 from backend.service import DNSMonService
-from backend.tests.geoip_helpers import FIXTURES, install_fixtures, seed_geoip, stored_geoip
+from backend.tests.geoip_helpers import (
+    FIXTURES,
+    KEY,
+    background_settled,
+    install_fixtures,
+    refuse_unlink,
+    seed_geoip,
+    stored_geoip,
+)
 
 ACCOUNT = "271828"
-KEY = "abcSECRETkey123"
 SIGNATURE = "SIGsecret987"
 LAST_MODIFIED = "Tue, 03 Nov 2026 10:00:00 GMT"
 NEWER = "Fri, 06 Nov 2026 10:00:00 GMT"
@@ -631,10 +638,7 @@ async def test_clear_unloads_and_deletes_everything(tmp_path):
 async def test_clear_survives_a_file_it_cannot_delete(tmp_path, monkeypatch, caplog):
     service = await _installed(tmp_path)
 
-    def refuse(self, missing_ok=False):
-        raise PermissionError("nope")
-
-    monkeypatch.setattr(Path, "unlink", refuse)
+    monkeypatch.setattr(Path, "unlink", refuse_unlink)
 
     await service.clear()
 
@@ -823,10 +827,6 @@ async def test_daily_job_swallows_errors(monkeypatch, caplog):
     assert "GeoIP" in caplog.text
 
 
-async def _background_settled():
-    await asyncio.gather(*geoip_module._background_tasks)
-
-
 def _hours_ago(hours):
     return datetime.now(timezone.utc) - timedelta(hours=hours)
 
@@ -851,7 +851,7 @@ async def test_startup_refreshes_in_background_when_a_file_is_missing(
     service = _bare_dnsmon_service()
 
     await service._start_geoip()
-    await _background_settled()
+    await background_settled()
 
     refresh_job.assert_awaited_once()
     assert isolated_geoip.lookup(IN_BOTH).country == "SE"
@@ -866,7 +866,7 @@ async def test_startup_refreshes_a_stale_check_even_with_files_present(
     service = _bare_dnsmon_service()
 
     await service._start_geoip()
-    await _background_settled()
+    await background_settled()
 
     refresh_job.assert_awaited_once()
 
@@ -896,7 +896,7 @@ async def test_startup_survives_an_unsearchable_directory(db_session, isolated_g
     service = _bare_dnsmon_service()
     try:
         await service._start_geoip()
-        await _background_settled()
+        await background_settled()
     finally:
         isolated_geoip.directory.chmod(0o700)
 
@@ -959,7 +959,7 @@ async def test_repeated_refresh_requests_queue_at_most_one(refresh_job):
     for _ in range(5):
         geoip_module.start_refresh()
     gate.set()
-    await _background_settled()
+    await background_settled()
 
     assert refresh_job.await_count == 2
     assert geoip_module._refreshes == []
@@ -1048,17 +1048,20 @@ def test_httpx_logging_stays_quiet_enough_to_hide_presigned_urls():
     assert logging.getLogger("httpcore").level == logging.WARNING
 
 
-async def test_refresh_after_a_queued_clear_is_not_coalesced_away(refresh_job):
-    gate = asyncio.Event()
-    refresh_job.side_effect = gate.wait
-    geoip_module.start_refresh()
-    geoip_module.start_refresh()
-    geoip_module.start_clear()
+async def test_queued_clear_deletes_only_while_credentials_are_gone(db_session, isolated_geoip):
+    install_fixtures(isolated_geoip, *EDITIONS)
+    isolated_geoip.load()
 
-    after_clear = geoip_module.start_refresh()
+    await geoip_module.start_clear()
 
-    assert after_clear is geoip_module._refreshes[-1]
-    assert len(geoip_module._refreshes) == 3
-    gate.set()
-    await _background_settled()
-    assert refresh_job.await_count == 3
+    assert isolated_geoip.lookup(IN_BOTH) is None
+    assert list(isolated_geoip.directory.iterdir()) == []
+
+
+def test_countries_reads_only_the_city_database(tmp_path):
+    service = GeoIPService(tmp_path / "geoip")
+    install_fixtures(service, *EDITIONS)
+    service.load()
+    service._readers[ASN_EDITION] = MagicMock(get=MagicMock(side_effect=AssertionError("ASN read")))
+
+    assert service.countries([IN_BOTH, "192.168.1.1", IN_BOTH]) == ["SE"]
