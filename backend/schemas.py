@@ -106,13 +106,6 @@ class GeoipStatus(BaseModel):
     last_status: Optional[str] = None
     last_error: Optional[str] = None
 
-    @field_validator('last_checked_at', 'last_updated_at', mode='after')
-    @classmethod
-    def coerce_to_utc(cls, v: Optional[datetime]) -> Optional[datetime]:
-        if v is not None and v.tzinfo is None:
-            return v.replace(tzinfo=timezone.utc)
-        return v
-
 
 class GeoipUpdate(BaseModel):
     account_id: Optional[str] = PydanticField(default=None, max_length=20)

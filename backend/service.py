@@ -41,7 +41,6 @@ class DNSMonService:
         self._started = False
         self._initial_ingestion_task = None
         self._answer_index_task = None
-        self._geoip_startup_refresh = None
 
     async def ingest_and_alert(self):
         """Poll Pihole servers and check for alerts"""
@@ -146,10 +145,7 @@ class DNSMonService:
 
     async def geoip_refresh_task(self):
         """Check MaxMind for newer GeoIP databases; a no-op without credentials."""
-        try:
-            await geoip.refresh_from_settings()
-        except Exception as e:
-            logger.error(f"Error in GeoIP refresh task: {type(e).__name__}")
+        await geoip.logged_refresh()
 
     async def session_cleanup_task(self):
         """Periodic cleanup of expired sessions"""
@@ -278,14 +274,9 @@ class DNSMonService:
             logger.error(f"Building the answer indexes failed; answer searches will be slow until restart: {e}")
 
     async def _start_geoip(self):
-        """Contained because GeoIP is optional and must never stop startup. Also refreshes
-        on a stale check: hosts restarting more often than daily never reach the interval
-        job, and the HEAD comparison keeps a restart from spending download quota."""
+        """Contained because GeoIP is optional and must never stop startup."""
         try:
-            service = geoip.get_geoip()
-            await asyncio.to_thread(service.load)
-            if await geoip.startup_refresh_needed(service):
-                self._geoip_startup_refresh = asyncio.create_task(self.geoip_refresh_task())
+            await geoip.open_at_startup()
         except Exception as e:
             logger.error(f"Could not start GeoIP: {type(e).__name__}")
 
@@ -325,8 +316,7 @@ class DNSMonService:
         # build outlives the app and the next start would mistake it for a failed one.
         await _cancel(self._answer_index_task, "Answer index build cancelled; it resumes on next start")
 
-        await _cancel(self._geoip_startup_refresh, "GeoIP refresh cancelled")
-        await geoip.cancel_background_refreshes()
+        await geoip.cancel_background_tasks()
 
         self.scheduler.shutdown()
         await self.ingestion_service.stop()

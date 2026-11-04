@@ -1,4 +1,5 @@
 import asyncio
+import gzip
 import io
 import logging
 import shutil
@@ -13,6 +14,7 @@ import maxminddb
 import pytest
 
 from backend import geoip as geoip_module
+from backend import main as _configures_logging  # noqa: F401
 from backend.geoip import (
     ASN_EDITION,
     CITY_EDITION,
@@ -21,12 +23,9 @@ from backend.geoip import (
     get_geoip,
     refresh_from_settings,
 )
-from backend.models import GeoipSettings
 from backend.schemas import GeoInfo
 from backend.service import DNSMonService
-
-DATA = Path(__file__).parent / "data"
-FIXTURES = {CITY_EDITION: DATA / "GeoIP2-City-Test.mmdb", ASN_EDITION: DATA / "GeoLite2-ASN-Test.mmdb"}
+from backend.tests.geoip_helpers import FIXTURES, install_fixtures, seed_geoip, stored_geoip
 
 ACCOUNT = "271828"
 KEY = "abcSECRETkey123"
@@ -664,24 +663,14 @@ def test_singleton_is_shared():
     assert get_geoip() is get_geoip()
 
 
-async def _seed(db_session, **fields):
-    db_session.add(GeoipSettings(id=1, **fields))
-    await db_session.commit()
-
-
-async def _stored(db_session):
-    db_session.expire_all()
-    return await db_session.get(GeoipSettings, 1)
-
-
 async def test_job_records_success(db_session, tmp_path):
-    await _seed(db_session, account_id=ACCOUNT, license_key=KEY,
+    await seed_geoip(db_session, account_id=ACCOUNT, license_key=KEY,
                 last_status="error", last_error="old failure")
     service = GeoIPService(tmp_path)
 
     await refresh_from_settings(service=service, transport=FakeMaxMind().transport())
 
-    row = await _stored(db_session)
+    row = await stored_geoip(db_session)
     assert row.last_status == "ok"
     assert row.last_error is None
     assert row.last_checked_at is not None
@@ -691,27 +680,28 @@ async def test_job_records_success(db_session, tmp_path):
 
 async def test_job_updates_only_checked_at_when_nothing_changed(db_session, tmp_path):
     long_ago = datetime.now(timezone.utc) - timedelta(days=3)
-    await _seed(db_session, account_id=ACCOUNT, license_key=KEY,
-                last_checked_at=long_ago, last_updated_at=long_ago)
+    await seed_geoip(db_session, account_id=ACCOUNT, license_key=KEY, city_build=1792695177,
+                     asn_build=1792695177, last_checked_at=long_ago, last_updated_at=long_ago)
     service = await _installed(tmp_path)
 
     await refresh_from_settings(service=service, transport=FakeMaxMind().transport())
 
-    row = await _stored(db_session)
+    row = await stored_geoip(db_session)
     assert row.last_checked_at > long_ago
     assert row.last_updated_at == long_ago
     assert row.last_status == "ok"
 
 
 async def test_job_records_scrubbed_error(db_session, tmp_path):
-    await _seed(db_session, account_id=ACCOUNT, license_key=KEY)
+    await seed_geoip(db_session, account_id=ACCOUNT, license_key=KEY,
+                     city_build=1792695177, asn_build=1792695177)
     service = await _installed(tmp_path)
     maxmind = FakeMaxMind()
     maxmind.status = {ASN_EDITION: 401}
 
     await refresh_from_settings(service=service, transport=maxmind.transport())
 
-    row = await _stored(db_session)
+    row = await stored_geoip(db_session)
     assert row.last_status == "error"
     assert row.last_error == f"{ASN_EDITION}: MaxMind rejected the credentials (HTTP 401)"
     assert row.last_updated_at is None
@@ -720,7 +710,7 @@ async def test_job_records_scrubbed_error(db_session, tmp_path):
 
 
 async def test_job_truncates_error_to_column(db_session, tmp_path, monkeypatch):
-    await _seed(db_session, account_id=ACCOUNT, license_key=KEY)
+    await seed_geoip(db_session, account_id=ACCOUNT, license_key=KEY)
     service = GeoIPService(tmp_path)
 
     async def fail(*args, **kwargs):
@@ -731,7 +721,7 @@ async def test_job_truncates_error_to_column(db_session, tmp_path, monkeypatch):
 
     await refresh_from_settings(service=service)
 
-    assert (await _stored(db_session)).last_error == "x" * 200
+    assert (await stored_geoip(db_session)).last_error == "x" * 200
 
 
 async def test_job_without_credentials_is_a_quiet_noop(db_session, tmp_path, caplog):
@@ -741,12 +731,12 @@ async def test_job_without_credentials_is_a_quiet_noop(db_session, tmp_path, cap
         await refresh_from_settings(service=GeoIPService(tmp_path), transport=maxmind.transport())
 
     assert maxmind.requests == []
-    assert await _stored(db_session) is None
+    assert await stored_geoip(db_session) is None
     assert caplog.text == ""
 
 
 async def test_job_with_only_account_id_is_a_noop(db_session, tmp_path):
-    await _seed(db_session, account_id=ACCOUNT)
+    await seed_geoip(db_session, account_id=ACCOUNT)
     maxmind = FakeMaxMind()
 
     await refresh_from_settings(service=GeoIPService(tmp_path), transport=maxmind.transport())
@@ -755,7 +745,7 @@ async def test_job_with_only_account_id_is_a_noop(db_session, tmp_path):
 
 
 async def test_clear_during_job_leaves_no_files_and_no_status(db_session, tmp_path):
-    await _seed(db_session, account_id=ACCOUNT, license_key=KEY)
+    await seed_geoip(db_session, account_id=ACCOUNT, license_key=KEY)
     service = GeoIPService(tmp_path)
     maxmind = FakeMaxMind()
     maxmind.gate = asyncio.Event()
@@ -763,7 +753,7 @@ async def test_clear_during_job_leaves_no_files_and_no_status(db_session, tmp_pa
     job = asyncio.create_task(refresh_from_settings(service=service, transport=maxmind.transport()))
     while not maxmind.requests or maxmind.requests[-1].method != "GET":
         await asyncio.sleep(0)
-    row = await _stored(db_session)
+    row = await stored_geoip(db_session)
     row.account_id = None
     row.license_key = None
     await db_session.commit()
@@ -772,14 +762,14 @@ async def test_clear_during_job_leaves_no_files_and_no_status(db_session, tmp_pa
     maxmind.gate.set()
     await asyncio.gather(job, clear)
 
-    row = await _stored(db_session)
+    row = await stored_geoip(db_session)
     assert (row.last_status, row.last_checked_at, row.city_build) == (None, None, None)
     assert list(tmp_path.iterdir()) == []
     assert service.lookup(IN_BOTH) is None
 
 
 async def test_job_started_after_clear_does_not_download(db_session, tmp_path):
-    await _seed(db_session, account_id=None, license_key=None)
+    await seed_geoip(db_session, account_id=None, license_key=None)
     service = GeoIPService(tmp_path)
     maxmind = FakeMaxMind()
 
@@ -790,7 +780,7 @@ async def test_job_started_after_clear_does_not_download(db_session, tmp_path):
 
 
 async def test_job_does_not_record_status_for_replaced_credentials(db_session, tmp_path):
-    await _seed(db_session, account_id=ACCOUNT, license_key=KEY)
+    await seed_geoip(db_session, account_id=ACCOUNT, license_key=KEY)
     maxmind = FakeMaxMind()
     maxmind.gate = asyncio.Event()
 
@@ -798,13 +788,13 @@ async def test_job_does_not_record_status_for_replaced_credentials(db_session, t
         service=GeoIPService(tmp_path), transport=maxmind.transport()))
     while not maxmind.requests or maxmind.requests[-1].method != "GET":
         await asyncio.sleep(0)
-    row = await _stored(db_session)
+    row = await stored_geoip(db_session)
     row.license_key = "otherKEY"
     await db_session.commit()
     maxmind.gate.set()
     await job
 
-    assert (await _stored(db_session)).last_status is None
+    assert (await stored_geoip(db_session)).last_status is None
 
 
 def _bare_dnsmon_service():
@@ -833,17 +823,8 @@ async def test_daily_job_swallows_errors(monkeypatch, caplog):
     assert "GeoIP" in caplog.text
 
 
-def _install_fixtures(service, *editions):
-    service.directory.mkdir(parents=True)
-    for edition in editions:
-        shutil.copy(FIXTURES[edition], service.directory / f"{edition}.mmdb")
-
-
-@pytest.fixture
-def refresh_job(monkeypatch):
-    job = AsyncMock()
-    monkeypatch.setattr(geoip_module, "refresh_from_settings", job)
-    return job
+async def _background_settled():
+    await asyncio.gather(*geoip_module._background_tasks)
 
 
 def _hours_ago(hours):
@@ -852,25 +833,25 @@ def _hours_ago(hours):
 
 async def test_startup_loads_files_and_skips_refresh_when_recently_checked(
         db_session, isolated_geoip, refresh_job):
-    await _seed(db_session, account_id=ACCOUNT, license_key=KEY, last_checked_at=_hours_ago(1))
-    _install_fixtures(isolated_geoip, *EDITIONS)
+    await seed_geoip(db_session, account_id=ACCOUNT, license_key=KEY, last_checked_at=_hours_ago(1))
+    install_fixtures(isolated_geoip, *EDITIONS)
     service = _bare_dnsmon_service()
 
     await service._start_geoip()
 
     assert isolated_geoip.lookup(IN_BOTH) == EXPECTED
-    assert service._geoip_startup_refresh is None
+    assert not geoip_module._background_tasks
     refresh_job.assert_not_awaited()
 
 
 async def test_startup_refreshes_in_background_when_a_file_is_missing(
         db_session, isolated_geoip, refresh_job):
-    await _seed(db_session, account_id=ACCOUNT, license_key=KEY, last_checked_at=_hours_ago(1))
-    _install_fixtures(isolated_geoip, CITY_EDITION)
+    await seed_geoip(db_session, account_id=ACCOUNT, license_key=KEY, last_checked_at=_hours_ago(1))
+    install_fixtures(isolated_geoip, CITY_EDITION)
     service = _bare_dnsmon_service()
 
     await service._start_geoip()
-    await service._geoip_startup_refresh
+    await _background_settled()
 
     refresh_job.assert_awaited_once()
     assert isolated_geoip.lookup(IN_BOTH).country == "SE"
@@ -880,12 +861,12 @@ async def test_startup_refreshes_in_background_when_a_file_is_missing(
 async def test_startup_refreshes_a_stale_check_even_with_files_present(
         db_session, isolated_geoip, refresh_job, last_checked_hours_ago):
     checked = None if last_checked_hours_ago is None else _hours_ago(last_checked_hours_ago)
-    await _seed(db_session, account_id=ACCOUNT, license_key=KEY, last_checked_at=checked)
-    _install_fixtures(isolated_geoip, *EDITIONS)
+    await seed_geoip(db_session, account_id=ACCOUNT, license_key=KEY, last_checked_at=checked)
+    install_fixtures(isolated_geoip, *EDITIONS)
     service = _bare_dnsmon_service()
 
     await service._start_geoip()
-    await service._geoip_startup_refresh
+    await _background_settled()
 
     refresh_job.assert_awaited_once()
 
@@ -898,34 +879,51 @@ async def test_startup_refreshes_a_stale_check_even_with_files_present(
 async def test_startup_without_credentials_starts_no_refresh(
         db_session, isolated_geoip, refresh_job, fields):
     if fields:
-        await _seed(db_session, **fields)
+        await seed_geoip(db_session, **fields)
     service = _bare_dnsmon_service()
 
     await service._start_geoip()
 
-    assert service._geoip_startup_refresh is None
+    assert not geoip_module._background_tasks
     refresh_job.assert_not_awaited()
 
 
-async def test_startup_survives_an_unsearchable_directory(db_session, isolated_geoip, refresh_job):
+@pytest.mark.parametrize("configured", [True, False])
+async def test_startup_survives_an_unsearchable_directory(db_session, isolated_geoip, refresh_job, configured):
+    if configured:
+        await seed_geoip(db_session, account_id=ACCOUNT, license_key=KEY)
     isolated_geoip.directory.mkdir(mode=0o000)
     service = _bare_dnsmon_service()
     try:
         await service._start_geoip()
+        await _background_settled()
     finally:
         isolated_geoip.directory.chmod(0o700)
 
-    assert service._geoip_startup_refresh is None
+    assert isolated_geoip.lookup(IN_BOTH) is None
 
 
-async def test_startup_logs_and_carries_on_after_any_geoip_error(isolated_geoip, monkeypatch, caplog):
+async def test_startup_logs_and_carries_on_after_any_geoip_error(db_session, isolated_geoip, monkeypatch, caplog):
+    await seed_geoip(db_session, account_id=ACCOUNT, license_key=KEY)
     monkeypatch.setattr(isolated_geoip, "load", MagicMock(side_effect=RuntimeError("boom")))
     service = _bare_dnsmon_service()
 
     await service._start_geoip()
 
     assert "RuntimeError" in caplog.text
-    assert service._geoip_startup_refresh is None
+    assert not geoip_module._background_tasks
+
+
+@pytest.mark.parametrize("fields", [{}, {"account_id": ACCOUNT}])
+async def test_startup_removes_databases_left_without_credentials(db_session, isolated_geoip, refresh_job, fields):
+    if fields:
+        await seed_geoip(db_session, **fields)
+    install_fixtures(isolated_geoip, *EDITIONS)
+
+    await _bare_dnsmon_service()._start_geoip()
+
+    assert isolated_geoip.lookup(IN_BOTH) is None
+    assert list(isolated_geoip.directory.iterdir()) == []
 
 
 async def test_shutdown_cancels_running_refreshes(monkeypatch):
@@ -940,13 +938,10 @@ async def test_shutdown_cancels_running_refreshes(monkeypatch):
     service.ingestion_service = MagicMock(stop=AsyncMock())
     from_route = geoip_module.start_refresh()
     await started.wait()
-    service._geoip_startup_refresh = asyncio.create_task(asyncio.sleep(3600))
-    startup_task = service._geoip_startup_refresh
 
     await service.shutdown()
 
     assert from_route.cancelled()
-    assert startup_task.cancelled()
 
 
 async def test_background_refresh_logs_failures(monkeypatch, caplog):
@@ -955,3 +950,99 @@ async def test_background_refresh_logs_failures(monkeypatch, caplog):
     await geoip_module.start_refresh()
 
     assert "RuntimeError" in caplog.text
+
+
+async def test_repeated_refresh_requests_queue_at_most_one(refresh_job):
+    gate = asyncio.Event()
+    refresh_job.side_effect = gate.wait
+
+    for _ in range(5):
+        geoip_module.start_refresh()
+    gate.set()
+    await _background_settled()
+
+    assert refresh_job.await_count == 2
+    assert geoip_module._refreshes == []
+
+
+async def test_undecodable_sidecar_recovers_with_a_download(tmp_path):
+    service = await _installed(tmp_path)
+    for edition in EDITIONS:
+        (tmp_path / f"{edition}.mmdb.last-modified").write_bytes(b"\xff\xfe")
+
+    await service.refresh(ACCOUNT, KEY, transport=FakeMaxMind().transport())
+
+    assert service.last_error is None
+    assert service.last_installed is True
+
+
+async def test_decompressed_size_is_capped_before_tarfile_parses_headers(tmp_path, monkeypatch):
+    service = await _installed(tmp_path)
+    monkeypatch.setattr(geoip_module, "MAX_DECOMPRESSED_BYTES", 1024 * 1024)
+    maxmind = FakeMaxMind()
+    maxmind.last_modified = NEWER
+    maxmind.archives[CITY_EDITION] = gzip.compress(b"\0" * (2 * 1024 * 1024))
+
+    await service.refresh(ACCOUNT, KEY, transport=maxmind.transport())
+
+    assert service.last_error == f"{CITY_EDITION}: Archive invalid: too large when decompressed"
+    assert service.lookup(IN_BOTH) == EXPECTED
+
+
+async def test_cancel_during_extraction_waits_for_the_thread(tmp_path, monkeypatch):
+    entered = threading.Event()
+    release = threading.Event()
+    reader = MagicMock()
+
+    def slow_unpack(archive, tmp, edition):
+        entered.set()
+        release.wait(10)
+        tmp.write_bytes(b"x")
+        return reader
+
+    monkeypatch.setattr(geoip_module, "_unpack_and_open", slow_unpack)
+    service = GeoIPService(tmp_path)
+    task = asyncio.create_task(service.refresh(ACCOUNT, KEY, transport=FakeMaxMind().transport()))
+    while not entered.is_set():
+        await asyncio.sleep(0.01)
+
+    task.cancel()
+    await asyncio.sleep(0.05)
+    assert not task.done()
+    assert service._lock.locked()
+
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    reader.close.assert_called_once()
+    assert list(tmp_path.iterdir()) == []
+
+
+async def test_outcome_is_not_written_over_credentials_committed_mid_write(db_session, tmp_path):
+    await seed_geoip(db_session, account_id=ACCOUNT, license_key=KEY)
+    service = GeoIPService(tmp_path)
+    row = await stored_geoip(db_session)
+    row.license_key = "otherKEY"
+    await db_session.flush()
+
+    outcome = asyncio.create_task(geoip_module._record_outcome(service, (ACCOUNT, KEY)))
+    await asyncio.sleep(0.2)
+    await db_session.commit()
+    await outcome
+
+    assert (await stored_geoip(db_session)).last_status is None
+
+
+async def test_build_change_records_an_update_even_with_nothing_installed(db_session, tmp_path):
+    await seed_geoip(db_session, account_id=ACCOUNT, license_key=KEY)
+    service = await _installed(tmp_path)
+
+    await refresh_from_settings(service=service, transport=FakeMaxMind().transport())
+
+    assert service.last_installed is False
+    assert (await stored_geoip(db_session)).last_updated_at is not None
+
+
+def test_httpx_logging_stays_quiet_enough_to_hide_presigned_urls():
+    assert logging.getLogger("httpx").level == logging.WARNING
+    assert logging.getLogger("httpcore").level == logging.WARNING

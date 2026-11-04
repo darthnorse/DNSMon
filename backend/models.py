@@ -342,6 +342,10 @@ class GeoipSettings(Base):
     last_status = Column(String(10), nullable=True)  # ok|error
     last_error = Column(String(200), nullable=True)
 
+    @property
+    def configured(self) -> bool:
+        return bool(self.account_id and self.license_key)
+
 
 class SyncHistory(Base):
     """Track Pi-hole configuration sync operations"""

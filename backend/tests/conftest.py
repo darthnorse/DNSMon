@@ -49,6 +49,7 @@ os.environ["DNSMON_TEST"] = "1"
 
 from typing import AsyncGenerator, Generator
 from datetime import timedelta
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
@@ -98,6 +99,13 @@ def isolated_geoip(tmp_path, monkeypatch):
     service = geoip_module.GeoIPService(tmp_path / "geoip")
     monkeypatch.setattr(geoip_module, "_service", service)
     return service
+
+
+@pytest.fixture
+def refresh_job(monkeypatch):
+    job = AsyncMock()
+    monkeypatch.setattr(geoip_module, "refresh_from_settings", job)
+    return job
 
 
 @pytest_asyncio.fixture(scope="session", autouse=True)

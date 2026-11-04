@@ -13,6 +13,7 @@ from typing import Callable, Iterable
 import httpx
 import maxminddb
 from maxminddb.reader import Reader
+from sqlalchemy import update
 
 from .database import async_session_maker
 from .models import GeoipSettings, utcnow
@@ -32,9 +33,10 @@ DOWNLOAD_URL = 'https://download.maxmind.com/geoip/databases/{edition}/download?
 # City is roughly 70-100 MB uncompressed. Room to grow, but a bad response can't fill the volume.
 MAX_DOWNLOAD_BYTES = 300 * 1024 * 1024
 MAX_MMDB_BYTES = 500 * 1024 * 1024
+MAX_DECOMPRESSED_BYTES = MAX_MMDB_BYTES + 16 * 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 100
 HTTP_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
-# Clearing credentials waits on the refresh lock, so a stalling download must not hold it forever.
+# A clear queues behind the refresh lock, so a stalling download must not hold it forever.
 EDITION_TIMEOUT_SECONDS = 900
 LAST_ERROR_MAX_LENGTH = GeoipSettings.last_error.type.length
 
@@ -57,8 +59,19 @@ def _is_unsafe_member_name(name: str) -> bool:
     return path.is_absolute() or '..' in path.parts
 
 
+def _check_decompressed_size(archive: Path) -> None:
+    # Before tarfile sees it: long-name and pax headers land in memory before any member check.
+    total = 0
+    with gzip.open(archive, 'rb') as stream:
+        while chunk := stream.read(1024 * 1024):
+            total += len(chunk)
+            if total > MAX_DECOMPRESSED_BYTES:
+                raise _RefreshFailure('Archive invalid: too large when decompressed')
+
+
 def _extract_mmdb(archive: Path, dest: Path) -> None:
     try:
+        _check_decompressed_size(archive)
         with tarfile.open(archive, 'r:gz') as tar:
             found = None
             for count, member in enumerate(tar, start=1):
@@ -106,13 +119,33 @@ async def _download(client: httpx.AsyncClient, url: str, dest: Path) -> None:
         if not response.is_success:
             raise _RefreshFailure(_describe_status(response.status_code))
         received = 0
-        with dest.open('wb') as out:
+        out = await asyncio.to_thread(dest.open, 'wb')
+        try:
             async for chunk in response.aiter_raw():
                 received += len(chunk)
                 if received > MAX_DOWNLOAD_BYTES:
                     raise _RefreshFailure(
                         f'Download larger than {MAX_DOWNLOAD_BYTES // (1024 * 1024)} MB')
-                out.write(chunk)
+                await asyncio.to_thread(out.write, chunk)
+        finally:
+            out.close()
+
+
+async def _unpack_in_thread(archive: Path, tmp: Path, edition: str) -> Reader:
+    worker = asyncio.create_task(asyncio.to_thread(_unpack_and_open, archive, tmp, edition))
+    try:
+        return await asyncio.shield(worker)
+    except asyncio.CancelledError:
+        # Cancelling can't stop the thread, and the caller's cleanup and the next refresh
+        # use the same paths, so it has to finish first. Its work is bounded by the size caps.
+        while not worker.done():
+            try:
+                await asyncio.wait({worker})
+            except asyncio.CancelledError:
+                pass
+        if not worker.cancelled() and worker.exception() is None:
+            worker.result().close()
+        raise
 
 
 def _city_fields(record: dict) -> dict:
@@ -229,7 +262,7 @@ class GeoIPService:
             return False
         try:
             return self._sidecar_path(edition).read_text() == last_modified
-        except OSError:
+        except (OSError, ValueError):
             return False
 
     def _store_last_modified(self, edition: str, last_modified: str | None) -> None:
@@ -258,7 +291,7 @@ class GeoIPService:
         tmp = self._tmp_mmdb_path(edition)
         try:
             await _download(client, url, archive)
-            reader = await asyncio.to_thread(_unpack_and_open, archive, tmp, edition)
+            reader = await _unpack_in_thread(archive, tmp, edition)
             try:
                 os.replace(tmp, self._mmdb_path(edition))
             except OSError:
@@ -313,8 +346,6 @@ class GeoIPService:
             readers, self._readers = self._readers, {}
             for reader in readers.values():
                 reader.close()
-            self.last_error = None
-            self.last_installed = False
             for edition in EDITIONS:
                 for path in (self._mmdb_path(edition), self._sidecar_path(edition),
                              self._tmp_mmdb_path(edition), self._tmp_archive_path(edition)):
@@ -335,20 +366,28 @@ def get_geoip() -> GeoIPService:
 
 
 async def _record_outcome(service: GeoIPService, credentials: tuple[str, str]) -> None:
+    now = utcnow()
+    builds = (service.build_epoch(CITY_EDITION), service.build_epoch(ASN_EDITION))
+    values = {
+        'last_checked_at': now,
+        'city_build': builds[0],
+        'asn_build': builds[1],
+        'last_status': 'error' if service.last_error else 'ok',
+        'last_error': service.last_error[:LAST_ERROR_MAX_LENGTH] if service.last_error else None,
+    }
     async with async_session_maker() as db:
         row = await db.get(GeoipSettings, GEOIP_ROW_ID)
-        # Credentials cleared or replaced during the download: this outcome no longer
-        # describes them, and writing it would bring back status the route just reset.
-        if row is None or (row.account_id, row.license_key) != credentials:
-            return
-        now = utcnow()
-        row.last_checked_at = now
-        if service.last_installed:
-            row.last_updated_at = now
-        row.city_build = service.build_epoch(CITY_EDITION)
-        row.asn_build = service.build_epoch(ASN_EDITION)
-        row.last_status = 'error' if service.last_error else 'ok'
-        row.last_error = service.last_error[:LAST_ERROR_MAX_LENGTH] if service.last_error else None
+        # Builds too: an install whose outcome was discarded leaves a matching sidecar, so
+        # the next refresh installs nothing and last_installed alone would never record it.
+        if service.last_installed or (row and (row.city_build, row.asn_build) != builds):
+            values['last_updated_at'] = now
+        # In the WHERE, not a check on the row above: credentials cleared or replaced during
+        # the download no longer match this outcome, and the route's commit can land any time.
+        await db.execute(update(GeoipSettings).where(
+            GeoipSettings.id == GEOIP_ROW_ID,
+            GeoipSettings.account_id == credentials[0],
+            GeoipSettings.license_key == credentials[1],
+        ).values(**values))
         await db.commit()
 
 
@@ -360,42 +399,72 @@ async def refresh_from_settings(*, service: GeoIPService | None = None,
     async with service._lock:
         async with async_session_maker() as db:
             row = await db.get(GeoipSettings, GEOIP_ROW_ID)
-            credentials = (row.account_id, row.license_key) if row else (None, None)
-        if not all(credentials):
+        if row is None or not row.configured:
             return
+        credentials = (row.account_id, row.license_key)
         await service._refresh_locked(*credentials, transport=transport)
         await _record_outcome(service, credentials)
 
 
-async def startup_refresh_needed(service: GeoIPService) -> bool:
-    async with async_session_maker() as db:
-        row = await db.get(GeoipSettings, GEOIP_ROW_ID)
-    if row is None or not (row.account_id and row.license_key):
-        return False
-    if not service.complete or row.last_checked_at is None:
-        return True
-    return utcnow() - row.last_checked_at > timedelta(hours=REFRESH_INTERVAL_HOURS)
+_background_tasks: set[asyncio.Task] = set()
+_refreshes: list[asyncio.Task] = []
 
 
-_background_refreshes: set[asyncio.Task] = set()
-
-
-async def _logged_refresh() -> None:
+async def logged_refresh() -> None:
     try:
         await refresh_from_settings()
     except Exception as e:
         logger.error(f'GeoIP refresh failed: {type(e).__name__}')
 
 
-def start_refresh() -> asyncio.Task:
-    task = asyncio.create_task(_logged_refresh())
-    _background_refreshes.add(task)
-    task.add_done_callback(_background_refreshes.discard)
+async def _logged_clear() -> None:
+    try:
+        await get_geoip().clear()
+    except Exception as e:
+        logger.error(f'GeoIP clear failed: {type(e).__name__}')
+
+
+def _track(task: asyncio.Task) -> asyncio.Task:
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
     return task
 
 
-async def cancel_background_refreshes() -> None:
-    tasks = tuple(_background_refreshes)
+def start_refresh() -> asyncio.Task:
+    # A queued refresh reads the credentials when its turn comes, so one waiting behind a
+    # running one covers every later request. More would only spend download quota.
+    if len(_refreshes) >= 2:
+        return _refreshes[-1]
+    task = _track(asyncio.create_task(logged_refresh()))
+    _refreshes.append(task)
+    task.add_done_callback(_refreshes.remove)
+    return task
+
+
+def start_clear() -> asyncio.Task:
+    return _track(asyncio.create_task(_logged_clear()))
+
+
+async def open_at_startup() -> None:
+    service = get_geoip()
+    async with async_session_maker() as db:
+        row = await db.get(GeoipSettings, GEOIP_ROW_ID)
+    if row is None or not row.configured:
+        # Files can outlive their credentials: a restart before a queued clear ran, a delete
+        # that failed, or a recreated database volume. No key means the feature is off.
+        await service.clear()
+        return
+    await asyncio.to_thread(service.load)
+    # Also on a stale check: hosts restarting more often than daily never reach the interval
+    # job, and the HEAD comparison keeps a restart from spending download quota.
+    stale = (row.last_checked_at is None
+             or utcnow() - row.last_checked_at > timedelta(hours=REFRESH_INTERVAL_HOURS))
+    if stale or not service.complete:
+        start_refresh()
+
+
+async def cancel_background_tasks() -> None:
+    tasks = tuple(_background_tasks)
     for task in tasks:
         task.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
