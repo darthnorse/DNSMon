@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from email.utils import format_datetime
 
 import httpx
 import pytest
@@ -172,3 +173,30 @@ async def test_pihole_yields_its_queries_as_one_page():
     pages = await _pages(client, 1793734700, 1793734800)
 
     assert [len(p) for p in pages] == [1]
+
+
+def _clock_client(handler) -> AdGuardHomeClient:
+    client = AdGuardHomeClient("http://adguard.test", "pw", "adguard1")
+    client.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    return client
+
+
+async def test_clock_drift_reads_the_date_header():
+    behind = format_datetime(datetime.now(timezone.utc) - timedelta(minutes=10), usegmt=True)
+
+    drift = await _clock_client(lambda r: httpx.Response(200, headers={"Date": behind})).clock_drift_seconds()
+
+    assert -605 <= drift <= -595
+
+
+@pytest.mark.parametrize("headers", [{}, {"Date": "not a date"}])
+async def test_clock_drift_is_unknown_without_a_usable_date(headers):
+    assert await _clock_client(lambda r: httpx.Response(200, headers=headers)).clock_drift_seconds() is None
+
+
+async def test_clock_drift_is_unknown_when_the_server_is_unreachable():
+    def refuse(request):
+        raise httpx.ConnectError("refused")
+
+    assert await _clock_client(refuse).clock_drift_seconds() is None
+

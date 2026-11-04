@@ -24,7 +24,10 @@ logger = logging.getLogger(__name__)
 # by the queries unique key.
 RESUME_OVERLAP_SECONDS = 5
 
-QUERY_LOG_CHECK_SECONDS = 900
+SERVER_CHECK_SECONDS = 900
+# Well inside the smallest max_catchup_seconds (60 s allowed, 300 s default), past which a
+# server's queries count as backlog and stop alerting.
+CLOCK_DRIFT_WARNING_SECONDS = 60
 
 POSTGRES_MAX_BIND_PARAMS = 32767
 
@@ -49,7 +52,7 @@ class QueryIngestionService:
 
     def __init__(self):
         self.settings = get_settings_sync()
-        self._log_checked_at: dict[str, float] = {}
+        self._server_checked_at: dict[str, float] = {}
         self._in_flight: dict[str, asyncio.Task[Tuple[int, List[IngestedQuery]]]] = {}
 
     def _catchup_floor(self, now: int) -> int:
@@ -98,13 +101,18 @@ class QueryIngestionService:
             await session.execute(stmt)
             await session.commit()
 
-    async def _check_query_log(self, client, server_name: str, now: int) -> None:
-        if now - self._log_checked_at.get(server_name, 0) < QUERY_LOG_CHECK_SECONDS:
+    async def _check_server(self, client, server_name: str, now: int) -> None:
+        if now - self._server_checked_at.get(server_name, 0) < SERVER_CHECK_SECONDS:
             return
-        self._log_checked_at[server_name] = now
+        self._server_checked_at[server_name] = now
         warning = await client.query_log_warning()
         if warning:
             logger.warning(f"{server_name}: {warning}")
+        drift = await client.clock_drift_seconds()
+        if drift is not None and abs(drift) >= CLOCK_DRIFT_WARNING_SECONDS:
+            direction = "behind" if drift < 0 else "ahead of"
+            logger.warning(f"{server_name}: clock is {abs(drift)}s {direction} DNSMon's, which can stop "
+                           f"alerts and lose queries; check NTP on both")
 
     async def ingest_from_server(self, server: PiholeServer) -> Tuple[int, List[IngestedQuery]]:
         """Ingest one server's queries since its resume point.
@@ -134,7 +142,7 @@ class QueryIngestionService:
                     logger.error(f"Failed to authenticate with {server.name}")
                     return 0, []
 
-                await self._check_query_log(client, server.name, now)
+                await self._check_server(client, server.name, now)
                 from_timestamp = await self._resume_point(server, client.supports_gap_recovery, now)
                 await self._advance_cursor(
                     server, datetime.fromtimestamp(from_timestamp + RESUME_OVERLAP_SECONDS, tz=timezone.utc),

@@ -17,6 +17,7 @@ class FakeClient:
         self.pages = pages
         self.supports_gap_recovery = gap_recovery
         self.requested: tuple[int, int] | None = None
+        self.clock_drift: int | None = None
 
     async def __aenter__(self):
         return self
@@ -29,6 +30,9 @@ class FakeClient:
 
     async def query_log_warning(self):
         return None
+
+    async def clock_drift_seconds(self):
+        return self.clock_drift
 
     async def iter_query_pages(self, from_timestamp: int, until_timestamp: int):
         self.requested = (from_timestamp, until_timestamp)
@@ -313,4 +317,26 @@ async def test_servers_writing_the_same_hour_at_once_keep_separate_stats(db_sess
         select(QueryStatsHourly.server, func.sum(QueryStatsHourly.total)).group_by(QueryStatsHourly.server))).all())
     assert count == 150
     assert totals == {"one": 50, "two": 50, "three": 50}
+
+
+@pytest.mark.parametrize("drift, expected", [(-600, "600s behind"), (600, "600s ahead"), (5, None), (None, None)])
+async def test_clock_drift_warning(db_session, fake_client, caplog, drift, expected):
+    server = await _server(db_session, datetime.now(timezone.utc) - timedelta(minutes=1))
+    fake_client(FakeClient([])).clock_drift = drift
+
+    await QueryIngestionService().ingest_from_server(server)
+
+    warnings = [r.getMessage() for r in caplog.records if "clock" in r.getMessage().lower()]
+    assert any(expected in w for w in warnings) if expected else not warnings
+
+
+async def test_clock_is_checked_at_most_once_per_interval(db_session, fake_client, caplog):
+    server = await _server(db_session, datetime.now(timezone.utc) - timedelta(minutes=1))
+    fake_client(FakeClient([])).clock_drift = -600
+    service = QueryIngestionService()
+
+    await service.ingest_from_server(server)
+    await service.ingest_from_server(server)
+
+    assert len([r for r in caplog.records if "clock" in r.getMessage().lower()]) == 1
 

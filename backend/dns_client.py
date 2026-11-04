@@ -8,7 +8,10 @@ enabling support for multiple DNS ad-blocking solutions (Pi-hole, AdGuard Home, 
 import logging
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any, AsyncIterator, Dict, List, Optional
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -314,6 +317,16 @@ class DNSBlockerClient(ABC):
     def supports_gap_recovery(self) -> bool:
         """Whether iter_query_pages can reach back through the server's whole retained log."""
         return False
+
+    async def clock_drift_seconds(self) -> Optional[int]:
+        """How far the server's clock is ahead of DNSMon's, from its HTTP Date header, or None
+        if that can't be told. Behind a reverse proxy this reads the proxy's clock."""
+        try:
+            response = await self.client.head(self.url)
+            server_time = parsedate_to_datetime(response.headers["date"])
+            return int((server_time - datetime.now(timezone.utc)).total_seconds())
+        except (httpx.HTTPError, KeyError, ValueError, TypeError):
+            return None
 
     async def query_log_warning(self) -> Optional[str]:
         """Why DNSMon would get no usable queries from this server's log, or None when it can."""
