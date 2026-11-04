@@ -216,7 +216,7 @@ class DNSMonService:
 
         self.scheduler.add_job(
             self.geoip_refresh_task,
-            trigger=IntervalTrigger(hours=24),
+            trigger=IntervalTrigger(hours=geoip.REFRESH_INTERVAL_HOURS),
             id='geoip_refresh',
             name='Refresh GeoIP databases',
             replace_existing=True,
@@ -278,12 +278,16 @@ class DNSMonService:
             logger.error(f"Building the answer indexes failed; answer searches will be slow until restart: {e}")
 
     async def _start_geoip(self):
-        """Refresh only when a database is missing: a restart must not spend MaxMind's
-        daily download quota, and a slow download must not delay startup."""
-        service = geoip.get_geoip()
-        await asyncio.to_thread(service.load)
-        if not service.complete:
-            self._geoip_startup_refresh = asyncio.create_task(self.geoip_refresh_task())
+        """Contained because GeoIP is optional and must never stop startup. Also refreshes
+        on a stale check: hosts restarting more often than daily never reach the interval
+        job, and the HEAD comparison keeps a restart from spending download quota."""
+        try:
+            service = geoip.get_geoip()
+            await asyncio.to_thread(service.load)
+            if await geoip.startup_refresh_needed(service):
+                self._geoip_startup_refresh = asyncio.create_task(self.geoip_refresh_task())
+        except Exception as e:
+            logger.error(f"Could not start GeoIP: {type(e).__name__}")
 
     async def startup(self):
         """Run on application startup (idempotent)"""

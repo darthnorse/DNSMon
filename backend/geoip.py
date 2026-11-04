@@ -6,6 +6,7 @@ import os
 import shutil
 import tarfile
 import zlib
+from datetime import timedelta
 from pathlib import Path, PurePosixPath
 from typing import Callable, Iterable
 
@@ -20,6 +21,7 @@ from .schemas import GeoInfo
 logger = logging.getLogger(__name__)
 
 GEOIP_ROW_ID = 1
+REFRESH_INTERVAL_HOURS = 24
 CITY_EDITION = 'GeoLite2-City'
 ASN_EDITION = 'GeoLite2-ASN'
 # Substrings, not exact names: MaxMind's test City database is typed GeoIP2-City.
@@ -98,12 +100,14 @@ def _unpack_and_open(archive: Path, tmp: Path, edition: str) -> Reader:
 
 
 async def _download(client: httpx.AsyncClient, url: str, dest: Path) -> None:
-    async with client.stream('GET', url) as response:
+    # Raw bytes with identity: a .tar.gz served with Content-Encoding: gzip must reach
+    # tarfile still compressed, and the cap must count what actually lands on disk.
+    async with client.stream('GET', url, headers={'Accept-Encoding': 'identity'}) as response:
         if not response.is_success:
             raise _RefreshFailure(_describe_status(response.status_code))
         received = 0
         with dest.open('wb') as out:
-            async for chunk in response.aiter_bytes():
+            async for chunk in response.aiter_raw():
                 received += len(chunk)
                 if received > MAX_DOWNLOAD_BYTES:
                     raise _RefreshFailure(
@@ -196,11 +200,10 @@ class GeoIPService:
         return list(dict.fromkeys(code for code in codes if code))
 
     def _open_existing(self, edition: str) -> Reader | None:
-        path = self._mmdb_path(edition)
-        if not path.exists():
-            return None
         try:
-            return _open_checked(path, edition)
+            return _open_checked(self._mmdb_path(edition), edition)
+        except FileNotFoundError:
+            return None
         except Exception as e:
             logger.error(f'GeoIP {edition} database on disk is unusable: {type(e).__name__}')
             return None
@@ -362,6 +365,16 @@ async def refresh_from_settings(*, service: GeoIPService | None = None,
             return
         await service._refresh_locked(*credentials, transport=transport)
         await _record_outcome(service, credentials)
+
+
+async def startup_refresh_needed(service: GeoIPService) -> bool:
+    async with async_session_maker() as db:
+        row = await db.get(GeoipSettings, GEOIP_ROW_ID)
+    if row is None or not (row.account_id and row.license_key):
+        return False
+    if not service.complete or row.last_checked_at is None:
+        return True
+    return utcnow() - row.last_checked_at > timedelta(hours=REFRESH_INTERVAL_HOURS)
 
 
 _background_refreshes: set[asyncio.Task] = set()

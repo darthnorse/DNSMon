@@ -70,6 +70,7 @@ class FakeMaxMind:
         self.archives = {edition: _tarball(edition) for edition in EDITIONS}
         self.status = {}
         self.raises = {}
+        self.download_headers = {}
         self.requests = []
         self.gate = None
 
@@ -94,7 +95,9 @@ class FakeMaxMind:
             return httpx.Response(200, headers=headers)
         if self.gate:
             await self.gate.wait()
-        return httpx.Response(200, headers=headers, content=self.archives[edition])
+        # stream=, not content=: httpx reads content= eagerly, leaving nothing for aiter_raw.
+        return httpx.Response(200, headers={**headers, **self.download_headers},
+                              stream=httpx.ByteStream(self.archives[edition]))
 
 
 async def _installed(tmp_path, maxmind=None):
@@ -367,6 +370,16 @@ async def test_both_editions_failing_names_both(tmp_path):
     assert CITY_EDITION in service.last_error and ASN_EDITION in service.last_error
 
 
+async def test_tarball_served_with_gzip_content_encoding_is_not_decoded(tmp_path):
+    maxmind = FakeMaxMind()
+    maxmind.download_headers = {"Content-Encoding": "gzip"}
+
+    service = await _installed(tmp_path, maxmind)
+
+    assert service.lookup(IN_BOTH) == EXPECTED
+    assert {r.headers["accept-encoding"] for r in maxmind.gets()} == {"identity"}
+
+
 async def test_oversized_download_is_refused(tmp_path, monkeypatch):
     monkeypatch.setattr(geoip_module, "MAX_DOWNLOAD_BYTES", 1000)
     service = GeoIPService(tmp_path)
@@ -550,8 +563,9 @@ async def test_countries_are_distinct_and_keep_order(tmp_path):
     assert service.countries(["81.2.69.160", "10.0.0.1", IN_BOTH, "81.2.69.161", "8.8.8.8"]) == ["GB", "SE"]
 
 
-def test_load_without_files_returns_false(tmp_path):
+def test_load_without_files_returns_false_quietly(tmp_path, caplog):
     assert GeoIPService(tmp_path / "absent").load() is False
+    assert caplog.text == ""
 
 
 def test_load_corrupt_file_returns_false(tmp_path, caplog):
@@ -579,6 +593,17 @@ def test_load_keeps_the_good_database_beside_a_corrupt_one(tmp_path):
     assert service.load() is True
     assert service.complete is False
     assert service.lookup(IN_BOTH).asn == 29518
+
+
+def test_load_survives_an_unsearchable_directory(tmp_path, caplog):
+    locked = tmp_path / "locked"
+    locked.mkdir(mode=0o000)
+    try:
+        assert GeoIPService(locked).load() is False
+    finally:
+        locked.chmod(0o700)
+
+    assert "PermissionError" in caplog.text
 
 
 async def test_corrupt_file_with_matching_sidecar_is_replaced_at_refresh(tmp_path):
@@ -808,33 +833,99 @@ async def test_daily_job_swallows_errors(monkeypatch, caplog):
     assert "GeoIP" in caplog.text
 
 
-async def test_startup_loads_files_and_skips_refresh_when_complete(isolated_geoip, monkeypatch):
-    isolated_geoip.directory.mkdir(parents=True)
-    for edition, source in FIXTURES.items():
-        shutil.copy(source, isolated_geoip.directory / f"{edition}.mmdb")
+def _install_fixtures(service, *editions):
+    service.directory.mkdir(parents=True)
+    for edition in editions:
+        shutil.copy(FIXTURES[edition], service.directory / f"{edition}.mmdb")
+
+
+@pytest.fixture
+def refresh_job(monkeypatch):
     job = AsyncMock()
     monkeypatch.setattr(geoip_module, "refresh_from_settings", job)
+    return job
+
+
+def _hours_ago(hours):
+    return datetime.now(timezone.utc) - timedelta(hours=hours)
+
+
+async def test_startup_loads_files_and_skips_refresh_when_recently_checked(
+        db_session, isolated_geoip, refresh_job):
+    await _seed(db_session, account_id=ACCOUNT, license_key=KEY, last_checked_at=_hours_ago(1))
+    _install_fixtures(isolated_geoip, *EDITIONS)
     service = _bare_dnsmon_service()
 
     await service._start_geoip()
 
     assert isolated_geoip.lookup(IN_BOTH) == EXPECTED
     assert service._geoip_startup_refresh is None
-    job.assert_not_awaited()
+    refresh_job.assert_not_awaited()
 
 
-async def test_startup_refreshes_in_background_when_a_file_is_missing(isolated_geoip, monkeypatch):
-    isolated_geoip.directory.mkdir(parents=True)
-    shutil.copy(FIXTURES[CITY_EDITION], isolated_geoip.directory / f"{CITY_EDITION}.mmdb")
-    job = AsyncMock()
-    monkeypatch.setattr(geoip_module, "refresh_from_settings", job)
+async def test_startup_refreshes_in_background_when_a_file_is_missing(
+        db_session, isolated_geoip, refresh_job):
+    await _seed(db_session, account_id=ACCOUNT, license_key=KEY, last_checked_at=_hours_ago(1))
+    _install_fixtures(isolated_geoip, CITY_EDITION)
     service = _bare_dnsmon_service()
 
     await service._start_geoip()
     await service._geoip_startup_refresh
 
-    job.assert_awaited_once()
+    refresh_job.assert_awaited_once()
     assert isolated_geoip.lookup(IN_BOTH).country == "SE"
+
+
+@pytest.mark.parametrize("last_checked_hours_ago", [None, 25])
+async def test_startup_refreshes_a_stale_check_even_with_files_present(
+        db_session, isolated_geoip, refresh_job, last_checked_hours_ago):
+    checked = None if last_checked_hours_ago is None else _hours_ago(last_checked_hours_ago)
+    await _seed(db_session, account_id=ACCOUNT, license_key=KEY, last_checked_at=checked)
+    _install_fixtures(isolated_geoip, *EDITIONS)
+    service = _bare_dnsmon_service()
+
+    await service._start_geoip()
+    await service._geoip_startup_refresh
+
+    refresh_job.assert_awaited_once()
+
+
+@pytest.mark.parametrize("fields", [
+    {},
+    {"account_id": ACCOUNT},
+    {"account_id": None, "license_key": None, "last_checked_at": None},
+])
+async def test_startup_without_credentials_starts_no_refresh(
+        db_session, isolated_geoip, refresh_job, fields):
+    if fields:
+        await _seed(db_session, **fields)
+    service = _bare_dnsmon_service()
+
+    await service._start_geoip()
+
+    assert service._geoip_startup_refresh is None
+    refresh_job.assert_not_awaited()
+
+
+async def test_startup_survives_an_unsearchable_directory(db_session, isolated_geoip, refresh_job):
+    isolated_geoip.directory.mkdir(mode=0o000)
+    service = _bare_dnsmon_service()
+    try:
+        await service._start_geoip()
+    finally:
+        isolated_geoip.directory.chmod(0o700)
+
+    assert service._geoip_startup_refresh is None
+
+
+async def test_startup_logs_and_carries_on_after_any_geoip_error(isolated_geoip, monkeypatch, caplog):
+    monkeypatch.setattr(isolated_geoip, "load", MagicMock(side_effect=RuntimeError("boom")))
+    service = _bare_dnsmon_service()
+
+    await service._start_geoip()
+
+    assert "RuntimeError" in caplog.text
+    assert service._geoip_startup_refresh is None
 
 
 async def test_shutdown_cancels_running_refreshes(monkeypatch):
