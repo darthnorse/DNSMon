@@ -32,10 +32,18 @@ QUERYLOG_PAGE_SIZE = 1000
 # server can't keep a poll running forever.
 MAX_QUERYLOG_PAGES = 2000
 
-# GET <endpoint> reads the config; PUT <endpoint>/update writes it back unchanged.
+# Config key -> (GET endpoint that reads it, PUT endpoint that takes the same body back).
 _SYNCED_CONFIG_ENDPOINTS = {
-    'querylog_config': '/control/querylog/config',
-    'stats_config': '/control/stats/config',
+    'querylog_config': ('/control/querylog/config', '/control/querylog/config/update'),
+    'stats_config': ('/control/stats/config', '/control/stats/config/update'),
+    'blocked_services': ('/control/blocked_services/get', '/control/blocked_services/update'),
+    'safesearch': ('/control/safesearch/status', '/control/safesearch/settings'),
+}
+# Config key -> endpoint prefix: GET <prefix>/status reads {"enabled": ...}, and these have no
+# settings body to write back, only POST <prefix>/enable and <prefix>/disable.
+_SYNCED_TOGGLE_ENDPOINTS = {
+    'safebrowsing_enabled': '/control/safebrowsing',
+    'parental_enabled': '/control/parental',
 }
 
 
@@ -91,7 +99,7 @@ class AdGuardHomeClient(DNSBlockerClient):
             return False
 
     async def query_log_warning(self) -> Optional[str]:
-        config = await self._get_json(_SYNCED_CONFIG_ENDPOINTS['querylog_config'], 'query log config')
+        config = await self._get_json(_SYNCED_CONFIG_ENDPOINTS['querylog_config'][0], 'query log config')
         if not isinstance(config, dict):
             return None
         if config.get('enabled') is False:
@@ -473,10 +481,15 @@ class AdGuardHomeClient(DNSBlockerClient):
             if dns_data is not None:
                 config['dns'] = {k: v for k, v in dns_data.items() if k not in ADGUARD_DNS_SYNC_DENYLIST}
 
-            for key, endpoint in _SYNCED_CONFIG_ENDPOINTS.items():
-                body = await self._get_json(endpoint, key)
+            for key, (read_endpoint, _) in _SYNCED_CONFIG_ENDPOINTS.items():
+                body = await self._get_json(read_endpoint, key)
                 if body is not None:
                     config[key] = body
+
+            for key, prefix in _SYNCED_TOGGLE_ENDPOINTS.items():
+                body = await self._get_json(f"{prefix}/status", key)
+                if body is not None:
+                    config[key] = bool(body.get('enabled'))
 
             rewrites = await self._get_json('/control/rewrite/list', 'rewrites')
             if rewrites is not None:
@@ -572,9 +585,14 @@ class AdGuardHomeClient(DNSBlockerClient):
             if config.get('dns') is not None:
                 success &= await self._write('POST', '/control/dns_config', config['dns'], 'DNS config')
 
-            for key, endpoint in _SYNCED_CONFIG_ENDPOINTS.items():
+            for key, (_, write_endpoint) in _SYNCED_CONFIG_ENDPOINTS.items():
                 if config.get(key) is not None:
-                    success &= await self._write('PUT', f"{endpoint}/update", config[key], key)
+                    success &= await self._write('PUT', write_endpoint, config[key], key)
+
+            for key, prefix in _SYNCED_TOGGLE_ENDPOINTS.items():
+                if config.get(key) is not None:
+                    action = 'enable' if config[key] else 'disable'
+                    success &= await self._write('POST', f"{prefix}/{action}", None, key)
 
             if 'filtering_enabled' in config:
                 success &= await self._write('POST', '/control/filtering/config', {

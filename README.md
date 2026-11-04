@@ -94,6 +94,8 @@ Designate a "source" server and sync its configuration to target servers automat
 - DNS rewrites
 - Blocklist and allowlist subscriptions
 - Persistent client settings
+- Blocked services and their schedule
+- Safe browsing, parental control and safe search
 
 **Technitium DNS syncs** (via backup/restore):
 - Block list URLs (subscriptions)
