@@ -17,6 +17,7 @@ from .api_keys import router as api_keys_router
 from .insights import router as insights_router
 from .app_definitions import router as app_definitions_router
 from .insight_sources import router as insight_sources_router
+from .geoip import router as geoip_router
 from .classify import router as classify_router
 from .pdns import router as pdns_router
 
@@ -36,6 +37,7 @@ __all__ = [
     'insights_router',
     'app_definitions_router',
     'insight_sources_router',
+    'geoip_router',
     'classify_router',
     'pdns_router',
 ]

@@ -327,6 +327,22 @@ class SettingsChangelog(Base):
         }
 
 
+class GeoipSettings(Base):
+    """MaxMind GeoLite2 credentials and download status. Single row, id=1.
+    Kept out of app_settings because GET /api/settings is readable by every user."""
+    __tablename__ = "geoip_settings"
+
+    id = Column(Integer, primary_key=True)
+    account_id = Column(String(20), nullable=True)
+    license_key = Column(Text, nullable=True)  # never serialised; see GeoipStatus.has_license_key
+    last_checked_at = Column(DateTime(timezone=True), nullable=True)
+    last_updated_at = Column(DateTime(timezone=True), nullable=True)
+    city_build = Column(BigInteger, nullable=True)
+    asn_build = Column(BigInteger, nullable=True)
+    last_status = Column(String(10), nullable=True)  # ok|error
+    last_error = Column(String(200), nullable=True)
+
+
 class SyncHistory(Base):
     """Track Pi-hole configuration sync operations"""
     __tablename__ = "sync_history"

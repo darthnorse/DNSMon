@@ -34,6 +34,7 @@ from .routes import (
     insights_router,
     app_definitions_router,
     insight_sources_router,
+    geoip_router,
     classify_router,
     pdns_router,
 )
@@ -139,6 +140,7 @@ app.include_router(api_keys_router)
 app.include_router(insights_router)
 app.include_router(app_definitions_router)
 app.include_router(insight_sources_router)
+app.include_router(geoip_router)
 app.include_router(classify_router)
 app.include_router(pdns_router)
 

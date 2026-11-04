@@ -95,6 +95,42 @@ class GeoInfo(BaseModel):
     org: Optional[str] = None
 
 
+class GeoipStatus(BaseModel):
+    configured: bool
+    account_id: Optional[str] = None
+    has_license_key: bool
+    last_checked_at: Optional[datetime] = None
+    last_updated_at: Optional[datetime] = None
+    city_build: Optional[int] = None
+    asn_build: Optional[int] = None
+    last_status: Optional[str] = None
+    last_error: Optional[str] = None
+
+    @field_validator('last_checked_at', 'last_updated_at', mode='after')
+    @classmethod
+    def coerce_to_utc(cls, v: Optional[datetime]) -> Optional[datetime]:
+        if v is not None and v.tzinfo is None:
+            return v.replace(tzinfo=timezone.utc)
+        return v
+
+
+class GeoipUpdate(BaseModel):
+    account_id: Optional[str] = PydanticField(default=None, max_length=20)
+    # No max_length or pattern: pydantic's 422 echoes the rejected input, and
+    # this one is a secret. The route validates it instead.
+    license_key: Optional[str] = None
+    clear: bool = False
+
+    @field_validator('account_id', mode='before')
+    @classmethod
+    def clean_account_id(cls, v):
+        if isinstance(v, str):
+            v = v.strip() or None
+            if v is not None and not (v.isascii() and v.isdigit()):
+                raise ValueError("account_id must be digits only")
+        return v
+
+
 class PdnsDomainRow(BaseModel):
     domain: str
     first_seen: str
