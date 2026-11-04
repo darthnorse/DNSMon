@@ -4,6 +4,7 @@ import resource
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
+from . import geoip
 from .config import get_settings_sync
 from .ingestion import QueryIngestionService
 from .alerts import AlertEngine
@@ -40,6 +41,7 @@ class DNSMonService:
         self._started = False
         self._initial_ingestion_task = None
         self._answer_index_task = None
+        self._geoip_startup_refresh = None
 
     async def ingest_and_alert(self):
         """Poll Pihole servers and check for alerts"""
@@ -142,6 +144,13 @@ class DNSMonService:
         except Exception as e:
             logger.error(f"Error in classification task: {e}", exc_info=True)
 
+    async def geoip_refresh_task(self):
+        """Check MaxMind for newer GeoIP databases; a no-op without credentials."""
+        try:
+            await geoip.refresh_from_settings()
+        except Exception as e:
+            logger.error(f"Error in GeoIP refresh task: {type(e).__name__}")
+
     async def session_cleanup_task(self):
         """Periodic cleanup of expired sessions"""
         try:
@@ -205,6 +214,16 @@ class DNSMonService:
             coalesce=True,
         )
 
+        self.scheduler.add_job(
+            self.geoip_refresh_task,
+            trigger=IntervalTrigger(hours=24),
+            id='geoip_refresh',
+            name='Refresh GeoIP databases',
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
         self.scheduler.start()
         logger.info(f"Scheduler started (poll: {self.settings.poll_interval_seconds}s, sync: {self.settings.sync_interval_seconds}s)")
 
@@ -258,6 +277,14 @@ class DNSMonService:
         except Exception as e:
             logger.error(f"Building the answer indexes failed; answer searches will be slow until restart: {e}")
 
+    async def _start_geoip(self):
+        """Refresh only when a database is missing: a restart must not spend MaxMind's
+        daily download quota, and a slow download must not delay startup."""
+        service = geoip.get_geoip()
+        await asyncio.to_thread(service.load)
+        if not service.complete:
+            self._geoip_startup_refresh = asyncio.create_task(self.geoip_refresh_task())
+
     async def startup(self):
         """Run on application startup (idempotent)"""
         if self._started:
@@ -267,6 +294,7 @@ class DNSMonService:
         logger.info("Starting DNSMon service...")
 
         await self._prime_threat_matcher()
+        await self._start_geoip()
 
         self.start_scheduler()
 
@@ -292,6 +320,9 @@ class DNSMonService:
         # Cancelling makes asyncpg cancel the CREATE INDEX server-side; otherwise the
         # build outlives the app and the next start would mistake it for a failed one.
         await _cancel(self._answer_index_task, "Answer index build cancelled; it resumes on next start")
+
+        await _cancel(self._geoip_startup_refresh, "GeoIP refresh cancelled")
+        await geoip.cancel_background_refreshes()
 
         self.scheduler.shutdown()
         await self.ingestion_service.stop()

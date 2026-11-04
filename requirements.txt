@@ -16,3 +16,6 @@ bcrypt==4.2.1
 
 # Domain classification
 tldextract==5.1.2
+
+# GeoIP lookups
+maxminddb==3.2.0

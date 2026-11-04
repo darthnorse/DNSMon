@@ -36,7 +36,7 @@ RUN rm -rf ./backend/tests/
 
 COPY --from=frontend-builder /app/frontend/build/ ./frontend/build/
 
-RUN mkdir -p /app/config && chown -R appuser:appuser /app
+RUN mkdir -p /app/config /app/geoip && chown -R appuser:appuser /app
 
 USER appuser
 

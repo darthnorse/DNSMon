@@ -36,8 +36,10 @@ services:
       - "8000:8000"
     volumes:
       - dnsmon_logs:/app/logs
+      - dnsmon_geoip:/app/geoip
     restart: unless-stopped
 
 volumes:
   dnsmon_postgres_data:
   dnsmon_logs:
+  dnsmon_geoip:

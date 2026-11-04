@@ -1,11 +1,19 @@
+import asyncio
+import shutil
 from datetime import datetime, timezone
+from pathlib import Path
+from unittest.mock import AsyncMock
 
+import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 
+from backend import geoip as geoip_module
+from backend.geoip import ASN_EDITION, CITY_EDITION
 from backend.models import GeoipSettings, SettingsChangelog
 
 KEY = "abcSECRETkey123"
+DATA = Path(__file__).parent / "data"
 
 
 async def _seed(db_session, **fields):
@@ -150,3 +158,129 @@ async def test_rejects_bad_license_key_without_echoing_it(async_admin_client: As
         r = await async_admin_client.put("/api/geoip", json={"account_id": "1", "license_key": bad})
         assert r.status_code == 400, bad
         assert bad not in r.text
+
+
+@pytest.fixture
+def refresh_job(monkeypatch):
+    job = AsyncMock()
+    monkeypatch.setattr(geoip_module, "refresh_from_settings", job)
+    return job
+
+
+@pytest.fixture(autouse=True)
+def no_real_refresh(refresh_job):
+    return refresh_job
+
+
+async def _background_settled():
+    await asyncio.gather(*geoip_module._background_refreshes)
+
+
+async def test_post_refresh_starts_the_job(async_admin_client: AsyncClient, db_session, refresh_job):
+    await _seed(db_session, account_id="111", license_key=KEY)
+
+    r = await async_admin_client.post("/api/geoip/refresh")
+    await _background_settled()
+
+    assert r.status_code == 202, r.text
+    refresh_job.assert_awaited_once()
+
+
+async def test_post_refresh_without_credentials_is_400(async_admin_client: AsyncClient, db_session, refresh_job):
+    await _seed(db_session, account_id="111")
+
+    no_key = await async_admin_client.post("/api/geoip/refresh")
+    await _background_settled()
+
+    assert no_key.status_code == 400
+    refresh_job.assert_not_awaited()
+
+
+async def test_post_refresh_with_no_row_is_400(async_admin_client: AsyncClient, refresh_job):
+    r = await async_admin_client.post("/api/geoip/refresh")
+
+    assert r.status_code == 400
+    refresh_job.assert_not_awaited()
+
+
+async def test_post_refresh_requires_admin(async_readonly_client: AsyncClient, db_session, refresh_job):
+    await _seed(db_session, account_id="111", license_key=KEY)
+
+    r = await async_readonly_client.post("/api/geoip/refresh")
+
+    assert r.status_code == 403
+    refresh_job.assert_not_awaited()
+
+
+async def test_post_refresh_requires_authentication(async_client: AsyncClient, refresh_job):
+    r = await async_client.post("/api/geoip/refresh")
+
+    assert r.status_code == 401
+
+
+async def test_put_new_credentials_starts_refresh(async_admin_client: AsyncClient, refresh_job):
+    r = await async_admin_client.put("/api/geoip", json={"account_id": "111", "license_key": KEY})
+    await _background_settled()
+
+    assert r.status_code == 200, r.text
+    refresh_job.assert_awaited_once()
+
+
+async def test_put_changed_key_starts_refresh(async_admin_client: AsyncClient, db_session, refresh_job):
+    await _seed(db_session, account_id="111", license_key=KEY)
+
+    await async_admin_client.put("/api/geoip", json={"license_key": "newKEY"})
+    await _background_settled()
+
+    refresh_job.assert_awaited_once()
+
+
+async def test_put_unchanged_credentials_starts_no_refresh(async_admin_client: AsyncClient, db_session, refresh_job):
+    await _seed(db_session, account_id="111", license_key=KEY)
+
+    await async_admin_client.put("/api/geoip", json={"account_id": "111", "license_key": KEY})
+    await _background_settled()
+
+    refresh_job.assert_not_awaited()
+
+
+async def test_put_partial_credentials_starts_no_refresh(async_admin_client: AsyncClient, refresh_job):
+    await async_admin_client.put("/api/geoip", json={"account_id": "111"})
+    await _background_settled()
+
+    refresh_job.assert_not_awaited()
+
+
+async def test_clear_unloads_reader_and_deletes_files(async_admin_client: AsyncClient, db_session,
+                                                      isolated_geoip, refresh_job):
+    await _seed(db_session, account_id="111", license_key=KEY)
+    isolated_geoip.directory.mkdir(parents=True)
+    for edition, name in ((CITY_EDITION, "GeoIP2-City-Test.mmdb"), (ASN_EDITION, "GeoLite2-ASN-Test.mmdb")):
+        shutil.copy(DATA / name, isolated_geoip.directory / f"{edition}.mmdb")
+        (isolated_geoip.directory / f"{edition}.mmdb.last-modified").write_text("x")
+    assert isolated_geoip.load() is True
+    assert isolated_geoip.lookup("89.160.20.130") is not None
+
+    r = await async_admin_client.put("/api/geoip", json={"clear": True})
+    await _background_settled()
+
+    assert r.status_code == 200, r.text
+    assert isolated_geoip.lookup("89.160.20.130") is None
+    assert list(isolated_geoip.directory.iterdir()) == []
+    refresh_job.assert_not_awaited()
+
+
+async def test_clear_survives_a_delete_failure(async_admin_client: AsyncClient, db_session, isolated_geoip, monkeypatch):
+    await _seed(db_session, account_id="111", license_key=KEY)
+    isolated_geoip.directory.mkdir(parents=True)
+    (isolated_geoip.directory / f"{CITY_EDITION}.mmdb").write_bytes(b"x")
+
+    def refuse(self, missing_ok=False):
+        raise PermissionError("nope")
+
+    monkeypatch.setattr(Path, "unlink", refuse)
+
+    r = await async_admin_client.put("/api/geoip", json={"clear": True})
+
+    assert r.status_code == 200, r.text
+    assert (await _stored(db_session)).license_key is None

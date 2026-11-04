@@ -58,6 +58,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from backend.auth import generate_session_token, hash_password
 from backend.config import get_settings
+from backend import geoip as geoip_module
 from backend.database import (
     async_session_maker,
     engine as production_engine,
@@ -88,6 +89,15 @@ async def _create_test_database():
             await conn.execute(text("CREATE DATABASE dnsmon_test"))
     finally:
         await admin_engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def isolated_geoip(tmp_path, monkeypatch):
+    """Tests run inside the app container, where the singleton's default directory
+    is the live volume: a PUT with `clear` would delete the real databases."""
+    service = geoip_module.GeoIPService(tmp_path / "geoip")
+    monkeypatch.setattr(geoip_module, "_service", service)
+    return service
 
 
 @pytest_asyncio.fixture(scope="session", autouse=True)
