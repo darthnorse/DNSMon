@@ -79,7 +79,7 @@ def _base_response_kwargs(**overrides):
         id=1, name="x", description=None, domain_pattern=None,
         client_ip_pattern=None, client_hostname_pattern=None,
         exclude_domains=None, exclude_client_ips=None, cooldown_minutes=5,
-        match_status="any", match_threat=False, enabled=True,
+        match_status="any", match_threat=False, match_countries=None, enabled=True,
         created_at=datetime(2026, 5, 17, 12, 0, 0, tzinfo=timezone.utc),
         updated_at=datetime(2026, 5, 17, 12, 0, 0, tzinfo=timezone.utc),
     )
@@ -196,3 +196,28 @@ def test_alert_rule_rejects_invalid_ip_exclude_entry():
     # A valid entry alongside an invalid one still rejects the whole value.
     with pytest.raises(ValidationError, match="invalid IP"):
         AlertRuleCreate(name="r", exclude_client_ips="10.0.0.5, nonsense")
+
+
+def test_match_countries_normalises_case_spacing_and_duplicates():
+    m = AlertRuleCreate(name="x", match_countries=" cn, ru ,CN")
+    assert m.match_countries == "CN,RU"
+
+
+@pytest.mark.parametrize("bad", ["CHN", "C1", "C", "CN,,RU", "CN,", "\u00e9\u00e9", "\u0663\u0663", "C N"])
+def test_match_countries_rejects_malformed_codes(bad):
+    with pytest.raises(ValidationError, match="match_countries"):
+        AlertRuleCreate(name="x", match_countries=bad)
+    with pytest.raises(ValidationError, match="match_countries"):
+        AlertRuleUpdate.model_validate({"match_countries": bad})
+
+
+def test_match_countries_blank_becomes_none_on_create_and_update():
+    assert AlertRuleCreate(name="x", match_countries="").match_countries is None
+    assert AlertRuleCreate(name="x", match_countries=None).match_countries is None
+    m = AlertRuleUpdate.model_validate({"match_countries": "  "})
+    assert m.model_dump(exclude_unset=True) == {"match_countries": None}
+
+
+def test_update_rejects_explicit_null_match_countries():
+    with pytest.raises(ValidationError, match="match_countries"):
+        AlertRuleUpdate.model_validate({"match_countries": None})

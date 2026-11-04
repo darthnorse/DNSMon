@@ -11,7 +11,7 @@ from backend.models import AlertRule, Query
 
 def _q(domain="example.com", status="OK", client_ip="192.168.1.10",
        client_hostname="laptop", server="pihole1",
-       timestamp=None) -> IngestedQuery:
+       timestamp=None, answer_countries=None, answer_ips=None) -> IngestedQuery:
     return IngestedQuery(
         id=0,
         domain=domain,
@@ -21,13 +21,15 @@ def _q(domain="example.com", status="OK", client_ip="192.168.1.10",
         query_type="A",
         status=status,
         server=server,
+        answer_countries=answer_countries,
+        answer_ips=answer_ips,
     )
 
 
 def _rule(id=1, name="r", domain_pattern=None, client_ip_pattern=None,
           client_hostname_pattern=None, exclude_domains=None,
           exclude_client_ips=None,
-          match_status="any", match_threat=False,
+          match_status="any", match_threat=False, match_countries=None,
           cooldown_minutes=5, enabled=True) -> AlertRule:
     return AlertRule(
         id=id, name=name,
@@ -39,6 +41,7 @@ def _rule(id=1, name="r", domain_pattern=None, client_ip_pattern=None,
         cooldown_minutes=cooldown_minutes,
         match_status=match_status,
         match_threat=match_threat,
+        match_countries=match_countries,
         enabled=enabled,
     )
 
@@ -552,3 +555,52 @@ def test_resolve_threats_deduplicates_domains():
     engine = AlertEngine(svc)
     engine._resolve_threats([_rule(id=1, match_threat=True)], [_q(domain='evil.com')] * 5)
     assert svc.calls == 1
+
+
+async def _countries_match(rule, query):
+    engine = AlertEngine()
+    patterns = {rule.id: await engine._get_cached_patterns(rule)}
+    return engine._evaluate_query_against_rules(query, [rule], patterns)
+
+
+async def test_match_countries_fires_when_an_answer_is_in_a_listed_country():
+    rule = _rule(id=1, match_countries="CN")
+    assert await _countries_match(rule, _q(answer_countries=["US", "CN"])) == [1]
+
+
+async def test_match_countries_ignores_other_countries_and_unknown():
+    rule = _rule(id=1, match_countries="CN,RU")
+    assert await _countries_match(rule, _q(answer_countries=["US"])) == []
+    assert await _countries_match(rule, _q(answer_countries=[])) == []
+    assert await _countries_match(rule, _q(answer_countries=None)) == []
+
+
+async def test_match_countries_composes_with_a_domain_pattern():
+    rule = _rule(id=1, domain_pattern="shop", match_countries="CN")
+    assert await _countries_match(rule, _q(domain="shop.example.com", answer_countries=["CN"])) == [1]
+    assert await _countries_match(rule, _q(domain="other.example.com", answer_countries=["CN"])) == []
+
+
+async def test_match_countries_respects_exclude_domains():
+    rule = _rule(id=1, match_countries="CN", exclude_domains='["example.com"]')
+    assert await _countries_match(rule, _q(domain="example.com", answer_countries=["CN"])) == []
+
+
+async def test_match_countries_applies_to_stored_query_rows():
+    rule = _rule(id=1, match_countries="CN")
+    row = Query(domain="a.com", client_ip="10.0.0.1", server="s", status="OK",
+                answer_countries=["CN"])
+    assert await _countries_match(rule, row) == [1]
+    row.answer_countries = ["US"]
+    assert await _countries_match(rule, row) == []
+
+
+async def test_editing_match_countries_takes_effect_after_invalidation():
+    engine = AlertEngine()
+    rule = _rule(id=1, match_countries="CN")
+    await engine._get_cached_patterns(rule)
+    rule.match_countries = "RU"
+    await engine.invalidate_cache(1)
+    patterns = {1: await engine._get_cached_patterns(rule)}
+    assert patterns[1]["countries"] == {"RU"}
+    assert engine._evaluate_query_against_rules(_q(answer_countries=["CN"]), [rule], patterns) == []

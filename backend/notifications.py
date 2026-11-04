@@ -8,8 +8,9 @@ import httpx
 from sqlalchemy import select as sa_select
 
 from .database import async_session_maker
+from .geoip import get_geoip
 from .models import AlertRule, NotificationChannel
-from .utils import validate_url_safety, async_validate_url_safety
+from .utils import validate_url_safety, async_validate_url_safety, split_country_codes
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,8 @@ class AlertContext:
     query_list: str = ""  # One query per line: "domain - client"
     domains: str = ""  # Comma-separated list of domains
     clients: str = ""  # Comma-separated list of clients (IP or hostname)
+    countries: str = ""  # Comma-separated matched country codes (match_countries rules)
+    answer_ips: str = ""  # Comma-separated answer IPs in the matched countries
 
 
 class NotificationSender(ABC):
@@ -317,6 +320,8 @@ def render_template(template: Optional[str], context: AlertContext) -> str:
         '{query_list}': context.query_list or f"{context.domain} - {context.client_ip}",
         '{domains}': context.domains or context.domain or '',
         '{clients}': context.clients or context.client_ip or '',
+        '{countries}': context.countries,
+        '{answer_ips}': context.answer_ips,
     }
 
     message = template
@@ -401,6 +406,29 @@ class NotificationService:
         """Send alert to all enabled notification channels."""
         return await self._send_to_all_channels(lambda _channel: context, "notification")
 
+    @staticmethod
+    def _country_matches(query, wanted: List[str]) -> Dict[str, List[str]]:
+        """Matched country -> answer IPs, for one query.
+
+        The query stores which countries its answers fell in, not which address was in
+        which, so the IPs are looked up again. A replaced database can leave a country
+        with no IPs; the country is still reported.
+        """
+        matched = {code: [] for code in wanted if code in (query.answer_countries or ())}
+        if not matched:
+            return matched
+        geoip = get_geoip()
+        for ip in query.answer_ips or ():
+            info = geoip.lookup(str(ip))
+            if info and info.country in matched and str(ip) not in matched[info.country]:
+                matched[info.country].append(str(ip))
+        return matched
+
+    @staticmethod
+    def _country_suffix(matches: Dict[str, List[str]]) -> str:
+        parts = [f"{code}: {', '.join(ips)}" if ips else code for code, ips in matches.items()]
+        return f" ({'; '.join(parts)})" if parts else ""
+
     def _build_batch_context(self, queries: List, rule: AlertRule, dedupe: bool = False) -> AlertContext:
         """Build alert context from a batch of queries.
 
@@ -410,6 +438,13 @@ class NotificationService:
             dedupe: If True, only include unique domain-client pairs. If False, include all.
         """
         first_query = queries[0]
+        wanted = split_country_codes(rule.match_countries)
+        matches_per_query = [self._country_matches(q, wanted) if wanted else {} for q in queries]
+        matched_countries = dict.fromkeys(code for m in matches_per_query for code in m)
+        matched_ips = dict.fromkeys(ip for m in matches_per_query for ips in m.values() for ip in ips)
+
+        def describe(q, matches: Dict[str, List[str]]) -> str:
+            return f"{q.domain} - {q.client_hostname or q.client_ip}{self._country_suffix(matches)}"
 
         if dedupe:
             # Collect unique domain-client pairs
@@ -420,12 +455,12 @@ class NotificationService:
             seen_domains = set()
             seen_clients = set()
 
-            for q in queries:
+            for q, matches in zip(queries, matches_per_query):
                 client_display = q.client_hostname or q.client_ip
                 pair = (q.domain, client_display)
                 if pair not in seen_pairs:
                     seen_pairs.add(pair)
-                    query_lines.append(f"{q.domain} - {client_display}")
+                    query_lines.append(describe(q, matches))
 
                 if q.domain and q.domain not in seen_domains:
                     seen_domains.add(q.domain)
@@ -438,9 +473,9 @@ class NotificationService:
             query_lines = []
             domains = []
             clients = []
-            for q in queries:
+            for q, matches in zip(queries, matches_per_query):
                 client_display = q.client_hostname or q.client_ip
-                query_lines.append(f"{q.domain} - {client_display}")
+                query_lines.append(describe(q, matches))
                 if q.domain:
                     domains.append(q.domain)
                 clients.append(client_display)
@@ -458,6 +493,8 @@ class NotificationService:
             query_list="\n".join(query_lines),
             domains=", ".join(domains),
             clients=", ".join(clients),
+            countries=", ".join(matched_countries),
+            answer_ips=", ".join(matched_ips),
         )
 
     async def send_batch_alert(self, queries: List, rule: AlertRule) -> Dict[int, bool]:

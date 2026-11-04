@@ -32,6 +32,26 @@ def _validate_domain_list(domains):
     return cleaned
 
 
+_COUNTRY_CODE_RE = re.compile(r'[A-Za-z]{2}')
+
+
+def _validate_match_countries(value: Optional[str]) -> Optional[str]:
+    """Normalise to upper-case, de-duplicated codes in first-seen order; blank clears.
+
+    The ASCII-only regex matters: str.isalpha() and \\w accept letters from other scripts.
+    """
+    if value is None or not value.strip():
+        return None
+    codes = []
+    for raw in value.split(','):
+        code = raw.strip()
+        if not _COUNTRY_CODE_RE.fullmatch(code):
+            raise ValueError(f"invalid country code in match_countries: {code!r}; "
+                             "use comma-separated two-letter codes such as CN,RU")
+        codes.append(code.upper())
+    return ','.join(dict.fromkeys(codes))
+
+
 def _validate_exclude_client_ips(value: Optional[str]) -> Optional[str]:
     """Reject exclude entries that would silently never match.
 
@@ -266,12 +286,18 @@ class AlertRuleCreate(BaseModel):
     cooldown_minutes: int = PydanticField(default=5, ge=0, le=10080)  # 0 to 7 days
     match_status: MatchStatus = 'any'
     match_threat: bool = False
+    match_countries: Optional[str] = PydanticField(default=None, max_length=500)
     enabled: bool = True
 
     @field_validator('exclude_client_ips')
     @classmethod
     def check_exclude_client_ips(cls, v):
         return _validate_exclude_client_ips(v)
+
+    @field_validator('match_countries')
+    @classmethod
+    def check_match_countries(cls, v):
+        return _validate_match_countries(v)
 
 
 class RejectsExplicitNulls(BaseModel):
@@ -307,12 +333,28 @@ class AlertRuleUpdate(RejectsExplicitNulls):
     cooldown_minutes: Optional[int] = PydanticField(default=None, ge=0, le=10080)
     match_status: Optional[MatchStatus] = None
     match_threat: Optional[bool] = None
+    match_countries: Optional[str] = PydanticField(default=None, max_length=500)
     enabled: Optional[bool] = None
 
     @field_validator('exclude_client_ips')
     @classmethod
     def check_exclude_client_ips(cls, v):
         return _validate_exclude_client_ips(v)
+
+    @field_validator('match_countries', mode='before')
+    @classmethod
+    def reject_null_match_countries(cls, v):
+        # Only an explicit null reaches a field validator (defaults are not validated).
+        # Clearing is spelled '', so a client that sends null by mistake is told rather
+        # than silently wiping the rule's country condition.
+        if v is None:
+            raise ValueError("match_countries cannot be null; send '' to clear it or omit the field")
+        return v
+
+    @field_validator('match_countries')
+    @classmethod
+    def check_match_countries(cls, v):
+        return _validate_match_countries(v)
 
 
 class AlertRuleResponse(BaseModel):
@@ -327,6 +369,7 @@ class AlertRuleResponse(BaseModel):
     cooldown_minutes: int
     match_status: MatchStatus
     match_threat: bool
+    match_countries: Optional[str]
     enabled: bool
     created_at: datetime
     updated_at: datetime

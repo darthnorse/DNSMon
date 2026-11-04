@@ -1,0 +1,78 @@
+"""Matched countries and answer IPs in batch alert notifications."""
+
+from datetime import datetime, timezone
+
+import pytest
+
+from backend import notifications
+from backend.schemas import GeoInfo
+from backend.ingestion import IngestedQuery
+from backend.models import AlertRule
+from backend.notifications import AlertContext, NotificationService, render_template
+
+
+class _FakeGeoIP:
+    def __init__(self, countries):
+        self.countries = countries
+
+    def lookup(self, ip):
+        code = self.countries.get(ip)
+        return GeoInfo(country=code) if code else None
+
+
+@pytest.fixture
+def geoip(monkeypatch):
+    fake = _FakeGeoIP({"1.2.3.4": "CN", "5.6.7.8": "US", "9.9.9.9": "RU"})
+    monkeypatch.setattr(notifications, "get_geoip", lambda: fake)
+    return fake
+
+
+def _q(domain, ips, countries, client="laptop"):
+    return IngestedQuery(
+        id=0, domain=domain, client_ip="10.0.0.1", client_hostname=client,
+        timestamp=datetime.now(timezone.utc), query_type="A", status="OK",
+        server="s", answer_ips=ips, answer_countries=countries)
+
+
+def _rule(match_countries):
+    return AlertRule(id=1, name="geo", match_countries=match_countries)
+
+
+def test_query_list_shows_matched_country_and_ip(geoip):
+    ctx = NotificationService()._build_batch_context(
+        [_q("example.cn", ["1.2.3.4", "5.6.7.8"], ["CN", "US"])], _rule("CN,RU"))
+    assert ctx.query_list == "example.cn - laptop (CN: 1.2.3.4)"
+    assert ctx.countries == "CN"
+    assert ctx.answer_ips == "1.2.3.4"
+
+
+def test_batch_unions_countries_and_ips_without_duplicates(geoip):
+    queries = [_q("a.cn", ["1.2.3.4"], ["CN"]), _q("a.cn", ["1.2.3.4"], ["CN"]),
+               _q("b.ru", ["9.9.9.9"], ["RU"])]
+    for dedupe in (False, True):
+        ctx = NotificationService()._build_batch_context(queries, _rule("RU,CN"), dedupe=dedupe)
+        assert ctx.countries == "CN, RU"
+        assert ctx.answer_ips == "1.2.3.4, 9.9.9.9"
+    assert ctx.query_list.splitlines() == ["a.cn - laptop (CN: 1.2.3.4)", "b.ru - laptop (RU: 9.9.9.9)"]
+
+
+def test_unresolvable_ips_still_show_the_country(geoip):
+    ctx = NotificationService()._build_batch_context(
+        [_q("gone.cn", ["8.8.4.4"], ["CN"])], _rule("CN"))
+    assert ctx.query_list == "gone.cn - laptop (CN)"
+    assert ctx.countries == "CN"
+    assert ctx.answer_ips == ""
+
+
+def test_rules_without_match_countries_keep_plain_lines(geoip):
+    ctx = NotificationService()._build_batch_context(
+        [_q("example.cn", ["1.2.3.4"], ["CN"])], _rule(None))
+    assert ctx.query_list == "example.cn - laptop"
+    assert ctx.countries == "" and ctx.answer_ips == ""
+
+
+def test_template_renders_countries_and_answer_ips():
+    ctx = AlertContext(domain="d", client_ip="c", client_hostname=None, rule_name="r",
+                       server_name="s", timestamp="", query_type="A", status="OK", count=1,
+                       countries="CN", answer_ips="1.2.3.4")
+    assert render_template("{countries} {answer_ips}", ctx) == "CN 1.2.3.4"

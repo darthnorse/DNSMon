@@ -10,6 +10,7 @@ from sqlalchemy import select, and_
 from .models import Query, AlertRule, AlertHistory
 from .database import async_session_maker
 from .constants import BLOCKED_STATUSES
+from .utils import split_country_codes
 
 # Per rule, not per batch: a broad rule (e.g. status-only, matching every allowed query)
 # must not use up a shared budget and starve narrower rules of the rest of the batch.
@@ -198,7 +199,7 @@ class AlertEngine:
     async def _get_cached_patterns(self, rule: AlertRule) -> Dict[str, object]:
         """
         Get or compile patterns for a rule.
-        Returns dict with 'domain', 'client_ip', 'client_hostname', 'exclude_client_ips' keys.
+        Returns dict with 'domain', 'client_ip', 'client_hostname', 'exclude_client_ips', 'countries' keys.
         Uses LRU eviction to prevent unbounded memory growth.
         """
         async with self._cache_lock:
@@ -212,6 +213,7 @@ class AlertEngine:
                 'client_ip': self._compile_patterns(rule.client_ip_pattern),
                 'client_hostname': self._compile_patterns(rule.client_hostname_pattern),
                 'exclude_client_ips': self._compile_ip_excludes(rule.exclude_client_ips),
+                'countries': set(split_country_codes(rule.match_countries)),
             }
             self._pattern_cache[rule.id] = cached
 
@@ -305,12 +307,15 @@ class AlertEngine:
             if rule.match_threat and query.domain not in threat_domains:
                 continue
 
+            patterns = cached_patterns.get(rule.id, {})
+
+            countries = patterns.get('countries')
+            if countries and not countries.intersection(query.answer_countries or ()):
+                continue
+
             # Check exclusions first
             if self._should_exclude(query.domain, rule.exclude_domains):
                 continue
-
-            # Get cached patterns for this rule
-            patterns = cached_patterns.get(rule.id, {})
 
             ip_excludes = patterns.get('exclude_client_ips')
             if ip_excludes is not None and not ip_excludes.is_empty and ip_excludes.matches(query.client_ip):

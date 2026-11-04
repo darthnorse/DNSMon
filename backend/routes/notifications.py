@@ -49,6 +49,8 @@ async def get_template_variables(_: User = Depends(get_current_user)):
             {"name": "{timestamp}", "description": "First query timestamp", "example": "2026-01-16 09:30:45"},
             {"name": "{query_type}", "description": "First DNS query type", "example": "A"},
             {"name": "{status}", "description": "First query status", "example": "Blocked"},
+            {"name": "{countries}", "description": "Matched countries (rules with a country condition)", "example": "CN, RU"},
+            {"name": "{answer_ips}", "description": "Answer IPs in the matched countries", "example": "1.2.3.4, 5.6.7.8"},
         ],
         "default_template": DEFAULT_TEMPLATE,
     }
@@ -251,6 +253,8 @@ async def test_channel(
         query_list="test.example.com - test-device.local\nads.tracker.com - 192.168.1.50\nanalytics.test.org - test-device.local",
         domains="test.example.com, ads.tracker.com, analytics.test.org",
         clients="test-device.local, 192.168.1.50",
+        countries="CN",
+        answer_ips="1.2.3.4",
     )
 
     sender = SENDERS.get(channel.channel_type)

@@ -100,6 +100,8 @@ async def _run_migrations(conn):
     migrations = [
         Migration(table='servers', column='extra_config',
                   col_type='JSON', default=None, nullable=True),
+        Migration(table='alert_rules', column='match_countries',
+                  col_type='TEXT', default=None, nullable=True),
         Migration(table='alert_rules', column='match_status',
                   col_type='VARCHAR(20)', default="'any'", nullable=False),
         Migration(table='app_definitions', column='is_category_only',

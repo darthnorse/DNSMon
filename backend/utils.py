@@ -6,7 +6,7 @@ import ipaddress
 import logging
 import socket
 from datetime import datetime, timezone
-from typing import Optional
+from typing import List, Optional
 from urllib.parse import urlparse
 
 import tldextract
@@ -148,3 +148,8 @@ def create_client_from_server(server):
         skip_ssl_verify=server.skip_ssl_verify or False,
         extra_config=server.extra_config or {}
     )
+
+
+def split_country_codes(value: Optional[str]) -> List[str]:
+    """Ordered codes from a stored, already-validated match_countries value."""
+    return [code for code in (value or '').split(',') if code]

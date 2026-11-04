@@ -201,3 +201,38 @@ async def test_create_status_only_rule(async_admin_client: AsyncClient):
     rule = r.json()
     assert rule["match_status"] == "blocked"
     assert rule["domain_pattern"] is None
+
+
+async def test_match_countries_round_trips_and_clears(async_admin_client):
+    r = await async_admin_client.post("/api/alert-rules",
+                                      json={"name": "geo", "match_countries": "cn, ru,CN"})
+    assert r.status_code == 200, r.text
+    rule_id = r.json()["id"]
+    assert r.json()["match_countries"] == "CN,RU"
+
+    listed = await async_admin_client.get("/api/alert-rules")
+    assert next(x for x in listed.json() if x["id"] == rule_id)["match_countries"] == "CN,RU"
+
+    r = await async_admin_client.put(f"/api/alert-rules/{rule_id}", json={"match_countries": "ir"})
+    assert r.json()["match_countries"] == "IR"
+
+    r = await async_admin_client.put(f"/api/alert-rules/{rule_id}", json={"match_countries": ""})
+    assert r.status_code == 200, r.text
+    assert r.json()["match_countries"] is None
+
+
+async def test_match_countries_explicit_null_is_422_and_bad_code_is_422(async_admin_client):
+    r = await async_admin_client.post("/api/alert-rules", json={"name": "geo2", "match_countries": "CN"})
+    rule_id = r.json()["id"]
+    r = await async_admin_client.put(f"/api/alert-rules/{rule_id}", json={"match_countries": None})
+    assert r.status_code == 422
+    r = await async_admin_client.put(f"/api/alert-rules/{rule_id}", json={"match_countries": "CHN"})
+    assert r.status_code == 422
+    assert "match_countries" in r.text
+    r = await async_admin_client.post("/api/alert-rules", json={"name": "geo3", "match_countries": ""})
+    assert r.json()["match_countries"] is None
+
+
+async def test_match_countries_defaults_to_none(async_admin_client):
+    r = await async_admin_client.post("/api/alert-rules", json={"name": "plain"})
+    assert r.json()["match_countries"] is None
