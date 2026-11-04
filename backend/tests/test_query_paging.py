@@ -78,13 +78,21 @@ async def test_adguard_stops_at_end_of_log():
     assert len(fake.older_than_seen) <= 3
 
 
-@pytest.mark.parametrize("override", [{0: ""}, {1: _iso(T0 - timedelta(seconds=999))}])
-async def test_adguard_paging_stops_on_empty_or_stuck_cursor(override):
-    fake = FakeQueryLog(total=5000, oldest_override=override)
+async def test_adguard_paging_stops_on_empty_cursor():
+    fake = FakeQueryLog(total=5000, oldest_override={0: ""})
 
     await _pages(_adguard(fake), 0, int(T0.timestamp()))
 
-    assert len(fake.older_than_seen) <= 3
+    assert len(fake.older_than_seen) == 1
+
+
+async def test_adguard_stuck_cursor_reports_the_range_as_truncated():
+    fake = FakeQueryLog(total=5000, oldest_override={1: _iso(T0 - timedelta(seconds=999))})
+
+    with pytest.raises(QueryRangeTruncated):
+        await _pages(_adguard(fake), 0, int(T0.timestamp()))
+
+    assert len(fake.older_than_seen) == 2
 
 
 async def test_adguard_page_error_raises():
@@ -202,3 +210,8 @@ async def test_clock_drift_is_unknown_when_the_date_overflows(monkeypatch):
     monkeypatch.setattr(dns_client, "parsedate_to_datetime", overflow)
 
     assert await _adguard(lambda r: httpx.Response(200, headers={"Date": "x"})).clock_drift_seconds() is None
+
+
+def test_only_technitium_keeps_progress_page_by_page():
+    assert TechnitiumClient("http://tech.test", "token", "tech1").pages_oldest_first
+    assert not AdGuardHomeClient("http://adguard.test", "pw", "adguard1").pages_oldest_first

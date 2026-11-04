@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { appDefinitionApi } from '../utils/api';
 import { getErrorMessage } from '../utils/errors';
+import { formatDateOrNever } from '../utils/dates';
 import { sourceLabel } from '../utils/labels';
 import type { AppDefinition, AppDefinitionCreate, FeedStatus } from '../types';
 
@@ -115,11 +116,6 @@ export default function AppDefinitionsSettings({ onError, onSuccess }: Props) {
     }
   };
 
-  const formatDate = (dateStr: string | null): string => {
-    if (!dateStr) return 'Never';
-    return new Date(dateStr).toLocaleString();
-  };
-
   const SOURCE_BADGE: Record<AppDefinition['source'], string> = {
     adguard: 'bg-teal-100 dark:bg-teal-900/30 text-teal-800 dark:text-teal-300',
     dnsmon: 'bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300',
@@ -162,7 +158,7 @@ export default function AppDefinitionsSettings({ onError, onSuccess }: Props) {
             </div>
             <div>
               <dt className="text-gray-500 dark:text-gray-400">Last refreshed</dt>
-              <dd className="font-medium text-gray-900 dark:text-white">{formatDate(feedStatus.last_refreshed_at)}</dd>
+              <dd className="font-medium text-gray-900 dark:text-white">{formatDateOrNever(feedStatus.last_refreshed_at)}</dd>
             </div>
           </dl>
         </div>

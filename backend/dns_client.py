@@ -21,8 +21,9 @@ class QueryFetchError(Exception):
 
 
 class QueryRangeTruncated(Exception):
-    """The walk hit its page cap. Every page yielded is complete, so ingestion may advance
-    to the newest query it saw instead of retrying a range that can never finish."""
+    """The walk can't reach the start of the range: it hit its page cap, or the server's cursor
+    stopped moving. Every page yielded is complete, so ingestion may advance to the newest
+    query it saw instead of retrying a range that can never finish."""
 
 
 def parse_query_time(value: str) -> datetime:
@@ -311,6 +312,11 @@ class DNSBlockerClient(ABC):
     @property
     def supports_sync(self) -> bool:
         """Whether this blocker supports cross-instance configuration sync."""
+        return False
+
+    @property
+    def pages_oldest_first(self) -> bool:
+        """Whether iter_query_pages yields oldest rows first, so stored pages leave no hole behind them."""
         return False
 
     @property

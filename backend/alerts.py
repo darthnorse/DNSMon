@@ -10,7 +10,7 @@ from sqlalchemy import select, and_
 from .models import Query, AlertRule, AlertHistory
 from .database import async_session_maker
 from .constants import BLOCKED_STATUSES
-from .utils import split_country_codes
+from .utils import split_csv
 
 # Per rule, not per batch: a broad rule (e.g. status-only, matching every allowed query)
 # must not use up a shared budget and starve narrower rules of the rest of the batch.
@@ -213,7 +213,7 @@ class AlertEngine:
                 'client_ip': self._compile_patterns(rule.client_ip_pattern),
                 'client_hostname': self._compile_patterns(rule.client_hostname_pattern),
                 'exclude_client_ips': self._compile_ip_excludes(rule.exclude_client_ips),
-                'countries': set(split_country_codes(rule.match_countries)),
+                'countries': set(split_csv(rule.match_countries)),
             }
             self._pattern_cache[rule.id] = cached
 

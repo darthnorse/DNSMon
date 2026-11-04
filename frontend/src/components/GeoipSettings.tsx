@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { geoipApi } from '../utils/api';
 import { getErrorMessage } from '../utils/errors';
+import { formatDateOrNever } from '../utils/dates';
 import type { GeoipStatus } from '../types';
 
 interface Props {
@@ -21,7 +22,6 @@ const NO_PASSWORD_MANAGER = {
   'data-form-type': 'other',
 };
 
-const formatTime = (value: string | null): string => (value ? new Date(value).toLocaleString() : 'Never');
 const formatBuild = (epoch: number | null): string => (epoch ? new Date(epoch * 1000).toLocaleString() : 'None');
 
 function ExternalLink({ href, children }: { href: string; children: string }) {
@@ -125,7 +125,7 @@ export default function GeoipSettings({ onError, onSuccess }: Props) {
       setLicenseKey('');
       if (next.refresh_started) {
         onSuccess('Saved. Downloading the databases in the background.');
-        pollUntilChecked(status?.last_checked_at ?? null);
+        pollUntilChecked(next.last_checked_at);
       } else {
         onSuccess('Saved');
       }
@@ -249,9 +249,9 @@ export default function GeoipSettings({ onError, onSuccess }: Props) {
 
       <dl className="mt-6 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
         <dt className="text-gray-500 dark:text-gray-400">Last updated</dt>
-        <dd className="text-gray-900 dark:text-white">{formatTime(status?.last_updated_at ?? null)}</dd>
+        <dd className="text-gray-900 dark:text-white">{formatDateOrNever(status?.last_updated_at ?? null)}</dd>
         <dt className="text-gray-500 dark:text-gray-400">Last checked</dt>
-        <dd className="text-gray-900 dark:text-white">{formatTime(status?.last_checked_at ?? null)}</dd>
+        <dd className="text-gray-900 dark:text-white">{formatDateOrNever(status?.last_checked_at ?? null)}</dd>
         <dt className="text-gray-500 dark:text-gray-400">City database</dt>
         <dd className="text-gray-900 dark:text-white">{formatBuild(status?.city_build ?? null)}</dd>
         <dt className="text-gray-500 dark:text-gray-400">ASN database</dt>

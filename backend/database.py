@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from sqlalchemy.pool import NullPool
 from sqlalchemy import text
 from .constants import HAGEZI_FEED_URL
-from .models import Base
+from .models import Base, Query
 
 logger = logging.getLogger(__name__)
 
@@ -243,7 +243,6 @@ async def ensure_insight_sources() -> int:
 
 def _answer_indexes() -> dict[str, str]:
     """GIN index name -> column, as declared on Query, so upgrades build what fresh installs get."""
-    from .models import Query
     return {ix.name: next(iter(ix.columns)).name for ix in Query.__table__.indexes
             if ix.dialect_options['postgresql'].get('using') == 'gin'}
 

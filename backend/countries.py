@@ -1,5 +1,7 @@
 """English names for the ISO 3166-1 alpha-2 codes the GeoIP City database reports."""
 
+COUNTRY_CODE_PATTERN = r'^[A-Za-z]{2}$'
+
 # Generated from Node's Intl.DisplayNames({type: 'region'}). Dropped: codes that only echo
 # themselves, and reserved, retired or pseudo-locale codes.
 # Kept beyond ISO: EU and XK, which MaxMind uses.

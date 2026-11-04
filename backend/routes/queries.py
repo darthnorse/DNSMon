@@ -8,6 +8,7 @@ from sqlalchemy.dialects.postgresql import ARRAY
 from typing import Dict, Literal, Optional, List
 from datetime import datetime, timedelta
 
+from ..countries import COUNTRY_CODE_PATTERN
 from ..database import get_db
 from ..models import Query, User, DomainLabel
 from ..schemas import GeoInfo, QueryContextResponse, QueryResponse
@@ -29,7 +30,6 @@ router = APIRouter(prefix="/api", tags=["queries"])
 # lookups right next to the anchor are always kept.
 CONTEXT_SIDE_LIMIT = 500
 CONTEXT_WINDOWS = (1, 2, 5, 15)
-COUNTRY_CODE_PATTERN = r'^[A-Za-z]{2}$'
 
 
 def _labelled_queries():

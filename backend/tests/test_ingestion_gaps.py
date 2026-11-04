@@ -15,9 +15,10 @@ from backend.models import PiholeServerModel, Query, QueryStatsHourly
 
 
 class FakeClient:
-    def __init__(self, pages: list, gap_recovery: bool = True):
+    def __init__(self, pages: list, gap_recovery: bool = True, oldest_first: bool = False):
         self.pages = pages
         self.supports_gap_recovery = gap_recovery
+        self.pages_oldest_first = oldest_first
         self.requested: tuple[int, int] | None = None
         self.clock_drift: int | None = None
 
@@ -150,6 +151,16 @@ async def test_unexpected_error_mid_walk_still_alerts_stored_pages(db_session, f
 
     assert count == 1
     assert [q.domain for q in alertable] == ["a.example.com"]
+
+
+async def test_oldest_first_walk_keeps_progress_when_a_later_page_fails(db_session, fake_client):
+    stored_up_to = datetime.now(timezone.utc) - timedelta(days=1)
+    server = await _server(db_session, stored_up_to - timedelta(days=1))
+    fake_client(FakeClient([[_q(stored_up_to, "a.example.com")], QueryFetchError("boom")], oldest_first=True))
+
+    await QueryIngestionService().ingest_from_server(server)
+
+    assert await _cursor(db_session, server.id) == stored_up_to
 
 
 async def test_cursor_not_advanced_when_a_page_fails(db_session, fake_client):

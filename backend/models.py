@@ -31,8 +31,9 @@ class Query(Base):
     # stored). Empty: it answered with no addresses (NXDOMAIN, NODATA, blocked).
     answer_ips = Column(ARRAY(INET), nullable=True)
     answer_cnames = Column(ARRAY(Text), nullable=True)
-    # NULL: not looked up (no City database, a server without answers, or a row from before
-    # countries were stored). Empty: looked up, and no answer address had a country.
+    # NULL: not looked up (no City database, a server without answers, a query answered with
+    # no addresses, or a row from before countries were stored). Empty: looked up, and no
+    # answer address had a country.
     answer_countries = Column(ARRAY(String(2)), nullable=True)
 
     # Composite indexes for common query patterns

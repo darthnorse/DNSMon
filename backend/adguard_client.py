@@ -122,8 +122,12 @@ class AdGuardHomeClient(DNSBlockerClient):
 
             oldest = data.get("oldest") or ""
             reached_start = bool(page) and int(page[-1]["timestamp"].timestamp()) < from_timestamp
-            if not rows or not oldest or oldest == cursor or reached_start:
+            if not rows or not oldest or reached_start:
                 return
+            if oldest == cursor:
+                raise QueryRangeTruncated(
+                    f"Query log walk on {self.server_name} stopped because its cursor stopped moving; "
+                    f"entries older than {cursor} were not recovered")
             cursor = oldest
 
         raise QueryRangeTruncated(

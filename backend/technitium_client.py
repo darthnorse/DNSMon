@@ -67,6 +67,10 @@ class TechnitiumClient(DNSBlockerClient):
         return True
 
     @property
+    def pages_oldest_first(self) -> bool:
+        return True
+
+    @property
     def supports_gap_recovery(self) -> bool:
         return True
 

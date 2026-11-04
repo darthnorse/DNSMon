@@ -11,7 +11,7 @@ from typing import ClassVar, Dict, Literal, Optional, List, Tuple, Union, get_ar
 from pydantic import BaseModel, Field as PydanticField, field_validator, model_validator
 
 from .classification import _DOMAIN_RE
-from .countries import COUNTRY_NAMES
+from .countries import COUNTRY_CODE_PATTERN, COUNTRY_NAMES
 from .utils import require_ip
 
 
@@ -33,7 +33,7 @@ def _validate_domain_list(domains):
     return cleaned
 
 
-_COUNTRY_CODE_RE = re.compile(r'[A-Za-z]{2}')
+_COUNTRY_CODE_RE = re.compile(COUNTRY_CODE_PATTERN)
 
 
 def _validate_match_countries(value: Optional[str]) -> Optional[str]:

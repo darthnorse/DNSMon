@@ -441,7 +441,7 @@ export default function AlertRules() {
                 )}
                 {formData.match_countries && formData.match_status === 'blocked' && (
                   <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
-                    Blocked queries store no answers, so this condition can't match.
+                    Blocked queries rarely store answers, so this condition will rarely match.
                   </p>
                 )}
               </div>

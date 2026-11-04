@@ -13,7 +13,7 @@ from .models import Query, QueryStatsHourly, ClientStatsHourly, DomainStatsHourl
 from .database import async_session_maker, cleanup_old_queries
 from .utils import create_client_from_server, normalize_domain
 from .config import get_settings_sync, PiholeServer
-from .dns_client import QueryRangeTruncated
+from .dns_client import QueryFetchError, QueryRangeTruncated
 from .geoip import get_geoip
 from .constants import BLOCKED_STATUSES, CACHE_STATUSES, BLOCKED_SQL_IN, CACHE_SQL_IN
 
@@ -45,7 +45,6 @@ class IngestedQuery:
     status: str
     server: str
     answer_ips: Optional[List[str]] = None
-    answer_cnames: Optional[List[str]] = None
     answer_countries: Optional[List[str]] = None
 
 
@@ -165,9 +164,13 @@ class QueryIngestionService:
                         times = [q["timestamp"] for q in page if isinstance(q.get("timestamp"), datetime)]
                         if times:
                             newest_seen = max([newest_seen, *times] if newest_seen else times)
+                            # Otherwise a failure repeating partway through would re-walk the same
+                            # pages every poll and never reach newer rows, which come last.
+                            if client.pages_oldest_first:
+                                await self._advance_cursor(server, newest_seen)
                 except QueryRangeTruncated as e:
                     logger.warning(str(e))
-                except Exception as e:
+                except QueryFetchError as e:
                     logger.error(f"Ingesting {server.name} stopped mid-range ({e}); retrying the range next poll")
                     return total, alertable
 
@@ -274,7 +277,6 @@ class QueryIngestionService:
                     status=status,
                     server=server_name,
                     answer_ips=answer_ips,
-                    answer_cnames=answer_cnames,
                     answer_countries=answer_countries,
                 ))
 

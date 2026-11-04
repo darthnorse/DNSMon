@@ -10,7 +10,7 @@ from sqlalchemy import select as sa_select
 from .database import async_session_maker
 from .geoip import get_geoip
 from .models import AlertRule, NotificationChannel
-from .utils import validate_url_safety, async_validate_url_safety, split_country_codes
+from .utils import validate_url_safety, async_validate_url_safety, split_csv
 
 logger = logging.getLogger(__name__)
 
@@ -426,7 +426,7 @@ class NotificationService:
 
     @classmethod
     def _matches_per_query(cls, queries: List, rule: AlertRule) -> List[Dict[str, List[str]]]:
-        wanted = split_country_codes(rule.match_countries)
+        wanted = split_csv(rule.match_countries)
         return [cls._country_matches(q, wanted) for q in queries]
 
     @staticmethod
@@ -438,19 +438,18 @@ class NotificationService:
     def _query_line(cls, domain: str, client: str, matches: Dict[str, List[str]]) -> str:
         return f"{domain} - {client}{cls._country_suffix(matches)}"
 
-    def _build_batch_context(self, queries: List, rule: AlertRule, dedupe: bool = False,
-                             matches_per_query: Optional[List[Dict[str, List[str]]]] = None) -> AlertContext:
+    def _build_batch_context(self, queries: List, rule: AlertRule,
+                             matches_per_query: List[Dict[str, List[str]]],
+                             dedupe: bool = False) -> AlertContext:
         """Build alert context from a batch of queries.
 
         Args:
             queries: List of matching queries
             rule: The alert rule that matched
+            matches_per_query: Country matches aligned with queries
             dedupe: If True, only include unique domain-client pairs. If False, include all.
-            matches_per_query: Country matches aligned with queries, when already computed.
         """
         first_query = queries[0]
-        if matches_per_query is None:
-            matches_per_query = self._matches_per_query(queries, rule)
         matched_countries = dict.fromkeys(code for m in matches_per_query for code in m)
         matched_ips = dict.fromkeys(ip for m in matches_per_query for ips in m.values() for ip in ips)
 
@@ -515,7 +514,7 @@ class NotificationService:
 
         def build_context(channel: NotificationChannel) -> AlertContext:
             dedupe = channel.config.get('dedupe_domains', False) if channel.config else False
-            return self._build_batch_context(queries, rule, dedupe=dedupe, matches_per_query=matches_per_query)
+            return self._build_batch_context(queries, rule, matches_per_query, dedupe=dedupe)
 
         return await self._send_to_all_channels(build_context, f"batch alert ({len(queries)} queries)")
 

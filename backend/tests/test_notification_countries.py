@@ -43,8 +43,13 @@ def _rule(match_countries):
     return AlertRule(id=1, name="geo", match_countries=match_countries)
 
 
+def _context(queries, rule, dedupe=False):
+    service = NotificationService()
+    return service._build_batch_context(queries, rule, service._matches_per_query(queries, rule), dedupe=dedupe)
+
+
 def test_query_list_shows_matched_country_and_ip(geoip):
-    ctx = NotificationService()._build_batch_context(
+    ctx = _context(
         [_q("example.cn", ["1.2.3.4", "5.6.7.8"], ["CN", "US"])], _rule("CN,RU"))
     assert ctx.query_list == "example.cn - laptop (CN: 1.2.3.4)"
     assert ctx.countries == "CN"
@@ -55,14 +60,14 @@ def test_batch_unions_countries_and_ips_without_duplicates(geoip):
     queries = [_q("a.cn", ["1.2.3.4"], ["CN"]), _q("a.cn", ["1.2.3.4"], ["CN"]),
                _q("b.ru", ["9.9.9.9"], ["RU"])]
     for dedupe in (False, True):
-        ctx = NotificationService()._build_batch_context(queries, _rule("RU,CN"), dedupe=dedupe)
+        ctx = _context(queries, _rule("RU,CN"), dedupe=dedupe)
         assert ctx.countries == "CN, RU"
         assert ctx.answer_ips == "1.2.3.4, 9.9.9.9"
     assert ctx.query_list.splitlines() == ["a.cn - laptop (CN: 1.2.3.4)", "b.ru - laptop (RU: 9.9.9.9)"]
 
 
 def test_unresolvable_ips_still_show_the_country(geoip):
-    ctx = NotificationService()._build_batch_context(
+    ctx = _context(
         [_q("gone.cn", ["8.8.4.4"], ["CN"])], _rule("CN"))
     assert ctx.query_list == "gone.cn - laptop (CN)"
     assert ctx.countries == "CN"
@@ -70,7 +75,7 @@ def test_unresolvable_ips_still_show_the_country(geoip):
 
 
 def test_rules_without_match_countries_keep_plain_lines(geoip):
-    ctx = NotificationService()._build_batch_context(
+    ctx = _context(
         [_q("example.cn", ["1.2.3.4"], ["CN"])], _rule(None))
     assert ctx.query_list == "example.cn - laptop"
     assert ctx.countries == "" and ctx.answer_ips == ""
@@ -86,7 +91,7 @@ def test_template_renders_countries_and_answer_ips():
 def test_dedupe_line_carries_every_match_of_a_repeated_pair(geoip):
     queries = [_q("a.com", ["1.2.3.4"], ["CN"]), _q("a.com", ["9.9.9.9"], ["RU"]),
                _q("a.com", ["1.2.3.4"], ["CN"])]
-    ctx = NotificationService()._build_batch_context(queries, _rule("CN,RU"), dedupe=True)
+    ctx = _context(queries, _rule("CN,RU"), dedupe=True)
     assert ctx.query_list == "a.com - laptop (CN: 1.2.3.4; RU: 9.9.9.9)"
 
 
@@ -94,7 +99,7 @@ def test_repeated_answer_ip_is_listed_and_looked_up_once(geoip, monkeypatch):
     lookups = []
     real = geoip.lookup
     monkeypatch.setattr(geoip, "lookup", lambda ip: (lookups.append(ip), real(ip))[1])
-    ctx = NotificationService()._build_batch_context(
+    ctx = _context(
         [_q("a.cn", ["1.2.3.4", "1.2.3.4"], ["CN"])], _rule("CN"))
     assert ctx.answer_ips == "1.2.3.4"
     assert lookups == ["1.2.3.4"]

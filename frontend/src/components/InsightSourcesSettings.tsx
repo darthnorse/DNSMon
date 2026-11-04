@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, Fragment } from 'react';
 import { insightSourceApi } from '../utils/api';
 import { getErrorMessage } from '../utils/errors';
+import { formatDateOrNever } from '../utils/dates';
 import type { InsightSource } from '../types';
 
 interface Props {
@@ -95,9 +96,6 @@ export default function InsightSourcesSettings({ onError, onSuccess }: Props) {
     }
   };
 
-  const formatDate = (dateStr: string | null): string =>
-    dateStr ? new Date(dateStr).toLocaleString() : 'Never';
-
   const provides = (kind: string): string => {
     if (kind === 'qfeeds') return 'Threat tagging';
     return kind === 'hosts' ? 'Categories' : 'Apps + Categories';
@@ -158,7 +156,7 @@ export default function InsightSourcesSettings({ onError, onSuccess }: Props) {
                   <td className="px-3 py-2 text-gray-600 dark:text-gray-400 whitespace-nowrap">
                     {src.domain_count?.toLocaleString() ?? '—'}
                   </td>
-                  <td className="px-3 py-2 text-gray-600 dark:text-gray-400 whitespace-nowrap">{formatDate(src.last_fetched_at)}</td>
+                  <td className="px-3 py-2 text-gray-600 dark:text-gray-400 whitespace-nowrap">{formatDateOrNever(src.last_fetched_at)}</td>
                   <td className="px-3 py-2 whitespace-nowrap">
                     {src.last_status === 'error' ? (
                       <span className="text-red-600 dark:text-red-400">error</span>

@@ -60,7 +60,7 @@ export default function StatisticsPage() {
   const [stats, setStats] = useState<Statistics | null>(null);
   const [recentQueries, setRecentQueries] = useState<Query[] | null>(null);
   const [countries, setCountries] = useState<CountryStat[] | null>(null);
-  const geoipConfiguredRef = useRef<Promise<boolean>>(Promise.resolve(false));
+  const [geoipConfigured] = useState(() => geoipApi.isConfigured());
   const [servers, setServers] = useState<PiholeServer[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -94,11 +94,6 @@ export default function StatisticsPage() {
 
   useEffect(() => {
     loadServers();
-  }, []);
-
-  // Assigned before the stats effect below runs, so the first load can wait on it.
-  useEffect(() => {
-    geoipConfiguredRef.current = geoipApi.isConfigured();
   }, []);
 
   // Load clients when period or servers change (or when custom range is applied).
@@ -196,7 +191,7 @@ export default function StatisticsPage() {
   };
 
   const loadCountries = async (params: StatisticsParams): Promise<CountryStat[] | null> => {
-    if (!(await geoipConfiguredRef.current)) return null;
+    if (!(await geoipConfigured)) return null;
     try {
       return await statisticsApi.getCountries(params);
     } catch {
