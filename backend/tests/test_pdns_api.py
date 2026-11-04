@@ -294,12 +294,13 @@ async def test_nul_byte_in_a_domain_lookup_is_400(async_admin_client: AsyncClien
     assert "NUL" in r.json()["detail"]
 
 
-async def test_ip_view_waits_for_a_slot_without_holding_a_connection(db_session):
+@pytest.mark.parametrize("lookup, value", [(pdns_routes.lookup_ip, "1.1.1.1"), (pdns_routes.lookup_domain, "a.example")])
+async def test_lookup_view_waits_for_a_slot_without_holding_a_connection(db_session, lookup, value):
     await db_session.execute(select(Query.id).limit(1))
-    for _ in range(pdns_routes.IP_VIEW_CONCURRENCY):
-        await pdns_routes._ip_view_slots.acquire()
+    for _ in range(pdns_routes.LOOKUP_VIEW_CONCURRENCY):
+        await pdns_routes._lookup_view_slots.acquire()
 
-    view = asyncio.create_task(pdns_routes.lookup_ip("1.1.1.1", None, None, db_session, None))
+    view = asyncio.create_task(lookup(value, None, None, db_session, None))
     try:
         for _ in range(100):
             if not db_session.in_transaction():
@@ -308,11 +309,9 @@ async def test_ip_view_waits_for_a_slot_without_holding_a_connection(db_session)
         assert not db_session.in_transaction()
         assert not view.done()
     finally:
-        for _ in range(pdns_routes.IP_VIEW_CONCURRENCY):
-            pdns_routes._ip_view_slots.release()
-        response = await view
-
-    assert response.ip == "1.1.1.1"
+        for _ in range(pdns_routes.LOOKUP_VIEW_CONCURRENCY):
+            pdns_routes._lookup_view_slots.release()
+        await view
 
 
 async def test_concurrent_batches_are_bounded(async_admin_client: AsyncClient, monkeypatch):

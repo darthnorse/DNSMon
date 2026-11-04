@@ -26,8 +26,8 @@ router = APIRouter(prefix="/api/pdns", tags=["pdns"])
 PDNS_ROW_LIMIT = 500
 RESOLVE_CONCURRENT_BATCHES = 4
 _batch_slots = asyncio.Semaphore(RESOLVE_CONCURRENT_BATCHES)
-IP_VIEW_CONCURRENCY = 4
-_ip_view_slots = asyncio.Semaphore(IP_VIEW_CONCURRENCY)
+LOOKUP_VIEW_CONCURRENCY = 4
+_lookup_view_slots = asyncio.Semaphore(LOOKUP_VIEW_CONCURRENCY)
 
 
 @asynccontextmanager
@@ -63,7 +63,7 @@ async def lookup_ip(
 ):
     ip = _parse_ip(ip)
     where = [Query.answer_ips.contains([ip]), *time_range_conditions(Query.timestamp, from_date, to_date)]
-    async with _limited(db, _ip_view_slots):
+    async with _limited(db, _lookup_view_slots):
         return await _ip_view(db, ip, where)
 
 
@@ -121,10 +121,11 @@ async def lookup_domain(
             .group_by(answers.c.value).order_by(last_seen.desc(), func.count().desc()).limit(PDNS_ROW_LIMIT)
         )).all()
 
-    ips = await grouped(Query.answer_ips)
-    cnames = await grouped(Query.answer_cnames)
-    has_answer_data = bool(ips or cnames) or (await db.execute(
-        select(Query.id).where(*where).limit(1))).first() is not None
+    async with _limited(db, _lookup_view_slots):
+        ips = await grouped(Query.answer_ips)
+        cnames = await grouped(Query.answer_cnames)
+        has_answer_data = bool(ips or cnames) or (await db.execute(
+            select(Query.id).where(*where).limit(1))).first() is not None
 
     return PdnsDomainResponse(
         domain=domain,
