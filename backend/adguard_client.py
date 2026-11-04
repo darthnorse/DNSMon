@@ -29,7 +29,7 @@ ADGUARD_DNS_SYNC_DENYLIST = frozenset({
 
 QUERYLOG_PAGE_SIZE = 1000
 # Bounds one poll's walk (2M entries, days of a busy log) so a runaway or hostile
-# server can't stall ingestion for every other server.
+# server can't keep a poll running forever.
 MAX_QUERYLOG_PAGES = 2000
 
 # GET <endpoint> reads the config; PUT <endpoint>/update writes it back unchanged.

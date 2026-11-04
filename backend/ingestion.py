@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import time
 from datetime import datetime, timedelta, timezone
@@ -49,6 +50,7 @@ class QueryIngestionService:
     def __init__(self):
         self.settings = get_settings_sync()
         self._log_checked_at: dict[str, float] = {}
+        self._in_flight: dict[str, asyncio.Task[Tuple[int, List[IngestedQuery]]]] = {}
 
     def _catchup_floor(self, now: int) -> int:
         return now - self.settings.max_catchup_seconds
@@ -445,22 +447,48 @@ class QueryIngestionService:
             logger.error(f"Error backfilling hourly stats: {e}", exc_info=True)
 
     async def ingest_from_all_servers(self) -> Tuple[int, List[IngestedQuery]]:
-        """Ingest queries from all configured Pi-hole servers.
-        Returns (total_count, all_ingested_queries).
+        """Poll every configured server at once and return what has finished as
+        (total_count, all_ingested_queries). A server still walking a backlog keeps running
+        and is collected by a later call, which won't start a second poll of it.
         """
         # Reload settings to pick up any newly added servers
         from .config import get_settings
         self.settings = await get_settings()
 
+        for server in self.settings.servers:
+            if server.name not in self._in_flight:
+                self._in_flight[server.name] = asyncio.create_task(self.ingest_from_server(server))
+
+        # Waiting for every server would be no better than polling in turn: the scheduler runs
+        # one instance of this job, so a long recovery would still stop the others being polled
+        # until they pass max_catchup_seconds and lose queries. Half an interval leaves the next
+        # tick free. Servers never share rows here, since every key these writes touch has `server`.
+        if self._in_flight:
+            await asyncio.wait(self._in_flight.values(), timeout=self.settings.poll_interval_seconds / 2)
+
         total_count = 0
         all_queries: List[IngestedQuery] = []
-
-        for server in self.settings.servers:
-            count, queries = await self.ingest_from_server(server)
+        for name, task in list(self._in_flight.items()):
+            if not task.done():
+                logger.info(f"Still ingesting from {name}; collecting it on a later poll")
+                continue
+            del self._in_flight[name]
+            if task.cancelled():
+                continue
+            count, queries = task.result()
             total_count += count
             all_queries.extend(queries)
 
         return total_count, all_queries
+
+    async def stop(self) -> None:
+        """Cancel running polls. A cancelled walk loses nothing: its cursor only moves once it
+        finishes, so the next start fetches that range again."""
+        tasks = list(self._in_flight.values())
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        self._in_flight.clear()
 
     async def cleanup_old_data(self):
         """Remove queries older than retention period"""

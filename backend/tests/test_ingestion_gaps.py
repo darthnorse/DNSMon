@@ -1,10 +1,11 @@
+import asyncio
 import time
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
-from backend import ingestion
+from backend import config, ingestion
 from backend.config import PiholeServer
 from backend.dns_client import QueryFetchError, QueryRangeTruncated
 from backend.ingestion import RESUME_OVERLAP_SECONDS, QueryIngestionService
@@ -218,3 +219,98 @@ async def test_polling_does_not_touch_the_server_config_timestamp(db_session, fa
     after = (await db_session.execute(
         select(PiholeServerModel.updated_at).where(PiholeServerModel.id == server.id))).scalar_one()
     assert after == before
+
+
+def _settings(*names: str, poll_interval_seconds: float = 0.02):
+    servers = [PiholeServer(name=name, url="http://x.test", password="pw", server_type="adguard") for name in names]
+
+    async def get_settings():
+        return type("Settings", (), {"servers": servers, "poll_interval_seconds": poll_interval_seconds,
+                                     "max_catchup_seconds": 300, "query_lookback_seconds": 60})()
+    return get_settings
+
+
+@pytest.fixture
+def scripted_polls(monkeypatch):
+    """Each server's ingest returns ([name]) at once, or waits on its event if it has one."""
+    def install(service: QueryIngestionService, *names: str, slow: asyncio.Event | None = None):
+        calls: dict[str, int] = {name: 0 for name in names}
+        monkeypatch.setattr(config, "get_settings", _settings(*names))
+
+        async def ingest(server):
+            calls[server.name] += 1
+            if slow is not None and server.name == "slow":
+                await slow.wait()
+            return 1, [server.name]
+        monkeypatch.setattr(service, "ingest_from_server", ingest)
+        return calls
+    return install
+
+
+async def test_every_server_is_polled_and_collected(scripted_polls):
+    service = QueryIngestionService()
+    scripted_polls(service, "a", "b")
+
+    count, queries = await service.ingest_from_all_servers()
+
+    assert count == 2
+    assert sorted(queries) == ["a", "b"]
+
+
+async def test_a_slow_server_does_not_hold_up_the_others(scripted_polls):
+    service = QueryIngestionService()
+    release = asyncio.Event()
+    calls = scripted_polls(service, "slow", "fast", slow=release)
+
+    first = await service.ingest_from_all_servers()
+    second = await service.ingest_from_all_servers()
+
+    assert first == (1, ["fast"]) and second == (1, ["fast"])
+    assert calls == {"slow": 1, "fast": 2}
+
+    release.set()
+    await asyncio.sleep(0)
+    count, queries = await service.ingest_from_all_servers()
+    await service.stop()
+
+    assert "slow" in queries and count == len(queries)
+
+
+async def test_a_finished_slow_server_is_polled_again(scripted_polls):
+    service = QueryIngestionService()
+    release = asyncio.Event()
+    calls = scripted_polls(service, "slow", slow=release)
+
+    await service.ingest_from_all_servers()
+    release.set()
+    await service.ingest_from_all_servers()
+    await service.ingest_from_all_servers()
+
+    assert calls["slow"] >= 2
+
+
+async def test_stop_cancels_a_running_walk(scripted_polls):
+    service = QueryIngestionService()
+    scripted_polls(service, "slow", slow=asyncio.Event())
+
+    await service.ingest_from_all_servers()
+    running = list(service._in_flight.values())
+    await service.stop()
+
+    assert running[0].cancelled()
+    assert not service._in_flight
+
+
+async def test_servers_writing_the_same_hour_at_once_keep_separate_stats(db_session, monkeypatch):
+    now = datetime.now(timezone.utc) - timedelta(seconds=5)
+    rows = [_q(now - timedelta(milliseconds=i), f"d{i}.example.com") for i in range(50)]
+    monkeypatch.setattr(config, "get_settings", _settings("one", "two", "three", poll_interval_seconds=60))
+    monkeypatch.setattr(ingestion, "create_client_from_server", lambda server: FakeClient([rows]))
+
+    count, _ = await QueryIngestionService().ingest_from_all_servers()
+
+    totals = dict((await db_session.execute(
+        select(QueryStatsHourly.server, func.sum(QueryStatsHourly.total)).group_by(QueryStatsHourly.server))).all())
+    assert count == 150
+    assert totals == {"one": 50, "two": 50, "three": 50}
+

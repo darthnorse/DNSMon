@@ -294,6 +294,7 @@ class DNSMonService:
         await _cancel(self._answer_index_task, "Answer index build cancelled; it resumes on next start")
 
         self.scheduler.shutdown()
+        await self.ingestion_service.stop()
         await self.alert_engine.invalidate_cache()
 
         self._started = False
