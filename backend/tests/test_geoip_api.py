@@ -26,6 +26,25 @@ async def test_get_unconfigured_needs_no_row(async_admin_client: AsyncClient, db
     assert await db_session.get(GeoipSettings, 1) is None
 
 
+async def test_last_error_is_admin_only(async_readonly_client: AsyncClient, db_session):
+    await seed_geoip(db_session, account_id="12345", license_key=KEY, last_status="error",
+                     last_error="GeoLite2-City: HTTP 401")
+
+    body = (await async_readonly_client.get("/api/geoip")).json()
+
+    assert body["last_error"] is None
+    assert body["last_status"] == "error"
+
+
+async def test_admin_sees_last_error(async_admin_client: AsyncClient, db_session):
+    await seed_geoip(db_session, account_id="12345", license_key=KEY, last_status="error",
+                     last_error="GeoLite2-City: HTTP 401")
+
+    body = (await async_admin_client.get("/api/geoip")).json()
+
+    assert body["last_error"] == "GeoLite2-City: HTTP 401"
+
+
 async def test_readonly_get_never_contains_key(async_readonly_client: AsyncClient, db_session):
     await seed_geoip(db_session, account_id="12345", license_key=KEY, city_build=1700000000,
                 last_status="ok", last_updated_at=datetime.now(timezone.utc))

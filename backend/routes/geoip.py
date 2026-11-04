@@ -21,6 +21,9 @@ def _to_status(row: GeoipSettings | None, *, is_admin: bool) -> GeoipStatus:
     if row is None:
         return GeoipStatus(configured=False, has_license_key=False)
     key = row.license_key
+    status = {column: getattr(row, column) for column in STATUS_COLUMNS}
+    if not is_admin:
+        status['last_error'] = None
     return GeoipStatus(
         configured=row.configured,
         account_id=row.account_id if is_admin else None,
@@ -29,7 +32,7 @@ def _to_status(row: GeoipSettings | None, *, is_admin: bool) -> GeoipStatus:
         # unnoticed until MaxMind answered 401. These let an admin recognise their key.
         license_key_length=len(key) if is_admin and key else None,
         license_key_last4=key[-4:] if is_admin and key and len(key) >= MIN_LENGTH_FOR_LAST4 else None,
-        **{column: getattr(row, column) for column in STATUS_COLUMNS},
+        **status,
     )
 
 
