@@ -1,7 +1,10 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from httpx import AsyncClient
+from sqlalchemy.exc import DBAPIError
 
+from backend.api import invalid_text_handler
 from backend.models import Query
 
 
@@ -108,3 +111,19 @@ async def test_count_honours_answer_filter(async_admin_client: AsyncClient, db_s
     r = await async_admin_client.get("/api/queries/count", params={"answer": "192.168.1.9"})
 
     assert r.json()["count"] == 1
+
+
+@pytest.mark.parametrize("param", ["search", "domain", "answer", "client_ip", "client_hostname", "server", "servers"])
+async def test_nul_byte_in_a_filter_is_400(async_admin_client: AsyncClient, param):
+    r = await async_admin_client.get("/api/queries", params={param: "a\x00b"})
+
+    assert r.status_code == 400
+    assert "NUL" in r.json()["detail"]
+
+
+async def test_other_database_errors_still_propagate():
+    error = DBAPIError("SELECT 1", {}, Exception("connection lost"))
+
+    with pytest.raises(DBAPIError):
+        await invalid_text_handler(None, error)
+

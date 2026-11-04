@@ -287,9 +287,32 @@ async def test_unrepresentable_times_are_rejected(async_admin_client: AsyncClien
     assert (await async_admin_client.get("/api/pdns/ip/1.1.1.1", params={"from_date": too_late})).status_code == 400
 
 
-async def test_nul_byte_in_a_name_is_400(async_admin_client: AsyncClient):
-    assert (await async_admin_client.get("/api/pdns/domain/a%00b")).status_code == 400
-    assert (await async_admin_client.get("/api/queries", params={"answer": "a\x00b"})).status_code == 400
+async def test_nul_byte_in_a_domain_lookup_is_400(async_admin_client: AsyncClient):
+    r = await async_admin_client.get("/api/pdns/domain/a%00b")
+
+    assert r.status_code == 400
+    assert "NUL" in r.json()["detail"]
+
+
+async def test_ip_view_waits_for_a_slot_without_holding_a_connection(db_session):
+    await db_session.execute(select(Query.id).limit(1))
+    for _ in range(pdns_routes.IP_VIEW_CONCURRENCY):
+        await pdns_routes._ip_view_slots.acquire()
+
+    view = asyncio.create_task(pdns_routes.lookup_ip("1.1.1.1", None, None, db_session, None))
+    try:
+        for _ in range(100):
+            if not db_session.in_transaction():
+                break
+            await asyncio.sleep(0.01)
+        assert not db_session.in_transaction()
+        assert not view.done()
+    finally:
+        for _ in range(pdns_routes.IP_VIEW_CONCURRENCY):
+            pdns_routes._ip_view_slots.release()
+        response = await view
+
+    assert response.ip == "1.1.1.1"
 
 
 async def test_concurrent_batches_are_bounded(async_admin_client: AsyncClient, monkeypatch):

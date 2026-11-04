@@ -3,6 +3,7 @@ Passive DNS lookups: which domains resolved to an IP and which devices looked th
 and which IPs and CNAMEs a domain resolved to, from the answers stored on queries.
 """
 import asyncio
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -25,6 +26,17 @@ router = APIRouter(prefix="/api/pdns", tags=["pdns"])
 PDNS_ROW_LIMIT = 500
 RESOLVE_CONCURRENT_BATCHES = 4
 _batch_slots = asyncio.Semaphore(RESOLVE_CONCURRENT_BATCHES)
+IP_VIEW_CONCURRENCY = 4
+_ip_view_slots = asyncio.Semaphore(IP_VIEW_CONCURRENCY)
+
+
+@asynccontextmanager
+async def _limited(db: AsyncSession, slots: asyncio.Semaphore):
+    """Auth's read left this request's session holding a pooled connection. Queued requests must
+    give it back first, or the queue itself exhausts the pool the limit exists to protect."""
+    await db.commit()
+    async with slots:
+        yield
 
 
 def _parse_ip(value: str) -> str:
@@ -36,8 +48,8 @@ def _parse_ip(value: str) -> str:
 
 def parse_domain(value: str) -> str:
     domain = normalize_domain(value)
-    if not domain or len(domain) > 255 or "\x00" in domain:
-        raise HTTPException(status_code=400, detail="Domain must be 1-255 characters, without NUL bytes")
+    if not domain or len(domain) > 255:
+        raise HTTPException(status_code=400, detail="Domain must be 1-255 characters")
     return domain
 
 
@@ -51,6 +63,11 @@ async def lookup_ip(
 ):
     ip = _parse_ip(ip)
     where = [Query.answer_ips.contains([ip]), *time_range_conditions(Query.timestamp, from_date, to_date)]
+    async with _limited(db, _ip_view_slots):
+        return await _ip_view(db, ip, where)
+
+
+async def _ip_view(db: AsyncSession, ip: str, where: List) -> PdnsIpResponse:
     last_seen = func.max(Query.timestamp)
 
     # Grouping by (domain, server) first keeps the aggregate parallel-safe, which
@@ -180,10 +197,7 @@ async def resolve_connections(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
-    # Auth's read left this request's session holding a pooled connection. Queued batches must
-    # give it back first, or the queue itself exhausts the pool the limit exists to protect.
-    await db.commit()
-    async with _batch_slots:
+    async with _limited(db, _batch_slots):
         now = datetime.now(timezone.utc)
         whens = [item.at or now for item in request.items]
         lookups = _NewestLookups(db)

@@ -6,13 +6,14 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import DBAPIError
 
 from .database import get_db, init_db
 from .config import get_settings, get_settings_sync
@@ -109,6 +110,19 @@ app = FastAPI(
 )
 
 app.add_middleware(DynamicCORSMiddleware)
+
+POSTGRES_INVALID_TEXT = "22021"
+
+
+async def invalid_text_handler(_: Request, exc: DBAPIError) -> JSONResponse:
+    """Postgres text can't hold a NUL byte, and any text a client sends can carry one, so this
+    is answered once here instead of being validated on every parameter and body field."""
+    if getattr(exc.orig, "sqlstate", None) != POSTGRES_INVALID_TEXT:
+        raise exc
+    return JSONResponse(status_code=400, content={"detail": "Text values must not contain NUL bytes"})
+
+
+app.add_exception_handler(DBAPIError, invalid_text_handler)
 
 app.include_router(auth_router)
 app.include_router(users_router)
