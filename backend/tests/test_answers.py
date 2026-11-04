@@ -104,3 +104,20 @@ def test_empty_answers_are_not_shared():
 
     assert adguard_answers({}, "BLOCKED") == Answers([], [])
     assert technitium_answers(None, "ALLOWED") == Answers([], [])
+
+
+def test_hint_text_inside_a_quoted_parameter_is_not_a_hint():
+    assert adguard_answers(_https_entry('1 . alpn="ipv4hint=203.0.113.7"'), "ALLOWED") == EMPTY
+    assert adguard_answers(_https_entry(r'1 . alpn="a\" ipv4hint=203.0.113.7"'), "ALLOWED") == EMPTY
+
+
+def test_cname_with_a_nul_byte_is_dropped():
+    entry = {"answer": [{"type": "CNAME", "value": "a\x00b.example."}, {"type": "A", "value": "1.2.3.4"}]}
+
+    assert adguard_answers(entry, "ALLOWED") == Answers(["1.2.3.4"], [])
+
+
+def test_safe_search_keeps_its_rewritten_answer():
+    entry = {"reason": "FilteredSafeSearch", "answer": [{"type": "A", "value": "216.239.38.120"}]}
+
+    assert adguard_answers(entry, "BLOCKED").ips == ["216.239.38.120"]

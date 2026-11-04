@@ -84,18 +84,18 @@ class DNSBlockerClient(ABC):
         pass
 
     @abstractmethod
-    async def get_queries(self, from_timestamp: int, until_timestamp: int) -> Optional[List[Dict[str, Any]]]:
+    def iter_query_pages(self, from_timestamp: int, until_timestamp: int) -> AsyncIterator[List[Dict[str, Any]]]:
         """
-        Get DNS queries from the server within a time range.
+        Yield the range's queries in batches; raises QueryFetchError rather than yield a partial range.
 
         Args:
             from_timestamp: Unix timestamp for start of range
             until_timestamp: Unix timestamp for end of range
 
-        Returns:
-            List of query dictionaries in normalized format, or None on error.
+        Yields:
+            Lists of query dictionaries in normalized format.
             Each query dict should contain:
-            - timestamp: Unix timestamp (int)
+            - timestamp: Timezone-aware datetime
             - domain: Domain name (str)
             - client: Dict with 'ip' and optional 'name' keys
             - type: Query type (A, AAAA, etc.)
@@ -315,26 +315,6 @@ class DNSBlockerClient(ABC):
         """Whether iter_query_pages can reach back through the server's whole retained log."""
         return False
 
-    async def _collect_pages(self, from_timestamp: int, until_timestamp: int) -> Optional[List[Dict[str, Any]]]:
-        """Every page of the range in one list, for callers that don't stream; None if a page failed."""
-        results: List[Dict[str, Any]] = []
-        try:
-            async for page in self.iter_query_pages(from_timestamp, until_timestamp):
-                results.extend(page)
-        except QueryFetchError as e:
-            logger.error(str(e))
-            return None
-        except QueryRangeTruncated as e:
-            logger.warning(str(e))
-        return results
-
     async def query_log_warning(self) -> Optional[str]:
         """Why DNSMon would get no usable queries from this server's log, or None when it can."""
         return None
-
-    async def iter_query_pages(self, from_timestamp: int, until_timestamp: int) -> AsyncIterator[List[Dict[str, Any]]]:
-        """Yield the range's queries in batches; raises QueryFetchError rather than yield a partial range."""
-        queries = await self.get_queries(from_timestamp, until_timestamp)
-        if queries is None:
-            raise QueryFetchError(f"Failed to fetch queries from {self.server_name}")
-        yield queries

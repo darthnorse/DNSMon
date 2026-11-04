@@ -28,10 +28,6 @@ QUERY_LOG_CHECK_SECONDS = 900
 POSTGRES_MAX_BIND_PARAMS = 32767
 
 
-class QueryStoreError(Exception):
-    """Queries were fetched but not written; the range must be fetched again."""
-
-
 @dataclass
 class IngestedQuery:
     """Lightweight query object for alert checking (avoids DB round-trip)"""
@@ -89,12 +85,13 @@ class QueryIngestionService:
         newest row and skip everything older."""
         if server.id is None:
             return
-        stmt = update(PiholeServerModel).where(PiholeServerModel.id == server.id)
+        # Naming updated_at stops its onupdate firing: it records config changes, not polls.
+        stmt = update(PiholeServerModel).where(PiholeServerModel.id == server.id).values(
+            updated_at=PiholeServerModel.updated_at)
         if only_if_unset:
             stmt = stmt.where(PiholeServerModel.ingested_until.is_(None)).values(ingested_until=to)
         else:
-            stmt = stmt.values(ingested_until=func.greatest(
-                func.coalesce(PiholeServerModel.ingested_until, to), to))
+            stmt = stmt.values(ingested_until=func.greatest(PiholeServerModel.ingested_until, to))
         async with async_session_maker() as session:
             await session.execute(stmt)
             await session.commit()
@@ -121,11 +118,11 @@ class QueryIngestionService:
             logger.debug(f"Server {server.name} is disabled, skipping")
             return 0, []
 
+        total = 0
+        alertable: List[IngestedQuery] = []
         try:
             now = int(time.time())
             alert_floor = datetime.fromtimestamp(self._catchup_floor(now), tz=timezone.utc)
-            total = 0
-            alertable: List[IngestedQuery] = []
             backlog = 0
             newest_seen: Optional[datetime] = None
 
@@ -169,8 +166,9 @@ class QueryIngestionService:
             return total, alertable
 
         except Exception as e:
+            # Stored rows re-read next poll hit ON CONFLICT and never come back as alertable.
             logger.error(f"Error ingesting from {server.name}: {e}", exc_info=True)
-            return 0, []
+            return total, alertable
 
     async def _store_queries(self, queries: List[dict], server_name: str) -> Tuple[int, List[IngestedQuery]]:
         """Store queries in database with duplicate handling using bulk insert.
@@ -179,131 +177,131 @@ class QueryIngestionService:
         if not queries:
             return 0, []
 
-        try:
-            async with async_session_maker() as session:
-                # One row per unique key within this batch; an A and an HTTPS lookup can
-                # still share a microsecond, and the one carrying addresses is worth keeping.
-                # Across batches ON CONFLICT DO NOTHING keeps whichever arrived first.
-                by_key: dict[tuple, tuple[dict, IngestedQuery]] = {}
-                skipped_untimed = 0
+        async with async_session_maker() as session:
+            # One row per unique key within this batch; an A and an HTTPS lookup can
+            # still share a microsecond, and the one carrying addresses is worth keeping.
+            # Across batches ON CONFLICT DO NOTHING keeps whichever arrived first.
+            by_key: dict[tuple, tuple[dict, IngestedQuery]] = {}
+            skipped_untimed = 0
+            skipped_unstorable = 0
 
-                for query_data in queries:
-                    # Extract client information
-                    client_data = query_data.get("client", {})
-                    if isinstance(client_data, dict):
-                        client_ip = client_data.get("ip", "unknown")
-                        client_hostname = client_data.get("name", "")
-                        # Don't store hostname if it's the same as IP
-                        if client_hostname == client_ip:
-                            client_hostname = None
-                    else:
-                        client_ip = str(client_data)
+            for query_data in queries:
+                # Extract client information
+                client_data = query_data.get("client", {})
+                if isinstance(client_data, dict):
+                    client_ip = client_data.get("ip") or "unknown"
+                    client_hostname = client_data.get("name") or ""
+                    # Don't store hostname if it's the same as IP
+                    if client_hostname == client_ip:
                         client_hostname = None
+                else:
+                    client_ip = str(client_data)
+                    client_hostname = None
 
-                    timestamp = query_data.get("timestamp")
-                    if isinstance(timestamp, (int, float)):
-                        timestamp = datetime.fromtimestamp(timestamp, tz=timezone.utc)
-                    elif isinstance(timestamp, str):
-                        timestamp = datetime.fromisoformat(timestamp)
-                    if not isinstance(timestamp, datetime):
-                        # Stamping "now" instead hid for months that Pi-hole rows never carried their real time.
-                        skipped_untimed += 1
-                        continue
-                    if timestamp.tzinfo is None:
-                        timestamp = timestamp.replace(tzinfo=timezone.utc)
+                timestamp = query_data.get("timestamp")
+                if not isinstance(timestamp, datetime):
+                    # Stamping "now" instead hid for months that Pi-hole rows never carried their real time.
+                    skipped_untimed += 1
+                    continue
 
-                    # Validate and truncate field lengths to prevent database constraint violations
-                    raw_domain = query_data.get("domain", "")
-                    # The root zone's only spelling is its dot, which normalizing would blank.
-                    domain = normalize_domain(raw_domain) or raw_domain.strip()
-                    if len(domain) > 255:
-                        domain = domain[:255]
+                # Validate and truncate field lengths to prevent database constraint violations
+                raw_domain = query_data.get("domain") or ""
+                # The root zone's only spelling is its dot, which normalizing would blank.
+                domain = normalize_domain(raw_domain) or raw_domain.strip()
+                if len(domain) > 255:
+                    domain = domain[:255]
 
-                    query_type = query_data.get("type", "")
-                    if len(query_type) > 10:
-                        query_type = query_type[:10]
+                query_type = query_data.get("type") or ""
+                if len(query_type) > 10:
+                    query_type = query_type[:10]
 
-                    status = query_data.get("status", "")
-                    if len(status) > 50:
-                        status = status[:50]
+                status = query_data.get("status") or ""
+                if len(status) > 50:
+                    status = status[:50]
 
-                    if client_ip and len(client_ip) > 45:
-                        client_ip = client_ip[:45]
+                if client_ip and len(client_ip) > 45:
+                    client_ip = client_ip[:45]
 
-                    if client_hostname and len(client_hostname) > 255:
-                        client_hostname = client_hostname[:255]
+                if client_hostname and len(client_hostname) > 255:
+                    client_hostname = client_hostname[:255]
 
-                    answer_ips = query_data.get("answer_ips")
-                    answer_cnames = query_data.get("answer_cnames")
-                    key = (timestamp, domain, client_ip, server_name)
-                    if key in by_key and not answer_ips:
-                        continue
-                    by_key[key] = ({
-                        'timestamp': timestamp,
-                        'domain': domain,
-                        'client_ip': client_ip,
-                        'client_hostname': client_hostname,
-                        'query_type': query_type,
-                        'status': status,
-                        'server': server_name,
-                        'created_at': datetime.now(timezone.utc),
-                        'answer_ips': answer_ips,
-                        'answer_cnames': answer_cnames,
-                    }, IngestedQuery(
-                        id=0,
-                        domain=domain,
-                        client_ip=client_ip,
-                        client_hostname=client_hostname,
-                        timestamp=timestamp,
-                        query_type=query_type,
-                        status=status,
-                        server=server_name,
-                        answer_ips=answer_ips,
-                        answer_cnames=answer_cnames,
-                    ))
+                # A multi-row insert fails whole, and a retried range would hit the same row
+                # every poll, so only this row is dropped. Only data errors are safe to skip:
+                # dropping a page on a database outage would lose the range.
+                if any("\x00" in text for text in (domain, client_ip, client_hostname or "", query_type, status)):
+                    skipped_unstorable += 1
+                    continue
 
-                if skipped_untimed:
-                    logger.warning(f"Skipped {skipped_untimed} queries from {server_name} with no usable time")
+                answer_ips = query_data.get("answer_ips")
+                answer_cnames = query_data.get("answer_cnames")
+                key = (timestamp, domain, client_ip, server_name)
+                if key in by_key and not answer_ips:
+                    continue
+                by_key[key] = ({
+                    'timestamp': timestamp,
+                    'domain': domain,
+                    'client_ip': client_ip,
+                    'client_hostname': client_hostname,
+                    'query_type': query_type,
+                    'status': status,
+                    'server': server_name,
+                    'created_at': datetime.now(timezone.utc),
+                    'answer_ips': answer_ips,
+                    'answer_cnames': answer_cnames,
+                }, IngestedQuery(
+                    id=0,
+                    domain=domain,
+                    client_ip=client_ip,
+                    client_hostname=client_hostname,
+                    timestamp=timestamp,
+                    query_type=query_type,
+                    status=status,
+                    server=server_name,
+                    answer_ips=answer_ips,
+                    answer_cnames=answer_cnames,
+                ))
 
-                values_list = [values for values, _ in by_key.values()]
-                ingested_queries = [ingested for _, ingested in by_key.values()]
+            if skipped_untimed:
+                logger.warning(f"Skipped {skipped_untimed} queries from {server_name} with no usable time")
+            if skipped_unstorable:
+                logger.warning(f"Skipped {skipped_unstorable} queries from {server_name} with a NUL byte in a text field")
 
-                if not values_list:
-                    return 0, []
+            values_list = [values for values, _ in by_key.values()]
+            ingested_queries = [ingested for _, ingested in by_key.values()]
 
-                batch_size = POSTGRES_MAX_BIND_PARAMS // len(values_list[0])
-                total_inserted = 0
-                inserted_keys: set = set()
+            if not values_list:
+                return 0, []
 
-                for i in range(0, len(values_list), batch_size):
-                    batch = values_list[i:i + batch_size]
+            batch_size = POSTGRES_MAX_BIND_PARAMS // len(values_list[0])
+            total_inserted = 0
+            inserted_keys: set = set()
 
-                    stmt = insert(Query).values(batch)
-                    stmt = stmt.on_conflict_do_nothing(
-                        index_elements=['timestamp', 'domain', 'client_ip', 'server']
-                    ).returning(Query.timestamp, Query.domain, Query.client_ip, Query.server)
+            for i in range(0, len(values_list), batch_size):
+                batch = values_list[i:i + batch_size]
 
-                    result = await session.execute(stmt)
-                    rows = result.fetchall()
-                    total_inserted += len(rows)
-                    for row in rows:
-                        inserted_keys.add((row[0], row[1], row[2], row[3]))
+                stmt = insert(Query).values(batch)
+                stmt = stmt.on_conflict_do_nothing(
+                    index_elements=['timestamp', 'domain', 'client_ip', 'server']
+                ).returning(Query.timestamp, Query.domain, Query.client_ip, Query.server)
 
-                await session.commit()
+                result = await session.execute(stmt)
+                rows = result.fetchall()
+                total_inserted += len(rows)
+                for row in rows:
+                    inserted_keys.add((row[0], row[1], row[2], row[3]))
 
-                skipped = len(values_list) - total_inserted
-                logger.debug(f"Bulk inserted {total_inserted} queries in {(len(values_list) + batch_size - 1) // batch_size} batches, skipped {skipped} duplicates")
+            await session.commit()
 
-                if skipped > 0:
-                    ingested_queries = [
-                        q for q in ingested_queries
-                        if (q.timestamp, q.domain, q.client_ip, q.server) in inserted_keys
-                    ]
+            skipped = len(values_list) - total_inserted
+            logger.debug(f"Bulk inserted {total_inserted} queries in {(len(values_list) + batch_size - 1) // batch_size} batches, skipped {skipped} duplicates")
 
-                return total_inserted, ingested_queries
+            if skipped > 0:
+                ingested_queries = [
+                    q for q in ingested_queries
+                    if (q.timestamp, q.domain, q.client_ip, q.server) in inserted_keys
+                ]
 
-        except Exception as e:
-            raise QueryStoreError(f"Storing queries from {server_name} failed: {e}") from e
+            return total_inserted, ingested_queries
 
     async def update_hourly_stats(self, ingested_queries: List[IngestedQuery]) -> None:
         """Update pre-aggregated hourly stats tables from ingested queries."""

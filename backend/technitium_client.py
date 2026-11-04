@@ -142,16 +142,13 @@ class TechnitiumClient(DNSBlockerClient):
         answers = technitium_answers(raw.get('answer'), status)
         return {
             'timestamp': timestamp,
-            'domain': raw.get('qname', '').rstrip('.'),
+            'domain': raw.get('qname') or '',
             'client': {'ip': raw.get('clientIpAddress', ''), 'name': ''},
             'type': raw.get('qtype', ''),
             'status': status,
             'answer_ips': answers.ips,
             'answer_cnames': answers.cnames,
         }
-
-    async def get_queries(self, from_timestamp: int, until_timestamp: int) -> Optional[List[Dict[str, Any]]]:
-        return await self._collect_pages(from_timestamp, until_timestamp)
 
     async def iter_query_pages(self, from_timestamp: int, until_timestamp: int) -> AsyncIterator[List[Dict[str, Any]]]:
         """Page the Query Logs DNS App oldest-first over [from, until]."""

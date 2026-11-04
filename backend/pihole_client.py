@@ -3,11 +3,11 @@ import hashlib
 import time
 import json
 from datetime import datetime, timezone
-from typing import Optional, Dict, List, Any
+from typing import AsyncIterator, Optional, Dict, List, Any
 from urllib.parse import quote
 import logging
 
-from .dns_client import DNSBlockerClient
+from .dns_client import DNSBlockerClient, QueryFetchError
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +149,12 @@ class PiholeClient(DNSBlockerClient):
             if isinstance(t, (int, float)):
                 q["timestamp"] = datetime.fromtimestamp(t, tz=timezone.utc)
         return queries
+
+    async def iter_query_pages(self, from_timestamp: int, until_timestamp: int) -> AsyncIterator[List[Dict[str, Any]]]:
+        queries = await self.get_queries(from_timestamp, until_timestamp)
+        if queries is None:
+            raise QueryFetchError(f"Failed to fetch queries from {self.server_name}")
+        yield queries
 
     async def get_queries(self, from_timestamp: int, until_timestamp: int) -> Optional[List[Dict[str, Any]]]:
         """Get queries from Pi-hole API"""

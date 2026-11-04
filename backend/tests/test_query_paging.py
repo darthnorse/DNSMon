@@ -111,14 +111,6 @@ async def test_adguard_non_json_page_raises_fetch_error():
         await _pages(client, 0, int(T0.timestamp()))
 
 
-async def test_adguard_get_queries_collects_all_pages():
-    fake = FakeQueryLog(total=2500)
-
-    queries = await _adguard(fake).get_queries(0, int(T0.timestamp()))
-
-    assert len(queries) == 2500
-
-
 def _technitium_handler(pages: dict[int, list[dict] | None]):
     def handler(request: httpx.Request) -> httpx.Response:
         body = pages.get(int(request.url.params["pageNumber"]))

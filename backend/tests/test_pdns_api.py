@@ -294,13 +294,17 @@ async def test_nul_byte_in_a_domain_lookup_is_400(async_admin_client: AsyncClien
     assert "NUL" in r.json()["detail"]
 
 
-@pytest.mark.parametrize("lookup, value", [(pdns_routes.lookup_ip, "1.1.1.1"), (pdns_routes.lookup_domain, "a.example")])
-async def test_lookup_view_waits_for_a_slot_without_holding_a_connection(db_session, lookup, value):
+@pytest.mark.parametrize("lookup", [
+    lambda db: pdns_routes.lookup_ip("1.1.1.1", None, None, db, None),
+    lambda db: pdns_routes.lookup_domain("a.example", None, None, db, None),
+    lambda db: pdns_routes.resolve_connection("1.1.1.1", None, None, db, None),
+], ids=["ip", "domain", "resolve"])
+async def test_lookup_view_waits_for_a_slot_without_holding_a_connection(db_session, lookup):
     await db_session.execute(select(Query.id).limit(1))
     for _ in range(pdns_routes.LOOKUP_VIEW_CONCURRENCY):
         await pdns_routes._lookup_view_slots.acquire()
 
-    view = asyncio.create_task(lookup(value, None, None, db_session, None))
+    view = asyncio.create_task(lookup(db_session))
     try:
         for _ in range(100):
             if not db_session.in_transaction():

@@ -14,7 +14,8 @@ class Answers(NamedTuple):
     cnames: List[str]
 
 
-_HINT = re.compile(r'ipv[46]hint="?([^"\s]+)"?')
+_SVCB_PARAM = re.compile(r'(?:[^\s"\\]|\\.|"(?:[^"\\]|\\.)*")+')
+_HINT_KEYS = {"ipv4hint", "ipv6hint"}
 _TECHNITIUM_PLACEHOLDERS = {"[TRUNCATED]", "[ZONE TRANSFER]"}
 
 
@@ -24,7 +25,13 @@ def _ip(value: str) -> Optional[str]:
 
 
 def _hint_ips(svcb_value: str) -> List[str]:
-    return [ip for group in _HINT.findall(svcb_value) for ip in group.split(",")]
+    """Addresses from real hint parameters only: a quoted value is the queried domain's to fill."""
+    ips: List[str] = []
+    for param in _SVCB_PARAM.findall(svcb_value):
+        key, _, value = param.partition("=")
+        if key.lower() in _HINT_KEYS:
+            ips.extend(value.strip('"').split(","))
+    return ips
 
 
 def _split_records(answer: str) -> List[str]:
@@ -64,7 +71,7 @@ def _collect(records: Iterable[tuple[str, str]]) -> Answers:
             candidates = _hint_ips(value)
         elif rtype == "CNAME":
             name = normalize_domain(value)
-            if name and name not in cnames:
+            if name and "\x00" not in name and name not in cnames:
                 cnames.append(name)
             continue
         else:
@@ -78,8 +85,9 @@ def _collect(records: Iterable[tuple[str, str]]) -> Answers:
 
 def adguard_answers(entry: dict, status: str) -> Answers:
     """Answers from an AdGuard query-log entry. A blocked query gets none: neither the
-    block response nor original_answer, because the device received neither."""
-    if status in BLOCKED_STATUSES:
+    block response nor original_answer, because the device received neither. SafeSearch
+    counts as blocked but is a rewrite, and the device does connect to the address it gets."""
+    if status in BLOCKED_STATUSES and entry.get("reason") != "FilteredSafeSearch":
         return Answers([], [])
     return _collect((r.get("type") or "", r.get("value") or "") for r in entry.get("answer") or [])
 

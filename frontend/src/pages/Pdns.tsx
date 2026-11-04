@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { format } from 'date-fns';
 
 import ClientDetailLink from '../components/ClientDetailLink';
+import PdnsLink from '../components/PdnsLink';
 import { pdnsApi } from '../utils/api';
 import { getErrorMessage } from '../utils/errors';
-import { isIpAddress, pdnsPath } from '../utils/pdns';
+import { isIpAddress } from '../utils/pdns';
 import type { PdnsDomainResponse, PdnsIpResponse } from '../types';
 
 // Mirrors PDNS_ROW_LIMIT in backend/routes/pdns.py, so a full list is labelled as cut off.
@@ -14,7 +15,6 @@ const ROW_LIMIT = 500;
 
 const HEADER_CLASS = 'px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider';
 const CELL_CLASS = 'px-4 py-2 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300';
-const LINK_CLASS = 'font-mono break-all text-blue-600 dark:text-blue-400 hover:underline';
 
 type LookupResult = { kind: 'ip'; data: PdnsIpResponse } | { kind: 'domain'; data: PdnsDomainResponse };
 
@@ -64,7 +64,7 @@ function IpView({ data }: { data: PdnsIpResponse }) {
       >
         {data.domains.map((row) => (
           <tr key={row.domain}>
-            <td className="min-w-[14rem] px-4 py-2 text-sm"><Link to={pdnsPath(row.domain)} className={LINK_CLASS}>{row.domain}</Link></td>
+            <td className="min-w-[14rem] px-4 py-2 text-sm"><PdnsLink value={row.domain} /></td>
             <td className={CELL_CLASS}>{formatTime(row.first_seen)}</td>
             <td className={CELL_CLASS}>{formatTime(row.last_seen)}</td>
             <td className={`${CELL_CLASS} tabular-nums`}>{row.count.toLocaleString()}</td>
@@ -91,6 +91,26 @@ function IpView({ data }: { data: PdnsIpResponse }) {
   );
 }
 
+function AnswerTable({ title, column, rows, empty }: {
+  title: string;
+  column: string;
+  rows: { value: string; first_seen: string; last_seen: string; count: number }[];
+  empty: string;
+}) {
+  return (
+    <ResultTable title={title} headers={[column, 'First seen', 'Last seen', 'Count']} rowCount={rows.length} empty={empty}>
+      {rows.map((row) => (
+        <tr key={row.value}>
+          <td className="min-w-[14rem] px-4 py-2 text-sm"><PdnsLink value={row.value} /></td>
+          <td className={CELL_CLASS}>{formatTime(row.first_seen)}</td>
+          <td className={CELL_CLASS}>{formatTime(row.last_seen)}</td>
+          <td className={`${CELL_CLASS} tabular-nums`}>{row.count.toLocaleString()}</td>
+        </tr>
+      ))}
+    </ResultTable>
+  );
+}
+
 function DomainView({ data }: { data: PdnsDomainResponse }) {
   if (!data.has_answer_data) {
     return (
@@ -100,22 +120,20 @@ function DomainView({ data }: { data: PdnsDomainResponse }) {
       </div>
     );
   }
-  const answerTable = (title: string, rows: { value: string; first_seen: string; last_seen: string; count: number }[], empty: string) => (
-    <ResultTable title={title} headers={[title.slice(0, -1), 'First seen', 'Last seen', 'Count']} rowCount={rows.length} empty={empty}>
-      {rows.map((row) => (
-        <tr key={row.value}>
-          <td className="min-w-[14rem] px-4 py-2 text-sm"><Link to={pdnsPath(row.value)} className={LINK_CLASS}>{row.value}</Link></td>
-          <td className={CELL_CLASS}>{formatTime(row.first_seen)}</td>
-          <td className={CELL_CLASS}>{formatTime(row.last_seen)}</td>
-          <td className={`${CELL_CLASS} tabular-nums`}>{row.count.toLocaleString()}</td>
-        </tr>
-      ))}
-    </ResultTable>
-  );
   return (
     <>
-      {answerTable('IPs', data.ips.map((row) => ({ ...row, value: row.ip })), 'No IPs in any stored answer.')}
-      {answerTable('CNAMEs', data.cnames.map((row) => ({ ...row, value: row.cname })), 'No CNAMEs in any stored answer.')}
+      <AnswerTable
+        title="IPs"
+        column="IP"
+        rows={data.ips.map((row) => ({ ...row, value: row.ip }))}
+        empty="No IPs in any stored answer."
+      />
+      <AnswerTable
+        title="CNAMEs"
+        column="CNAME"
+        rows={data.cnames.map((row) => ({ ...row, value: row.cname }))}
+        empty="No CNAMEs in any stored answer."
+      />
     </>
   );
 }
@@ -133,6 +151,7 @@ export default function Pdns() {
     setInput(q);
     setResult(null);
     setError(null);
+    setLoading(false);
     if (!q) return;
     let cancelled = false;
     const load = async () => {

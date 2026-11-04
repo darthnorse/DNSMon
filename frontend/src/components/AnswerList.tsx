@@ -1,15 +1,9 @@
-import { Link } from 'react-router-dom';
-
-import { pdnsPath } from '../utils/pdns';
-
-const LINK_CLASS = 'font-mono break-all text-blue-600 dark:text-blue-400 hover:underline';
+import PdnsLink from './PdnsLink';
 
 function AnswerLinks({ values }: { values: string[] }) {
   return (
     <>
-      {values.map((value) => (
-        <Link key={value} to={pdnsPath(value)} className={LINK_CLASS}>{value}</Link>
-      ))}
+      {values.map((value) => <PdnsLink key={value} value={value} />)}
     </>
   );
 }

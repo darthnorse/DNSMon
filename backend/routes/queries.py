@@ -96,8 +96,9 @@ async def search_queries(
             Query.client_ip.ilike(search_pattern, escape='\\'),
             Query.client_hostname.ilike(search_pattern, escape='\\'),
         ]
-        if normalize_ip(search) is not None:
-            matches.append(_answer_condition(search))
+        search_ip = normalize_ip(search)
+        if search_ip is not None:
+            matches.append(Query.answer_ips.contains([search_ip]))
         conditions.append(or_(*matches))
 
     if answer:

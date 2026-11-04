@@ -124,3 +124,43 @@ async def test_root_zone_keeps_its_spelling(db_session):
     await QueryIngestionService()._store_queries([{**_q(), "domain": "."}], "pihole1")
 
     assert (await _rows(db_session))[0].domain == "."
+
+
+async def test_row_with_a_nul_byte_costs_only_that_row(db_session):
+    count, _ = await QueryIngestionService()._store_queries([
+        {**_q(), "domain": "a\x00b.example.com"},
+        {**_q(), "client": {"ip": "192.168.1.67", "name": "bad\x00name"}},
+        {**_q(T + timedelta(seconds=1)), "domain": "good.example.com"},
+    ], "technitium1")
+
+    assert count == 1
+    assert [r.domain for r in await _rows(db_session)] == ["good.example.com"]
+
+
+async def test_null_text_fields_do_not_fail_the_page(db_session):
+    count, _ = await QueryIngestionService()._store_queries(
+        [{**_q(), "type": None, "status": None, "client": {"ip": None, "name": None}}], "technitium1")
+
+    assert count == 1
+
+
+def test_technitium_null_qname_does_not_raise():
+    client = TechnitiumClient("http://technitium.test", "token", "tech1")
+
+    assert client._transform_query({"timestamp": "2026-11-03T10:00:00Z", "qname": None})["domain"] == ""
+
+
+def test_adguard_null_question_does_not_raise():
+    client = AdGuardHomeClient("http://adguard.test", "pw", "adguard1")
+
+    assert client._transform_query({"time": "2026-11-03T10:00:00Z", "question": None})["domain"] == ""
+
+
+async def test_adguard_root_query_is_stored_as_the_root(db_session):
+    client = AdGuardHomeClient("http://adguard.test", "pw", "adguard1")
+    query = client._transform_query({"time": "2026-11-03T10:00:00Z", "question": {"name": ".", "type": "NS"},
+                                     "client": "192.168.1.67"})
+
+    await QueryIngestionService()._store_queries([query], "adguard1")
+
+    assert (await _rows(db_session))[0].domain == "."

@@ -189,7 +189,9 @@ async def resolve_connection(
         when = require_resolvable_time(_parse_iso_date(at, "at")) if at else datetime.now(timezone.utc)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return await _resolve(_NewestLookups(db), _parse_ip(client) if client else None, _parse_ip(ip), when)
+    client, ip = _parse_ip(client) if client else None, _parse_ip(ip)
+    async with _limited(db, _lookup_view_slots):
+        return await _resolve(_NewestLookups(db), client, ip, when)
 
 
 @router.post("/resolve", response_model=PdnsResolveResponse)

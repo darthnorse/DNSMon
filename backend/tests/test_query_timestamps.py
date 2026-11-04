@@ -43,7 +43,7 @@ async def test_adguard_same_second_queries_get_distinct_times():
         _adguard_entry("2026-11-03T12:46:48.412830163-07:00", "HTTPS"),
     ]}))
 
-    queries = await client.get_queries(when - 1, when + 1)
+    queries = [q async for page in client.iter_query_pages(when - 1, when + 1) for q in page]
 
     assert [q["type"] for q in queries] == ["A", "HTTPS"]
     assert queries[0]["timestamp"] != queries[1]["timestamp"]

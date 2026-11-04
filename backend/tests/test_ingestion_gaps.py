@@ -185,3 +185,36 @@ async def test_backlog_counts_in_hourly_stats(db_session, fake_client):
     hour = old_ts.replace(minute=0, second=0, microsecond=0)
     row = (await db_session.execute(select(QueryStatsHourly).where(QueryStatsHourly.hour == hour))).scalar_one()
     assert row.total == 1
+
+
+async def test_failure_after_storing_still_returns_the_alerts(db_session, fake_client, monkeypatch):
+    server = await _server(db_session, datetime.now(timezone.utc) - timedelta(minutes=1))
+    fake_client(FakeClient([[_q(datetime.now(timezone.utc) - timedelta(seconds=5), "a.example.com")]]))
+    service = QueryIngestionService()
+    advance = service._advance_cursor
+
+    async def fail_final_advance(server, to, only_if_unset=False):
+        if not only_if_unset:
+            raise RuntimeError("database went away")
+        await advance(server, to, only_if_unset=True)
+    monkeypatch.setattr(service, "_advance_cursor", fail_final_advance)
+
+    count, alertable = await service.ingest_from_server(server)
+
+    assert count == 1
+    assert [q.domain for q in alertable] == ["a.example.com"]
+
+
+async def test_polling_does_not_touch_the_server_config_timestamp(db_session, fake_client):
+    server = await _server(db_session, None)
+    db_session.expire_all()
+    before = (await db_session.execute(
+        select(PiholeServerModel.updated_at).where(PiholeServerModel.id == server.id))).scalar_one()
+    fake_client(FakeClient([[_q(datetime.now(timezone.utc) - timedelta(seconds=5), "a.example.com")]]))
+
+    await QueryIngestionService().ingest_from_server(server)
+
+    db_session.expire_all()
+    after = (await db_session.execute(
+        select(PiholeServerModel.updated_at).where(PiholeServerModel.id == server.id))).scalar_one()
+    assert after == before

@@ -90,9 +90,6 @@ class AdGuardHomeClient(DNSBlockerClient):
             logger.error(f"Error during authentication for {self.server_name}: {e}")
             return False
 
-    async def get_queries(self, from_timestamp: int, until_timestamp: int) -> Optional[List[Dict[str, Any]]]:
-        return await self._collect_pages(from_timestamp, until_timestamp)
-
     async def query_log_warning(self) -> Optional[str]:
         config = await self._get_json(_SYNCED_CONFIG_ENDPOINTS['querylog_config'], 'query log config')
         if not isinstance(config, dict):
@@ -150,8 +147,8 @@ class AdGuardHomeClient(DNSBlockerClient):
             logger.warning(f"Unparseable timestamp {ts!r} from {self.server_name}, skipping entry")
             return None
 
-        question = raw_query.get("question", {})
-        domain = question.get("name", "").rstrip(".")
+        question = raw_query.get("question") or {}
+        domain = question.get("name") or ""
         query_type = question.get("type", "")
 
         client_ip = raw_query.get("client", "")
