@@ -13,6 +13,7 @@ export interface Query {
   answer_ips: string[] | null;
   answer_cnames: string[] | null;
   answer_countries: string[] | null;
+  answer_geo: Record<string, GeoInfo> | null;
 }
 
 export type ContextScope = 'device' | 'all';

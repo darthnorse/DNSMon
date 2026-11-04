@@ -6,7 +6,7 @@ Shared across all route modules.
 import ipaddress
 import re
 from datetime import datetime, timedelta, timezone
-from typing import ClassVar, Literal, Optional, List, Tuple, Union, get_args, get_origin
+from typing import ClassVar, Dict, Literal, Optional, List, Tuple, Union, get_args, get_origin
 
 from pydantic import BaseModel, Field as PydanticField, field_validator, model_validator
 
@@ -68,6 +68,14 @@ MatchStatus = Literal['any', 'blocked', 'allowed']
 # Query Schemas
 # ============================================================================
 
+class GeoInfo(BaseModel):
+    country: Optional[str] = None
+    country_name: Optional[str] = None
+    city: Optional[str] = None
+    asn: Optional[int] = None
+    org: Optional[str] = None
+
+
 class QueryResponse(BaseModel):
     id: int
     timestamp: str
@@ -83,17 +91,10 @@ class QueryResponse(BaseModel):
     answer_ips: Optional[List[str]] = None
     answer_cnames: Optional[List[str]] = None
     answer_countries: Optional[List[str]] = None
+    answer_geo: Optional[Dict[str, GeoInfo]] = None
 
     class Config:
         from_attributes = True
-
-
-class GeoInfo(BaseModel):
-    country: Optional[str] = None
-    country_name: Optional[str] = None
-    city: Optional[str] = None
-    asn: Optional[int] = None
-    org: Optional[str] = None
 
 
 class GeoipStatus(BaseModel):

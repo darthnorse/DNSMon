@@ -21,11 +21,10 @@ function AnswerLinks({ values, geo }: { values: string[]; geo?: Record<string, G
 }
 
 /** NULL means the server doesn't report answers (Pi-hole); an empty list means it answered with nothing. */
-export default function AnswerList({ ips, cnames, geo, countries, compact = false }: {
+export default function AnswerList({ ips, cnames, geo, compact = false }: {
   ips: string[] | null;
   cnames: string[] | null;
   geo?: Record<string, GeoInfo | null>;
-  countries?: string[] | null;
   compact?: boolean;
 }) {
   const unavailable = ips === null && cnames === null;
@@ -60,12 +59,6 @@ export default function AnswerList({ ips, cnames, geo, countries, compact = fals
         <div className="flex flex-wrap gap-x-3">
           <dt className="w-16 text-gray-500 dark:text-gray-400">IPs</dt>
           <dd className="flex flex-wrap gap-x-3 min-w-0"><AnswerLinks values={ipList} geo={geo} /></dd>
-        </div>
-      )}
-      {countries && countries.length > 0 && (
-        <div className="flex flex-wrap gap-x-3">
-          <dt className="w-16 text-gray-500 dark:text-gray-400">Countries</dt>
-          <dd className="font-mono text-gray-700 dark:text-gray-300">{countries.join(', ')}</dd>
         </div>
       )}
     </dl>

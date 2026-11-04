@@ -269,3 +269,30 @@ async def test_column_and_index_exist(db_session):
 
     assert column == "character varying(2)[]"
     assert "gin" in index
+
+
+async def _answer_geo_rows(client, db_session):
+    row = _row(0, None, answer_ips=[SE, "192.168.1.5"])
+    await _add(db_session, row)
+    await db_session.refresh(row)
+    search = (await client.get("/api/queries")).json()[0]
+    context = (await client.get("/api/queries/context", params={"query_id": row.id})).json()["anchor"]
+    return search, context
+
+
+async def test_rows_carry_read_time_geo_for_public_answer_ips(geoip, async_admin_client: AsyncClient, db_session):
+    for body in await _answer_geo_rows(async_admin_client, db_session):
+        assert list(body["answer_geo"]) == [SE]
+        assert body["answer_geo"][SE]["country"] == "SE"
+        assert body["answer_geo"][SE]["asn"] == 29518
+
+
+async def test_rows_have_no_answer_geo_without_databases(isolated_geoip, async_admin_client: AsyncClient, db_session):
+    for body in await _answer_geo_rows(async_admin_client, db_session):
+        assert body["answer_geo"] is None
+
+
+async def test_rows_without_answer_ips_have_no_answer_geo(geoip, async_admin_client: AsyncClient, db_session):
+    await _add(db_session, _row(0, None, answer_ips=None), _row(1, None, answer_ips=[], domain="empty.test"))
+
+    assert [q["answer_geo"] for q in (await async_admin_client.get("/api/queries")).json()] == [None, None]

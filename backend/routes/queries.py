@@ -5,13 +5,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query as QueryParam
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import String, select, func, and_, or_, cast
 from sqlalchemy.dialects.postgresql import ARRAY
-from typing import Literal, Optional, List
+from typing import Dict, Literal, Optional, List
 from datetime import datetime, timedelta
 
 from ..database import get_db
 from ..models import Query, User, DomainLabel
-from ..schemas import QueryContextResponse, QueryResponse
+from ..schemas import GeoInfo, QueryContextResponse, QueryResponse
 from ..auth import get_current_user
+from ..geoip import get_geoip
 from ..utils import ensure_utc, normalize_ip, split_csv
 from .pdns import parse_domain
 from .stats import _parse_iso_date, time_range_conditions
@@ -36,8 +37,17 @@ def _labelled_queries():
                   DomainLabel.threat_type).outerjoin(DomainLabel, Query.domain == DomainLabel.domain)
 
 
+def _answer_geo(ips: Optional[List[str]]) -> Optional[Dict[str, GeoInfo]]:
+    if not ips:
+        return None
+    geoip = get_geoip()
+    found = {ip: info for ip in ips if (info := geoip.lookup(ip))}
+    return found or None
+
+
 def _to_response(row) -> QueryResponse:
     q, app_name, category, threat_type = row
+    answer_ips = q.answer_ip_strings
     return QueryResponse(
         id=q.id,
         timestamp=ensure_utc(q.timestamp),
@@ -50,9 +60,10 @@ def _to_response(row) -> QueryResponse:
         app_name=app_name,
         category=category,
         threat_type=threat_type,
-        answer_ips=q.answer_ip_strings,
+        answer_ips=answer_ips,
         answer_cnames=q.answer_cnames,
         answer_countries=q.answer_countries,
+        answer_geo=_answer_geo(answer_ips),
     )
 
 

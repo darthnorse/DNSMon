@@ -307,7 +307,7 @@ function QueryRow({ row, center, showClient, isAnchor = false }: {
             <span className="px-2 py-0.5 rounded-full text-xs font-sans bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200">this query</span>
           )}
         </span>
-        <span className="mt-0.5 block"><AnswerList ips={query.answer_ips} cnames={query.answer_cnames} compact /></span>
+        <span className="mt-0.5 block"><AnswerList ips={query.answer_ips} cnames={query.answer_cnames} geo={query.answer_geo ?? undefined} compact /></span>
       </td>
       {showClient && (
         <td className="px-4 py-2 whitespace-nowrap text-sm">
