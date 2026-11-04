@@ -44,6 +44,20 @@ A comprehensive web-based dashboard for monitoring and managing multiple Pi-hole
 - Advanced search across domain, client IP, and hostname
 - Date range filtering with pagination
 - Query status tracking (allowed, blocked, cached)
+- Recovers queries missed during an outage from the server's own log (AdGuard Home and Technitium), without a burst of stale alerts
+
+### Passive DNS
+- Stores the IP addresses and CNAME targets each query resolved to (AdGuard Home and Technitium; Pi-hole doesn't report answers)
+- **Lookup** page: every IP a domain resolved to, and every domain and device behind an IP
+- Search by resolved IP or CNAME
+- `resolve` API to name a connection: which domain did this device look up that resolved to this IP?
+- Answers share the query retention setting
+
+### GeoIP (optional)
+- Country and network owner for the IPs in DNS answers, using MaxMind's free GeoLite2 databases
+- Filter searches by country, and see top resolved countries in Statistics
+- Databases are downloaded to your server and refreshed automatically; lookups stay local
+- Everything else works without it
 
 ### Comprehensive Statistics
 - Query counts (today, week, month, all-time)
@@ -60,6 +74,7 @@ A comprehensive web-based dashboard for monitoring and managing multiple Pi-hole
   - Client IP patterns (e.g., `192.168.1.*`)
   - Client hostname patterns (e.g., `*kids-tablet*`)
 - Exclusion patterns to reduce false positives
+- Alert when a query resolves to chosen countries (needs GeoIP and a server that reports answers)
 - Configurable cooldown periods to prevent alert spam
 - Batched notifications for multiple matches
 
@@ -184,10 +199,13 @@ services:
       TZ: America/Denver  # Your timezone
     ports:
       - "8000:8000"
+    volumes:
+      - dnsmon_geoip:/app/geoip
     restart: unless-stopped
 
 volumes:
   dnsmon_postgres_data:
+  dnsmon_geoip:
 ```
 
 2. Start the services:
@@ -248,6 +266,17 @@ location / {
    - **Password/API Key**: Your server's password or API token
 4. Click **Test Connection** to verify
 5. Save and the server will start being monitored
+
+### Technitium Query Logs
+
+DNSMon reads Technitium's query log through the **Query Logs (Sqlite)** DNS App, so install it from **Apps** on the Technitium server. The app keeps 10,000 records by default. On a busy server that limits how far back DNSMon can recover after an outage, so raise `maxLogRecords` in the app's settings if you need more.
+
+### Setting Up GeoIP
+
+1. Create a free [MaxMind GeoLite2 account](https://www.maxmind.com/en/geolite2/signup) and generate a license key.
+2. In DNSMon, go to **Settings** → **GeoIP** and enter your Account ID and license key.
+
+Check the **Saved key** line under the field afterwards: it shows the saved key's length and last 4 characters, so you can spot a browser or password manager filling in something else. Countries are added to new queries from then on; older queries aren't backfilled.
 
 ### Setting Up Notifications
 
@@ -357,6 +386,16 @@ curl -X POST -H "Authorization: Bearer YOUR_API_KEY" -H "Content-Type: applicati
 ### Queries
 - `GET /api/queries` - Search queries with filters
 - `GET /api/queries/count` - Count matching queries
+
+### Passive DNS
+- `GET /api/pdns/domain/{domain}` - IPs and CNAMEs a domain resolved to
+- `GET /api/pdns/ip/{ip}` - Domains and clients behind an IP
+- `GET /api/pdns/resolve?ip=&client=&at=` - Name a connection (`POST` for a batch)
+
+### GeoIP
+- `GET /api/geoip` - Status
+- `PUT /api/geoip` - Save or clear credentials (admin)
+- `POST /api/geoip/refresh` - Refresh the databases now (admin)
 
 ### Statistics
 - `GET /api/stats` - Dashboard statistics
