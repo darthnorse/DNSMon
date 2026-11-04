@@ -6,6 +6,7 @@ import re
 from typing import Iterable, List, NamedTuple, Optional
 
 from .constants import BLOCKED_STATUSES
+from .utils import normalize_domain, normalize_ip
 
 
 class Answers(NamedTuple):
@@ -18,11 +19,8 @@ _TECHNITIUM_PLACEHOLDERS = {"[TRUNCATED]", "[ZONE TRANSFER]"}
 
 
 def _ip(value: str) -> Optional[str]:
-    try:
-        addr = ipaddress.ip_address(value.strip())
-    except ValueError:
-        return None
-    return None if addr.is_unspecified else str(addr)
+    ip = normalize_ip(value)
+    return None if ip is None or ipaddress.ip_address(ip).is_unspecified else ip
 
 
 def _hint_ips(svcb_value: str) -> List[str]:
@@ -65,7 +63,7 @@ def _collect(records: Iterable[tuple[str, str]]) -> Answers:
         elif rtype in ("HTTPS", "SVCB"):
             candidates = _hint_ips(value)
         elif rtype == "CNAME":
-            name = value.strip().rstrip(".").lower()
+            name = normalize_domain(value)
             if name and name not in cnames:
                 cnames.append(name)
             continue

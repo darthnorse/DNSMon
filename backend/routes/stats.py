@@ -74,12 +74,23 @@ def _parse_iso_date(value: str, field_name: str) -> datetime:
         dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
+        # asyncpg binds in UTC, so a value that overflows here would otherwise fail in the driver as a 500.
+        dt.astimezone(timezone.utc)
         return dt
-    except (ValueError, AttributeError):
+    except (ValueError, AttributeError, OverflowError):
         raise HTTPException(
             status_code=400,
             detail=f"Invalid {field_name} format. Use ISO 8601 (e.g. 2026-02-18T00:00:00Z)"
         )
+
+
+def time_range_conditions(column, from_date: Optional[str], to_date: Optional[str]) -> list:
+    """WHERE clauses for an optional ISO from/to range on `column`; 400 on a bad or inverted range."""
+    from_dt = _parse_iso_date(from_date, "from_date") if from_date else None
+    to_dt = _parse_iso_date(to_date, "to_date") if to_date else None
+    if from_dt and to_dt and from_dt > to_dt:
+        raise HTTPException(status_code=400, detail="from_date must be before or equal to to_date")
+    return [c for c in (column >= from_dt if from_dt else None, column <= to_dt if to_dt else None) if c is not None]
 
 
 def _parse_custom_range(from_date: str, to_date: str) -> tuple[datetime, datetime]:

@@ -43,6 +43,10 @@ class Query(Base):
         Index('idx_queries_answer_cnames', 'answer_cnames', postgresql_using='gin'),
     )
 
+    @property
+    def answer_ip_strings(self):
+        return [str(ip) for ip in self.answer_ips] if self.answer_ips is not None else None
+
     def to_dict(self):
         return {
             'id': self.id,
@@ -53,7 +57,7 @@ class Query(Base):
             'query_type': self.query_type,
             'status': self.status,
             'server': self.server,
-            'answer_ips': [str(ip) for ip in self.answer_ips] if self.answer_ips is not None else None,
+            'answer_ips': self.answer_ip_strings,
             'answer_cnames': self.answer_cnames,
         }
 

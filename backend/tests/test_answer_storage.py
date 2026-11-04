@@ -106,3 +106,21 @@ async def test_answer_indexes_exist_after_ensure(db_session):
         "SELECT c.relname, i.indisvalid, am.amname FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
         "JOIN pg_am am ON am.oid = c.relam WHERE c.relname LIKE 'idx_queries_answer_%' ORDER BY 1"))).all()
     assert rows == [("idx_queries_answer_cnames", True, "gin"), ("idx_queries_answer_ips", True, "gin")]
+
+
+async def test_domains_are_stored_lowercase(db_session):
+    await QueryIngestionService()._store_queries([{**_q(), "domain": "WWW.Example.COM"}], "technitium1")
+
+    assert (await _rows(db_session))[0].domain == "www.example.com"
+
+
+async def test_trailing_dot_is_stripped_from_stored_domains(db_session):
+    await QueryIngestionService()._store_queries([{**_q(), "domain": "Example.COM."}], "pihole1")
+
+    assert (await _rows(db_session))[0].domain == "example.com"
+
+
+async def test_root_zone_keeps_its_spelling(db_session):
+    await QueryIngestionService()._store_queries([{**_q(), "domain": "."}], "pihole1")
+
+    assert (await _rows(db_session))[0].domain == "."

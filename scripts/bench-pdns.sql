@@ -31,10 +31,11 @@ CREATE TABLE queries (
     answer_cnames text[]
 );
 
-INSERT INTO queries (timestamp, domain, client_ip, query_type, status, server, answer_ips, answer_cnames)
+INSERT INTO queries (timestamp, domain, client_ip, client_hostname, query_type, status, server, answer_ips, answer_cnames)
 SELECT now() - random() * interval '60 days',
        'd' || floor(power(random(), 3) * 200000)::int || '.example.com',
        '192.168.1.' || (1 + floor(random() * 60))::int,
+       CASE WHEN random() < 0.7 THEN 'host-' || floor(random() * 60)::int END,
        'A', 'ALLOWED', 'adguard' || (1 + floor(random() * 2))::int,
        CASE WHEN answered THEN (ARRAY[
              '10.0.0.0'::inet + floor(power(random(), 4) * 2000000)::int,
@@ -73,9 +74,15 @@ GROUP BY domain ORDER BY last_seen DESC LIMIT 500;
 
 \echo '== IP view: devices for the hottest IP'
 EXPLAIN (ANALYZE, BUFFERS)
-SELECT client_ip, max(client_hostname), count(*), max(timestamp)
+SELECT client_ip, count(*), max(timestamp)
 FROM queries WHERE answer_ips @> ARRAY['10.0.0.0'::inet]
 GROUP BY client_ip ORDER BY max(timestamp) DESC LIMIT 500;
+
+\echo '== IP view: each device''s latest hostname for the hottest IP'
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT DISTINCT ON (client_ip) client_ip, client_hostname
+FROM queries WHERE answer_ips @> ARRAY['10.0.0.0'::inet] AND client_hostname <> ''
+ORDER BY client_ip, timestamp DESC;
 
 \echo '== Domain view: IPs for the hottest domain'
 EXPLAIN (ANALYZE, BUFFERS)

@@ -12,7 +12,8 @@ from ..models import Query, User, DomainLabel
 from ..schemas import QueryContextResponse, QueryResponse
 from ..auth import get_current_user
 from ..utils import ensure_utc, normalize_ip, split_csv
-from .stats import _parse_iso_date
+from .pdns import parse_domain
+from .stats import _parse_iso_date, time_range_conditions
 
 
 def escape_sql_like(value: str) -> str:
@@ -47,7 +48,7 @@ def _to_response(row) -> QueryResponse:
         app_name=app_name,
         category=category,
         threat_type=threat_type,
-        answer_ips=[str(ip) for ip in q.answer_ips] if q.answer_ips is not None else None,
+        answer_ips=q.answer_ip_strings,
         answer_cnames=q.answer_cnames,
     )
 
@@ -58,7 +59,7 @@ def _answer_condition(value: str):
     ip = normalize_ip(value)
     if ip is not None:
         return Query.answer_ips.contains([ip])
-    return Query.answer_cnames.contains([value.strip().lower().rstrip('.')])
+    return Query.answer_cnames.contains([parse_domain(value)])
 
 
 @router.get("/queries", response_model=List[QueryResponse])
@@ -79,7 +80,8 @@ async def search_queries(
 ):
     """
     Search DNS queries with flexible filtering.
-    - search: searches across domain, client_ip, and client_hostname (OR)
+    - search: searches across domain, client_ip, and client_hostname (OR); an IP also matches answer_ips
+    - answer: exact answer IP (any spelling) or exact CNAME target
     - domain/client_ip/client_hostname: specific field filters (AND)
     - server: substring match; servers: comma-separated exact names, as /api/statistics takes them
     """
@@ -120,19 +122,7 @@ async def search_queries(
     if server_list:
         conditions.append(Query.server.in_(server_list))
 
-    from_dt = None
-    to_dt = None
-
-    if from_date:
-        from_dt = _parse_iso_date(from_date, "from_date")
-        conditions.append(Query.timestamp >= from_dt)
-
-    if to_date:
-        to_dt = _parse_iso_date(to_date, "to_date")
-        conditions.append(Query.timestamp <= to_dt)
-
-    if from_dt and to_dt and from_dt > to_dt:
-        raise HTTPException(status_code=400, detail="from_date must be before or equal to to_date")
+    conditions.extend(time_range_conditions(Query.timestamp, from_date, to_date))
 
     if conditions:
         stmt = stmt.where(and_(*conditions))
@@ -266,19 +256,7 @@ async def count_queries(
     if server_list:
         conditions.append(Query.server.in_(server_list))
 
-    from_dt = None
-    to_dt = None
-
-    if from_date:
-        from_dt = _parse_iso_date(from_date, "from_date")
-        conditions.append(Query.timestamp >= from_dt)
-
-    if to_date:
-        to_dt = _parse_iso_date(to_date, "to_date")
-        conditions.append(Query.timestamp <= to_dt)
-
-    if from_dt and to_dt and from_dt > to_dt:
-        raise HTTPException(status_code=400, detail="from_date must be before or equal to to_date")
+    conditions.extend(time_range_conditions(Query.timestamp, from_date, to_date))
 
     if conditions:
         stmt = stmt.where(and_(*conditions))

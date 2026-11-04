@@ -10,7 +10,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from .models import Query, QueryStatsHourly, ClientStatsHourly, DomainStatsHourly, PiholeServerModel
 from .database import async_session_maker, cleanup_old_queries
-from .utils import create_client_from_server
+from .utils import create_client_from_server, normalize_domain
 from .config import get_settings_sync, PiholeServer
 from .dns_client import QueryRangeTruncated
 from .constants import BLOCKED_STATUSES, CACHE_STATUSES, BLOCKED_SQL_IN, CACHE_SQL_IN
@@ -213,7 +213,9 @@ class QueryIngestionService:
                         timestamp = timestamp.replace(tzinfo=timezone.utc)
 
                     # Validate and truncate field lengths to prevent database constraint violations
-                    domain = query_data.get("domain", "")
+                    raw_domain = query_data.get("domain", "")
+                    # The root zone's only spelling is its dot, which normalizing would blank.
+                    domain = normalize_domain(raw_domain) or raw_domain.strip()
                     if len(domain) > 255:
                         domain = domain[:255]
 

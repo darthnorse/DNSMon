@@ -115,6 +115,18 @@ def normalize_ip(value: str) -> Optional[str]:
         return None
 
 
+def require_ip(value: str) -> str:
+    ip = normalize_ip(value)
+    if ip is None:
+        raise ValueError(f"Not an IP address: {value[:64]}")
+    return ip
+
+
+def normalize_domain(value: str) -> str:
+    """The one spelling stored and searched for domains and CNAME targets."""
+    return value.strip().rstrip(".").lower()
+
+
 def ensure_utc(dt: Optional[datetime]) -> Optional[str]:
     """Ensure datetime is timezone-aware (UTC) and return ISO format"""
     if dt is None:

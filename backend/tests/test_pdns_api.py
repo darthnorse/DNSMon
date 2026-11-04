@@ -1,7 +1,10 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from httpx import AsyncClient
+from sqlalchemy import event
 
+from backend.database import engine
 from backend.models import Query
 
 NOW = datetime.now(timezone.utc).replace(microsecond=0)
@@ -191,3 +194,96 @@ async def test_resolve_batch_rejects_bad_ip(async_admin_client: AsyncClient):
 
 async def test_resolve_open_to_readonly_users(async_readonly_client: AsyncClient):
     assert (await async_readonly_client.post("/api/pdns/resolve", json={"items": []})).status_code == 200
+
+
+async def test_ip_view_reports_the_devices_latest_hostname(async_admin_client: AsyncClient, db_session):
+    db_session.add_all([
+        Query(timestamp=NOW - timedelta(hours=2), domain="a.example", client_ip="192.168.1.5",
+              client_hostname="z-old-name", server="a", answer_ips=["9.9.9.9"], answer_cnames=[]),
+        Query(timestamp=NOW - timedelta(hours=1), domain="a.example", client_ip="192.168.1.5",
+              client_hostname="a-new-name", server="a", answer_ips=["9.9.9.9"], answer_cnames=[]),
+        Query(timestamp=NOW, domain="a.example", client_ip="192.168.1.5",
+              client_hostname=None, server="a", answer_ips=["9.9.9.9"], answer_cnames=[]),
+    ])
+    await db_session.commit()
+
+    body = (await async_admin_client.get("/api/pdns/ip/9.9.9.9")).json()
+
+    assert body["clients"][0]["client_hostname"] == "a-new-name"
+
+
+async def test_inverted_date_range_is_400(async_admin_client: AsyncClient):
+    r = await async_admin_client.get("/api/pdns/domain/example.com", params={
+        "from_date": NOW.isoformat(), "to_date": (NOW - timedelta(days=1)).isoformat()})
+
+    assert r.status_code == 400
+
+
+@pytest.fixture
+def statements():
+    seen: list = []
+
+    def record(conn, cursor, statement, *args):
+        seen.append(statement)
+    event.listen(engine.sync_engine, "before_cursor_execute", record)
+    yield seen
+    event.remove(engine.sync_engine, "before_cursor_execute", record)
+
+
+async def test_resolve_batch_resolves_each_distinct_lookup_once(async_admin_client: AsyncClient, db_session, statements):
+    await _seed_resolve(db_session)
+    at = NOW.isoformat()
+    r = await async_admin_client.post("/api/pdns/resolve", json={"items": [
+        {"client": "192.168.1.99", "ip": "47.1.2.3", "at": at}] * 50})
+
+    resolves = [s for s in statements if "answer_ips @>" in s]
+    assert r.status_code == 200 and len(r.json()["results"]) == 50
+    assert {x["domain"] for x in r.json()["results"]} == {"theirs.example.com"}
+    assert len(resolves) <= 2
+
+
+async def test_resolve_batch_rejects_a_future_item_before_querying(async_admin_client: AsyncClient, db_session, statements):
+    r = await async_admin_client.post("/api/pdns/resolve", json={"items": [
+        {"ip": "1.1.1.1", "at": NOW.isoformat()},
+        {"ip": "1.1.1.1", "at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()}]})
+
+    assert r.status_code == 422
+    assert not [s for s in statements if "answer_ips @>" in s]
+
+
+async def test_blank_hostname_does_not_hide_a_devices_real_name(async_admin_client: AsyncClient, db_session):
+    db_session.add_all([
+        Query(timestamp=NOW - timedelta(hours=1), domain="a.example", client_ip="192.168.1.5",
+              client_hostname="laptop", server="a", answer_ips=["9.9.9.9"], answer_cnames=[]),
+        Query(timestamp=NOW, domain="a.example", client_ip="192.168.1.5",
+              client_hostname="", server="a", answer_ips=["9.9.9.9"], answer_cnames=[]),
+    ])
+    await db_session.commit()
+
+    body = (await async_admin_client.get("/api/pdns/ip/9.9.9.9")).json()
+
+    assert body["clients"][0]["client_hostname"] == "laptop"
+
+
+async def test_device_with_only_blank_hostnames_reports_null(async_admin_client: AsyncClient, db_session):
+    db_session.add(Query(timestamp=NOW, domain="a.example", client_ip="192.168.1.5",
+                         client_hostname="", server="a", answer_ips=["9.9.9.9"], answer_cnames=[]))
+    await db_session.commit()
+
+    body = (await async_admin_client.get("/api/pdns/ip/9.9.9.9")).json()
+
+    assert body["clients"][0]["client_hostname"] is None
+
+
+async def test_unrepresentable_times_are_rejected(async_admin_client: AsyncClient):
+    too_early = "0001-01-01T00:00:00+14:00"
+    too_late = "9999-12-31T23:59:59-14:00"
+
+    assert (await async_admin_client.get("/api/pdns/resolve", params={"ip": "1.1.1.1", "at": too_early})).status_code == 400
+    assert (await async_admin_client.post("/api/pdns/resolve", json={"items": [{"ip": "1.1.1.1", "at": too_early}]})).status_code == 422
+    assert (await async_admin_client.get("/api/pdns/ip/1.1.1.1", params={"from_date": too_late})).status_code == 400
+
+
+async def test_nul_byte_in_a_name_is_400(async_admin_client: AsyncClient):
+    assert (await async_admin_client.get("/api/pdns/domain/a%00b")).status_code == 400
+    assert (await async_admin_client.get("/api/queries", params={"answer": "a\x00b"})).status_code == 400

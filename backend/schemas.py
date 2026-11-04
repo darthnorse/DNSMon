@@ -11,6 +11,7 @@ from typing import ClassVar, Literal, Optional, List, Tuple, Union, get_args, ge
 from pydantic import BaseModel, Field as PydanticField, field_validator, model_validator
 
 from .classification import _DOMAIN_RE
+from .utils import require_ip
 
 
 def _validate_domain_list(domains):
@@ -139,14 +140,20 @@ class PdnsDomainResponse(BaseModel):
 
 
 RESOLVE_BATCH_MAX = 200
+# netdash and DNSMon may run on different hosts; a slightly-ahead clock is not an error.
+RESOLVE_CLOCK_SKEW = timedelta(minutes=5)
 
 
-def _resolve_ip(value: str) -> str:
-    from .utils import normalize_ip
-    ip = normalize_ip(value)
-    if ip is None:
-        raise ValueError(f"not an IP address: {value[:64]}")
-    return ip
+def require_resolvable_time(at: datetime) -> datetime:
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=timezone.utc)
+    try:
+        at.astimezone(timezone.utc)
+    except OverflowError:
+        raise ValueError("'at' is outside the supported date range")
+    if at > datetime.now(timezone.utc) + RESOLVE_CLOCK_SKEW:
+        raise ValueError("'at' is in the future")
+    return at
 
 
 class PdnsResolveItem(BaseModel):
@@ -154,15 +161,15 @@ class PdnsResolveItem(BaseModel):
     ip: str
     at: Optional[datetime] = None
 
-    @field_validator('ip')
+    @field_validator('ip', 'client')
     @classmethod
-    def validate_ip(cls, v: str) -> str:
-        return _resolve_ip(v)
+    def validate_ips(cls, v: Optional[str]) -> Optional[str]:
+        return None if v is None else require_ip(v)
 
-    @field_validator('client')
+    @field_validator('at')
     @classmethod
-    def validate_client(cls, v: Optional[str]) -> Optional[str]:
-        return None if v is None else _resolve_ip(v)
+    def validate_at(cls, v: Optional[datetime]) -> Optional[datetime]:
+        return None if v is None else require_resolvable_time(v)
 
 
 class PdnsResolveRequest(BaseModel):
