@@ -1,6 +1,8 @@
 import asyncio
 import time
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import func, select
@@ -225,21 +227,21 @@ async def test_polling_does_not_touch_the_server_config_timestamp(db_session, fa
     assert after == before
 
 
-def _settings(*names: str, poll_interval_seconds: float = 0.02):
+def _settings(*names: str, poll_interval_seconds: int = 60):
     servers = [PiholeServer(name=name, url="http://x.test", password="pw", server_type="adguard") for name in names]
-
-    async def get_settings():
-        return type("Settings", (), {"servers": servers, "poll_interval_seconds": poll_interval_seconds,
-                                     "max_catchup_seconds": 300, "query_lookback_seconds": 60})()
-    return get_settings
+    return AsyncMock(return_value=SimpleNamespace(
+        servers=servers, poll_interval_seconds=poll_interval_seconds,
+        max_catchup_seconds=300, query_lookback_seconds=60))
 
 
 @pytest.fixture
 def scripted_polls(monkeypatch):
-    """Each server's ingest returns ([name]) at once, or waits on its event if it has one."""
-    def install(service: QueryIngestionService, *names: str, slow: asyncio.Event | None = None):
+    """Ingest returns (1, [name]) at once, except that a server named "slow" first waits on `slow`."""
+    def install(service: QueryIngestionService, *names: str, slow: asyncio.Event | None = None,
+                poll_interval_seconds: int = 60):
         calls: dict[str, int] = {name: 0 for name in names}
-        monkeypatch.setattr(config, "get_settings", _settings(*names))
+        service._poll_wait_seconds = 0.01
+        monkeypatch.setattr(config, "get_settings", _settings(*names, poll_interval_seconds=poll_interval_seconds))
 
         async def ingest(server):
             calls[server.name] += 1
@@ -280,17 +282,27 @@ async def test_a_slow_server_does_not_hold_up_the_others(scripted_polls):
     assert "slow" in queries and count == len(queries)
 
 
-async def test_a_finished_slow_server_is_polled_again(scripted_polls):
+async def test_a_poll_finishing_between_ticks_is_polled_again_on_the_next_tick(scripted_polls):
     service = QueryIngestionService()
     release = asyncio.Event()
     calls = scripted_polls(service, "slow", slow=release)
 
-    await service.ingest_from_all_servers()
+    first = await service.ingest_from_all_servers()
     release.set()
-    await service.ingest_from_all_servers()
-    await service.ingest_from_all_servers()
+    await asyncio.sleep(0.01)
+    second = await service.ingest_from_all_servers()
 
-    assert calls["slow"] >= 2
+    assert first == (0, [])
+    assert calls["slow"] == 2
+    assert second == (2, ["slow", "slow"])
+
+
+async def test_an_interval_awaiting_restart_does_not_lengthen_the_wait(scripted_polls):
+    service = QueryIngestionService()
+    scripted_polls(service, "slow", slow=asyncio.Event(), poll_interval_seconds=3600)
+
+    await asyncio.wait_for(service.ingest_from_all_servers(), timeout=1)
+    await service.stop()
 
 
 async def test_stop_cancels_a_running_walk(scripted_polls):
@@ -308,7 +320,7 @@ async def test_stop_cancels_a_running_walk(scripted_polls):
 async def test_servers_writing_the_same_hour_at_once_keep_separate_stats(db_session, monkeypatch):
     now = datetime.now(timezone.utc) - timedelta(seconds=5)
     rows = [_q(now - timedelta(milliseconds=i), f"d{i}.example.com") for i in range(50)]
-    monkeypatch.setattr(config, "get_settings", _settings("one", "two", "three", poll_interval_seconds=60))
+    monkeypatch.setattr(config, "get_settings", _settings("one", "two", "three"))
     monkeypatch.setattr(ingestion, "create_client_from_server", lambda server: FakeClient([rows]))
 
     count, _ = await QueryIngestionService().ingest_from_all_servers()
@@ -339,4 +351,3 @@ async def test_clock_is_checked_at_most_once_per_interval(db_session, fake_clien
     await service.ingest_from_server(server)
 
     assert len([r for r in caplog.records if "clock" in r.getMessage().lower()]) == 1
-

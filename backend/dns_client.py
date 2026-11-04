@@ -325,7 +325,7 @@ class DNSBlockerClient(ABC):
             response = await self.client.head(self.url)
             server_time = parsedate_to_datetime(response.headers["date"])
             return int((server_time - datetime.now(timezone.utc)).total_seconds())
-        except (httpx.HTTPError, KeyError, ValueError, TypeError):
+        except (httpx.HTTPError, KeyError, ValueError, TypeError, OverflowError):
             return None
 
     async def query_log_warning(self) -> Optional[str]:

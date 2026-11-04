@@ -25,8 +25,8 @@ logger = logging.getLogger(__name__)
 RESUME_OVERLAP_SECONDS = 5
 
 SERVER_CHECK_SECONDS = 900
-# Well inside the smallest max_catchup_seconds (60 s allowed, 300 s default), past which a
-# server's queries count as backlog and stop alerting.
+# Well inside the default max_catchup_seconds (300 s), past which a server's queries count
+# as backlog and stop alerting.
 CLOCK_DRIFT_WARNING_SECONDS = 60
 
 POSTGRES_MAX_BIND_PARAMS = 32767
@@ -54,6 +54,9 @@ class QueryIngestionService:
         self.settings = get_settings_sync()
         self._server_checked_at: dict[str, float] = {}
         self._in_flight: dict[str, asyncio.Task[Tuple[int, List[IngestedQuery]]]] = {}
+        # From the interval the scheduler started with: a changed setting waits for a restart
+        # there, and following it here could hold the job for far longer than a tick.
+        self._poll_wait_seconds = self.settings.poll_interval_seconds / 2
 
     def _catchup_floor(self, now: int) -> int:
         return now - self.settings.max_catchup_seconds
@@ -463,6 +466,7 @@ class QueryIngestionService:
         from .config import get_settings
         self.settings = await get_settings()
 
+        total_count, all_queries = self._collect_finished_polls()
         for server in self.settings.servers:
             if server.name not in self._in_flight:
                 self._in_flight[server.name] = asyncio.create_task(self.ingest_from_server(server))
@@ -472,13 +476,18 @@ class QueryIngestionService:
         # until they pass max_catchup_seconds and lose queries. Half an interval leaves the next
         # tick free. Servers never share rows here, since every key these writes touch has `server`.
         if self._in_flight:
-            await asyncio.wait(self._in_flight.values(), timeout=self.settings.poll_interval_seconds / 2)
+            await asyncio.wait(self._in_flight.values(), timeout=self._poll_wait_seconds)
 
+        count, queries = self._collect_finished_polls()
+        for name in self._in_flight:
+            logger.info(f"Still ingesting from {name}; collecting it on a later poll")
+        return total_count + count, all_queries + queries
+
+    def _collect_finished_polls(self) -> Tuple[int, List[IngestedQuery]]:
         total_count = 0
         all_queries: List[IngestedQuery] = []
         for name, task in list(self._in_flight.items()):
             if not task.done():
-                logger.info(f"Still ingesting from {name}; collecting it on a later poll")
                 continue
             del self._in_flight[name]
             if task.cancelled():
@@ -486,12 +495,12 @@ class QueryIngestionService:
             count, queries = task.result()
             total_count += count
             all_queries.extend(queries)
-
         return total_count, all_queries
 
     async def stop(self) -> None:
-        """Cancel running polls. A cancelled walk loses nothing: its cursor only moves once it
-        finishes, so the next start fetches that range again."""
+        """Cancel running polls. A walk's cursor only moves once it finishes, so the next start
+        re-reads the range, but rows already stored don't come back as alertable, and neither
+        do the results of polls that finished since the last tick."""
         tasks = list(self._in_flight.values())
         for task in tasks:
             task.cancel()

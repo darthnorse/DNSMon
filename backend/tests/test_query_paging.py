@@ -1,11 +1,12 @@
 from datetime import datetime, timedelta, timezone
 from email.utils import format_datetime
+from typing import Callable
 
 import httpx
 import pytest
 
 from backend.adguard_client import AdGuardHomeClient
-from backend import adguard_client, technitium_client
+from backend import adguard_client, dns_client, technitium_client
 from backend.dns_client import QueryFetchError, QueryRangeTruncated
 from backend.pihole_client import PiholeClient
 from backend.technitium_client import TechnitiumClient
@@ -48,9 +49,9 @@ class FakeQueryLog:
         return httpx.Response(200, json={"data": rows, "oldest": oldest})
 
 
-def _adguard(fake: FakeQueryLog) -> AdGuardHomeClient:
+def _adguard(handler: Callable[[httpx.Request], httpx.Response]) -> AdGuardHomeClient:
     client = AdGuardHomeClient("http://adguard.test", "pw", "adguard1")
-    client.client = httpx.AsyncClient(transport=httpx.MockTransport(fake))
+    client.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     return client
 
 
@@ -175,28 +176,29 @@ async def test_pihole_yields_its_queries_as_one_page():
     assert [len(p) for p in pages] == [1]
 
 
-def _clock_client(handler) -> AdGuardHomeClient:
-    client = AdGuardHomeClient("http://adguard.test", "pw", "adguard1")
-    client.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    return client
-
-
 async def test_clock_drift_reads_the_date_header():
     behind = format_datetime(datetime.now(timezone.utc) - timedelta(minutes=10), usegmt=True)
 
-    drift = await _clock_client(lambda r: httpx.Response(200, headers={"Date": behind})).clock_drift_seconds()
+    drift = await _adguard(lambda r: httpx.Response(200, headers={"Date": behind})).clock_drift_seconds()
 
     assert -605 <= drift <= -595
 
 
 @pytest.mark.parametrize("headers", [{}, {"Date": "not a date"}])
 async def test_clock_drift_is_unknown_without_a_usable_date(headers):
-    assert await _clock_client(lambda r: httpx.Response(200, headers=headers)).clock_drift_seconds() is None
+    assert await _adguard(lambda r: httpx.Response(200, headers=headers)).clock_drift_seconds() is None
 
 
 async def test_clock_drift_is_unknown_when_the_server_is_unreachable():
     def refuse(request):
         raise httpx.ConnectError("refused")
 
-    assert await _clock_client(refuse).clock_drift_seconds() is None
+    assert await _adguard(refuse).clock_drift_seconds() is None
 
+
+async def test_clock_drift_is_unknown_when_the_date_overflows(monkeypatch):
+    def overflow(value):
+        raise OverflowError
+    monkeypatch.setattr(dns_client, "parsedate_to_datetime", overflow)
+
+    assert await _adguard(lambda r: httpx.Response(200, headers={"Date": "x"})).clock_drift_seconds() is None
