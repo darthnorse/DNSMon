@@ -90,7 +90,12 @@ def time_range_conditions(column, from_date: Optional[str], to_date: Optional[st
     to_dt = _parse_iso_date(to_date, "to_date") if to_date else None
     if from_dt and to_dt and from_dt > to_dt:
         raise HTTPException(status_code=400, detail="from_date must be before or equal to to_date")
-    return [c for c in (column >= from_dt if from_dt else None, column <= to_dt if to_dt else None) if c is not None]
+    conditions = []
+    if from_dt:
+        conditions.append(column >= from_dt)
+    if to_dt:
+        conditions.append(column <= to_dt)
+    return conditions
 
 
 def _parse_custom_range(from_date: str, to_date: str) -> tuple[datetime, datetime]:

@@ -1,11 +1,14 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import event
+from sqlalchemy import event, select
 
+import backend.routes.pdns as pdns_routes
 from backend.database import engine
 from backend.models import Query
+from backend.schemas import PdnsResolveRequest, PdnsResolveResult
 
 NOW = datetime.now(timezone.utc).replace(microsecond=0)
 
@@ -287,3 +290,46 @@ async def test_unrepresentable_times_are_rejected(async_admin_client: AsyncClien
 async def test_nul_byte_in_a_name_is_400(async_admin_client: AsyncClient):
     assert (await async_admin_client.get("/api/pdns/domain/a%00b")).status_code == 400
     assert (await async_admin_client.get("/api/queries", params={"answer": "a\x00b"})).status_code == 400
+
+
+async def test_concurrent_batches_are_bounded(async_admin_client: AsyncClient, monkeypatch):
+    in_flight = peak = 0
+
+    async def tracked_resolve(*args):
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        await asyncio.sleep(0.01)
+        in_flight -= 1
+        return PdnsResolveResult(match="none")
+    monkeypatch.setattr(pdns_routes, "_resolve", tracked_resolve)
+
+    responses = await asyncio.gather(*[
+        async_admin_client.post("/api/pdns/resolve", json={"items": [{"ip": "1.1.1.1"}]})
+        for _ in range(pdns_routes.RESOLVE_CONCURRENT_BATCHES * 3)])
+
+    assert {r.status_code for r in responses} == {200}
+    assert peak == pdns_routes.RESOLVE_CONCURRENT_BATCHES
+
+
+async def test_queued_batch_holds_no_database_connection(db_session):
+    await db_session.execute(select(Query.id).limit(1))
+    assert db_session.in_transaction()
+    for _ in range(pdns_routes.RESOLVE_CONCURRENT_BATCHES):
+        await pdns_routes._batch_slots.acquire()
+
+    request = PdnsResolveRequest(items=[{"ip": "1.1.1.1"}])
+    batch = asyncio.create_task(pdns_routes.resolve_connections(request, db_session, None))
+    try:
+        for _ in range(100):
+            if not db_session.in_transaction():
+                break
+            await asyncio.sleep(0.01)
+        assert not db_session.in_transaction()
+        assert not batch.done()
+    finally:
+        for _ in range(pdns_routes.RESOLVE_CONCURRENT_BATCHES):
+            pdns_routes._batch_slots.release()
+        response = await batch
+
+    assert response.results[0].match == "none"

@@ -7,7 +7,7 @@ from ..models import User, AppDefinition, AppDomain, DomainLabel
 from ..schemas import ClassifyRequest, ClassifySuggestions
 from ..auth import get_current_user, require_admin
 from ..constants import HIDDEN_APP_SOURCES
-from ..utils import registrable_domain
+from ..utils import normalize_domain, registrable_domain
 from ..classification_service import _slugify
 from .app_definitions import _slugify_unique, _reclassify_async
 from ._background import run_in_background
@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api/classify", tags=["classify"])
 
 
 def _resolve(domain: str, scope: str) -> str:
-    return registrable_domain(domain) if scope == 'registrable' else domain.strip().rstrip('.').lower()
+    return registrable_domain(domain) if scope == 'registrable' else normalize_domain(domain)
 
 
 @router.post("")
@@ -115,7 +115,7 @@ async def unclassify(domain: str = Query(..., min_length=1, max_length=255),
 async def get_label(domain: str = Query(..., min_length=1, max_length=255),
                     db: AsyncSession = Depends(get_db),
                     _: User = Depends(get_current_user)):
-    clean = domain.strip().rstrip('.').lower()
+    clean = normalize_domain(domain)
     label = await db.get(DomainLabel, clean)
     return {
         "domain": clean,

@@ -2,6 +2,7 @@
 Passive DNS lookups: which domains resolved to an IP and which devices looked them up,
 and which IPs and CNAMEs a domain resolved to, from the answers stored on queries.
 """
+import asyncio
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -22,6 +23,8 @@ from .stats import _parse_iso_date, time_range_conditions
 router = APIRouter(prefix="/api/pdns", tags=["pdns"])
 
 PDNS_ROW_LIMIT = 500
+RESOLVE_CONCURRENT_BATCHES = 4
+_batch_slots = asyncio.Semaphore(RESOLVE_CONCURRENT_BATCHES)
 
 
 def _parse_ip(value: str) -> str:
@@ -177,10 +180,14 @@ async def resolve_connections(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
-    now = datetime.now(timezone.utc)
-    whens = [item.at or now for item in request.items]
-    lookups = _NewestLookups(db)
-    results: List[Optional[PdnsResolveResult]] = [None] * len(whens)
-    for i in sorted(range(len(whens)), key=whens.__getitem__, reverse=True):
-        results[i] = await _resolve(lookups, request.items[i].client, request.items[i].ip, whens[i])
+    # Auth's read left this request's session holding a pooled connection. Queued batches must
+    # give it back first, or the queue itself exhausts the pool the limit exists to protect.
+    await db.commit()
+    async with _batch_slots:
+        now = datetime.now(timezone.utc)
+        whens = [item.at or now for item in request.items]
+        lookups = _NewestLookups(db)
+        results: List[Optional[PdnsResolveResult]] = [None] * len(whens)
+        for i in sorted(range(len(whens)), key=whens.__getitem__, reverse=True):
+            results[i] = await _resolve(lookups, request.items[i].client, request.items[i].ip, whens[i])
     return PdnsResolveResponse(results=results)

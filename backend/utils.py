@@ -91,10 +91,15 @@ async def async_validate_url_safety(url: str) -> Optional[str]:
     return await asyncio.get_running_loop().run_in_executor(None, validate_url_safety, url)
 
 
+def normalize_domain(value: str) -> str:
+    """The one spelling stored and searched for domains and CNAME targets."""
+    return value.strip().rstrip(".").lower()
+
+
 def registrable_domain(fqdn: str) -> str:
     """Resolve a hostname to its registrable domain (e.g. a.b.example.co.uk ->
     example.co.uk). Falls back to the cleaned input for internal/unknown TLDs."""
-    fqdn = (fqdn or "").strip().rstrip(".").lower()
+    fqdn = normalize_domain(fqdn or "")
     if not fqdn:
         return ""
     ext = _TLD_EXTRACT(fqdn)
@@ -120,11 +125,6 @@ def require_ip(value: str) -> str:
     if ip is None:
         raise ValueError(f"Not an IP address: {value[:64]}")
     return ip
-
-
-def normalize_domain(value: str) -> str:
-    """The one spelling stored and searched for domains and CNAME targets."""
-    return value.strip().rstrip(".").lower()
 
 
 def ensure_utc(dt: Optional[datetime]) -> Optional[str]:
