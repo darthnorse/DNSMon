@@ -101,6 +101,8 @@ class GeoipStatus(BaseModel):
     configured: bool
     account_id: Optional[str] = None
     has_license_key: bool
+    license_key_length: Optional[int] = None
+    license_key_last4: Optional[str] = None
     last_checked_at: Optional[datetime] = None
     last_updated_at: Optional[datetime] = None
     city_build: Optional[int] = None

@@ -11,18 +11,24 @@ from ..geoip import GEOIP_ROW_ID, start_clear, start_refresh
 router = APIRouter(prefix="/api/geoip", tags=["geoip"])
 
 MAX_LICENSE_KEY_LENGTH = 100
+MIN_LENGTH_FOR_LAST4 = 16
 MASK = '********'
 STATUS_COLUMNS = ('last_checked_at', 'last_updated_at', 'city_build',
                   'asn_build', 'last_status', 'last_error')
 
 
-def _to_status(row: GeoipSettings | None) -> GeoipStatus:
+def _to_status(row: GeoipSettings | None, *, is_admin: bool) -> GeoipStatus:
     if row is None:
         return GeoipStatus(configured=False, has_license_key=False)
+    key = row.license_key
     return GeoipStatus(
         configured=row.configured,
         account_id=row.account_id,
-        has_license_key=bool(row.license_key),
+        has_license_key=bool(key),
+        # The form never shows the saved key, so a browser autofilling the field went
+        # unnoticed until MaxMind answered 401. These let an admin recognise their key.
+        license_key_length=len(key) if is_admin and key else None,
+        license_key_last4=key[-4:] if is_admin and key and len(key) >= MIN_LENGTH_FOR_LAST4 else None,
         **{column: getattr(row, column) for column in STATUS_COLUMNS},
     )
 
@@ -38,8 +44,8 @@ def _clean_license_key(value: str | None) -> str | None:
 
 @router.get("", response_model=GeoipStatus)
 async def get_geoip(db: AsyncSession = Depends(get_db),
-                    _: User = Depends(get_current_user)):
-    return _to_status(await db.get(GeoipSettings, GEOIP_ROW_ID))
+                    user: User = Depends(get_current_user)):
+    return _to_status(await db.get(GeoipSettings, GEOIP_ROW_ID), is_admin=bool(user.is_admin))
 
 
 @router.put("", response_model=GeoipUpdateResult)
@@ -81,7 +87,7 @@ async def update_geoip(payload: GeoipUpdate,
         start_clear()
     elif refresh_started:
         start_refresh()
-    return GeoipUpdateResult(**_to_status(row).model_dump(), refresh_started=refresh_started)
+    return GeoipUpdateResult(**_to_status(row, is_admin=True).model_dump(), refresh_started=refresh_started)
 
 
 @router.post("/refresh", status_code=202)

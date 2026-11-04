@@ -89,6 +89,8 @@ export interface GeoipStatus {
   configured: boolean;
   account_id: string | null;
   has_license_key: boolean;
+  license_key_length: number | null;
+  license_key_last4: string | null;
   last_checked_at: string | null;
   last_updated_at: string | null;
   city_build: number | null;

@@ -19,6 +19,7 @@ async def test_get_unconfigured_needs_no_row(async_admin_client: AsyncClient, db
     assert r.status_code == 200, r.text
     assert r.json() == {
         "configured": False, "account_id": None, "has_license_key": False,
+        "license_key_length": None, "license_key_last4": None,
         "last_checked_at": None, "last_updated_at": None, "city_build": None,
         "asn_build": None, "last_status": None, "last_error": None,
     }
@@ -40,6 +41,49 @@ async def test_readonly_get_never_contains_key(async_readonly_client: AsyncClien
     assert body["account_id"] == "12345"
     assert body["city_build"] == 1700000000
     assert body["last_updated_at"] is not None
+    assert body["license_key_length"] is None
+    assert body["license_key_last4"] is None
+
+
+async def test_admin_get_identifies_the_saved_key_without_revealing_it(async_admin_client: AsyncClient, db_session):
+    long_key = "abcdef_0123456789SECRETwxyz"
+    await seed_geoip(db_session, account_id="12345", license_key=long_key)
+
+    r = await async_admin_client.get("/api/geoip")
+
+    assert r.status_code == 200, r.text
+    assert r.json()["license_key_length"] == len(long_key)
+    assert r.json()["license_key_last4"] == "wxyz"
+    assert long_key[:-4] not in r.text
+
+
+async def test_put_response_identifies_the_saved_key(async_admin_client: AsyncClient):
+    long_key = "abcdef_0123456789SECRETwxyz"
+
+    r = await async_admin_client.put("/api/geoip", json={"license_key": long_key})
+
+    assert r.status_code == 200, r.text
+    assert r.json()["license_key_length"] == len(long_key)
+    assert r.json()["license_key_last4"] == "wxyz"
+    assert long_key[:-4] not in r.text
+
+
+async def test_short_key_shows_length_only(async_admin_client: AsyncClient, db_session):
+    await seed_geoip(db_session, account_id="12345", license_key="short")
+
+    body = (await async_admin_client.get("/api/geoip")).json()
+
+    assert body["license_key_length"] == 5
+    assert body["license_key_last4"] is None
+
+
+async def test_cleared_key_has_no_hint(async_admin_client: AsyncClient, db_session):
+    await seed_geoip(db_session, account_id="12345", license_key="abcdef_0123456789SECRETwxyz")
+
+    body = (await async_admin_client.put("/api/geoip", json={"clear": True})).json()
+
+    assert body["license_key_length"] is None
+    assert body["license_key_last4"] is None
 
 
 async def test_account_id_alone_is_not_configured(async_admin_client: AsyncClient, db_session):

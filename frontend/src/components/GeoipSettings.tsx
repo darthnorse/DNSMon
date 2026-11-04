@@ -12,6 +12,14 @@ const POLL_INTERVAL_MS = 3000;
 const POLL_LIMIT = 20;
 const MAXMIND_URL = 'https://www.maxmind.com';
 const SIGNUP_URL = 'https://www.maxmind.com/en/geolite2/signup';
+// A text box followed by a password box looks like a login form, and password managers ignore
+// autoComplete="off". These are the opt-outs 1Password, LastPass, Bitwarden and Dashlane read.
+const NO_PASSWORD_MANAGER = {
+  'data-1p-ignore': true,
+  'data-lpignore': 'true',
+  'data-bwignore': true,
+  'data-form-type': 'other',
+};
 
 const formatTime = (value: string | null): string => (value ? new Date(value).toLocaleString() : 'Never');
 const formatBuild = (epoch: number | null): string => (epoch ? new Date(epoch * 1000).toLocaleString() : 'None');
@@ -189,6 +197,7 @@ export default function GeoipSettings({ onError, onSuccess }: Props) {
             type="text"
             inputMode="numeric"
             autoComplete="off"
+            {...NO_PASSWORD_MANAGER}
             value={accountId}
             onChange={(e) => setAccountId(e.target.value)}
             className={inputClass}
@@ -199,12 +208,19 @@ export default function GeoipSettings({ onError, onSuccess }: Props) {
           <input
             id="geoip-license-key"
             type="password"
-            autoComplete="off"
+            autoComplete="new-password"
+            {...NO_PASSWORD_MANAGER}
             value={licenseKey}
             onChange={(e) => setLicenseKey(e.target.value)}
             placeholder={status?.has_license_key ? 'saved, leave blank to keep' : undefined}
             className={inputClass}
           />
+          {status?.license_key_length != null && (
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Saved key: {status.license_key_length} characters
+              {status.license_key_last4 ? `, ending in ${status.license_key_last4}` : ''}
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
           <button
