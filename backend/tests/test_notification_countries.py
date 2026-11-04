@@ -27,6 +27,11 @@ def geoip(monkeypatch):
     return fake
 
 
+class AlertChannel:
+    def __init__(self, config):
+        self.config = config
+
+
 def _q(domain, ips, countries, client="laptop"):
     return IngestedQuery(
         id=0, domain=domain, client_ip="10.0.0.1", client_hostname=client,
@@ -76,3 +81,38 @@ def test_template_renders_countries_and_answer_ips():
                        server_name="s", timestamp="", query_type="A", status="OK", count=1,
                        countries="CN", answer_ips="1.2.3.4")
     assert render_template("{countries} {answer_ips}", ctx) == "CN 1.2.3.4"
+
+
+def test_dedupe_line_carries_every_match_of_a_repeated_pair(geoip):
+    queries = [_q("a.com", ["1.2.3.4"], ["CN"]), _q("a.com", ["9.9.9.9"], ["RU"]),
+               _q("a.com", ["1.2.3.4"], ["CN"])]
+    ctx = NotificationService()._build_batch_context(queries, _rule("CN,RU"), dedupe=True)
+    assert ctx.query_list == "a.com - laptop (CN: 1.2.3.4; RU: 9.9.9.9)"
+
+
+def test_repeated_answer_ip_is_listed_and_looked_up_once(geoip, monkeypatch):
+    lookups = []
+    real = geoip.lookup
+    monkeypatch.setattr(geoip, "lookup", lambda ip: (lookups.append(ip), real(ip))[1])
+    ctx = NotificationService()._build_batch_context(
+        [_q("a.cn", ["1.2.3.4", "1.2.3.4"], ["CN"])], _rule("CN"))
+    assert ctx.answer_ips == "1.2.3.4"
+    assert lookups == ["1.2.3.4"]
+
+
+async def test_send_batch_alert_looks_up_answers_once_across_channels(geoip, monkeypatch):
+    lookups = []
+    real = geoip.lookup
+    monkeypatch.setattr(geoip, "lookup", lambda ip: (lookups.append(ip), real(ip))[1])
+    contexts = []
+
+    async def two_channels(build_context, _label):
+        contexts.extend(build_context(AlertChannel(config=config)) for config in ({}, {"dedupe_domains": True}))
+        return {}
+
+    service = NotificationService()
+    monkeypatch.setattr(service, "_send_to_all_channels", two_channels)
+    await service.send_batch_alert([_q("a.cn", ["1.2.3.4"], ["CN"])], _rule("CN"))
+
+    assert lookups == ["1.2.3.4"]
+    assert [c.answer_ips for c in contexts] == ["1.2.3.4", "1.2.3.4"]

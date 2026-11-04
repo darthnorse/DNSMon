@@ -2,13 +2,20 @@ import { useState, useEffect } from 'react';
 import { Select, type SelectOption } from '../components/Select';
 import CountryPicker from '../components/CountryPicker';
 import { alertRuleApi, geoipApi, insightSourceApi } from '../utils/api';
-import type { AlertRule, AlertRuleCreate, GeoipCountry, MatchStatus } from '../types';
+import type { AlertRule, AlertRuleCreate, GeoipCountry, GeoipStatus, MatchStatus } from '../types';
 
 const MATCH_STATUS_OPTIONS: SelectOption<MatchStatus>[] = [
   { value: 'any', label: 'Any' },
   { value: 'blocked', label: 'Blocked only' },
   { value: 'allowed', label: 'Allowed only' },
 ];
+
+// Credentials alone don't help: countries are stored only once a City database is loaded.
+const countryConditionProblem = (status: GeoipStatus): string | null => {
+  if (!status.configured) return "GeoIP isn't configured; this condition can't match.";
+  if (status.city_build === null) return "The GeoIP City database isn't loaded; this condition can't match.";
+  return null;
+};
 
 const matchStatusLabel = (status: MatchStatus): string =>
   MATCH_STATUS_OPTIONS.find((o) => o.value === status)?.label ?? status;
@@ -72,10 +79,15 @@ export default function AlertRules() {
 
   const [countries, setCountries] = useState<GeoipCountry[]>([]);
   const [countryUnresolved, setCountryUnresolved] = useState(false);
-  const [geoipConfigured, setGeoipConfigured] = useState(true);
+  const [geoipWarning, setGeoipWarning] = useState<string | null>(null);
 
   const loadGeoipState = async () => {
-    setGeoipConfigured(await geoipApi.isConfigured());
+    try {
+      setGeoipWarning(countryConditionProblem(await geoipApi.get()));
+    } catch (err) {
+      // A failed probe says nothing about GeoIP, so it doesn't warn on a working install.
+      console.error(err);
+    }
     try {
       setCountries(await geoipApi.countries());
     } catch (err) {
@@ -175,7 +187,6 @@ export default function AlertRules() {
 
   const handleEdit = (rule: AlertRule) => {
     setEditingRule(rule);
-    setCountryUnresolved(false);
     setFormData({
       name: rule.name,
       description: rule.description || '',
@@ -207,7 +218,6 @@ export default function AlertRules() {
 
   const handleCancel = () => {
     setShowForm(false);
-    setCountryUnresolved(false);
     setEditingRule(null);
     setFormData({
       name: '',
@@ -426,10 +436,8 @@ export default function AlertRules() {
                 <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                   Fires when an answer resolves to any chosen country.
                 </p>
-                {formData.match_countries && !geoipConfigured && (
-                  <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
-                    GeoIP isn't configured; this condition can't match.
-                  </p>
+                {formData.match_countries && geoipWarning && (
+                  <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">{geoipWarning}</p>
                 )}
                 {formData.match_countries && formData.match_status === 'blocked' && (
                   <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
@@ -515,6 +523,7 @@ export default function AlertRules() {
                           </Badge>
                         )}
                         {rule.match_countries && <Badge color="amber">Countries: {rule.match_countries}</Badge>}
+                        {rule.match_countries && geoipWarning && <Badge color="amber">GeoIP not available</Badge>}
                         {rule.match_threat && <Badge color="red">Malicious only</Badge>}
                         {rule.match_threat && !threatFeedReady && (
                           <Badge color="amber">No threat feed active</Badge>

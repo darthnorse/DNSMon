@@ -11,6 +11,7 @@ from typing import ClassVar, Dict, Literal, Optional, List, Tuple, Union, get_ar
 from pydantic import BaseModel, Field as PydanticField, field_validator, model_validator
 
 from .classification import _DOMAIN_RE
+from .countries import COUNTRY_NAMES
 from .utils import require_ip
 
 
@@ -48,7 +49,10 @@ def _validate_match_countries(value: Optional[str]) -> Optional[str]:
         if not _COUNTRY_CODE_RE.fullmatch(code):
             raise ValueError(f"invalid country code in match_countries: {code!r}; "
                              "use comma-separated two-letter codes such as CN,RU")
-        codes.append(code.upper())
+        code = code.upper()
+        if code not in COUNTRY_NAMES:
+            raise ValueError(f"unknown country code in match_countries: {code!r}")
+        codes.append(code)
     return ','.join(dict.fromkeys(codes))
 
 

@@ -18,7 +18,7 @@ const optionLabel = (c: GeoipCountry): string => `${c.name} (${c.code})`;
 export default function CountryPicker({ id, label, value, countries, onChange, onUnresolvedChange }: CountryPickerProps) {
   const [query, setQuery] = useState('');
   const codes = toCodes(value);
-  const names = new Map(countries.map((c) => [c.code, c.name]));
+  const byCode = new Map(countries.map((c) => [c.code, c]));
   const available = countries.filter((c) => !codes.includes(c.code));
 
   const add = (code: string) => {
@@ -28,7 +28,7 @@ export default function CountryPicker({ id, label, value, countries, onChange, o
 
   const remove = (code: string) => onChange(codes.filter((c) => c !== code).join(','));
 
-  // Without the list (it failed to load) any two-letter code is accepted; the backend validates it.
+  // Without the list (it failed to load) any two-letter code is accepted; the backend rejects unknown ones.
   const resolve = (text: string): string | undefined => {
     const typed = text.trim().toLowerCase();
     if (!typed) return undefined;
@@ -65,17 +65,17 @@ export default function CountryPicker({ id, label, value, countries, onChange, o
       {codes.length > 0 && (
         <ul className="mt-1 flex flex-wrap gap-2">
           {codes.map((code) => {
-            const name = names.get(code);
+            const country = byCode.get(code);
             return (
               <li
                 key={code}
                 className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300"
               >
-                {name ? `${name} (${code})` : code}
+                {country ? optionLabel(country) : code}
                 <button
                   type="button"
                   onClick={() => remove(code)}
-                  aria-label={`Remove ${name ?? code}`}
+                  aria-label={`Remove ${country?.name ?? code}`}
                   className="ml-1 rounded hover:bg-blue-200 dark:hover:bg-blue-800/50 focus:outline-none focus:ring-2 focus:ring-blue-500 px-1"
                 >
                   &times;

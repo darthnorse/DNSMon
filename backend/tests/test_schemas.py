@@ -211,6 +211,12 @@ def test_match_countries_rejects_malformed_codes(bad):
         AlertRuleUpdate.model_validate({"match_countries": bad})
 
 
+@pytest.mark.parametrize("unknown", ["UK", "ZZ", "CN,UK"])
+def test_match_countries_rejects_codes_that_could_never_match(unknown):
+    with pytest.raises(ValidationError):
+        AlertRuleCreate(name="r", match_countries=unknown)
+
+
 def test_match_countries_blank_becomes_none_on_create_and_update():
     assert AlertRuleCreate(name="x", match_countries="").match_countries is None
     assert AlertRuleCreate(name="x", match_countries=None).match_countries is None
