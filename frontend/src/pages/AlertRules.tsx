@@ -71,6 +71,7 @@ export default function AlertRules() {
   };
 
   const [countries, setCountries] = useState<GeoipCountry[]>([]);
+  const [countryUnresolved, setCountryUnresolved] = useState(false);
   const [geoipConfigured, setGeoipConfigured] = useState(true);
 
   const loadGeoipState = async () => {
@@ -134,6 +135,10 @@ export default function AlertRules() {
       errors.push('Exclude client IPs must be 5000 characters or less');
     }
 
+    if (countryUnresolved) {
+      errors.push('Finish or clear the country you typed');
+    }
+
     const cooldown = formData.cooldown_minutes ?? 5;
     if (cooldown < 0 || cooldown > 10080) {
       errors.push('Cooldown must be between 0 and 10080 minutes (7 days)');
@@ -170,6 +175,7 @@ export default function AlertRules() {
 
   const handleEdit = (rule: AlertRule) => {
     setEditingRule(rule);
+    setCountryUnresolved(false);
     setFormData({
       name: rule.name,
       description: rule.description || '',
@@ -201,6 +207,7 @@ export default function AlertRules() {
 
   const handleCancel = () => {
     setShowForm(false);
+    setCountryUnresolved(false);
     setEditingRule(null);
     setFormData({
       name: '',
@@ -414,6 +421,7 @@ export default function AlertRules() {
                   value={formData.match_countries ?? ''}
                   countries={countries}
                   onChange={(v) => setFormData({ ...formData, match_countries: v })}
+                  onUnresolvedChange={setCountryUnresolved}
                 />
                 <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                   Fires when an answer resolves to any chosen country.

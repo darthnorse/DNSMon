@@ -39,7 +39,7 @@ async def get_template_variables(_: User = Depends(get_current_user)):
         "variables": [
             {"name": "{rule_name}", "description": "Alert rule name", "example": "Block Adult Content"},
             {"name": "{count}", "description": "Number of matching queries", "example": "5"},
-            {"name": "{query_list}", "description": "All queries, one per line (domain - client)", "example": "ads.com - 192.168.1.50\\ntracker.com - 192.168.1.51"},
+            {"name": "{query_list}", "description": "All queries, one per line (domain - client), plus matched country and IP for country rules", "example": "ads.com - 192.168.1.50\\ntracker.com - 192.168.1.51"},
             {"name": "{domains}", "description": "All domains (comma-separated)", "example": "ads.google.com, tracker.fb.com"},
             {"name": "{clients}", "description": "All clients (comma-separated)", "example": "johns-iphone, 192.168.1.50"},
             {"name": "{domain}", "description": "First queried domain", "example": "ads.google.com"},
