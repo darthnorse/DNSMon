@@ -52,6 +52,7 @@ import type {
   DomainLabelInfo,
   ClassifyRequest,
   ClassifySuggestions,
+  GeoipCountry,
   GeoipStatus,
   GeoipUpdate,
   GeoipUpdateResult,
@@ -136,6 +137,8 @@ export const statisticsApi = {
 
 export const geoipApi = {
   get: async (): Promise<GeoipStatus> => (await api.get<GeoipStatus>('/geoip')).data,
+  countries: async (): Promise<GeoipCountry[]> =>
+    (await api.get<GeoipCountry[]>('/geoip/countries')).data,
   update: async (patch: GeoipUpdate): Promise<GeoipUpdateResult> =>
     (await api.put<GeoipUpdateResult>('/geoip', patch)).data,
   refresh: async (): Promise<void> => { await api.post('/geoip/refresh'); },

@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Select, type SelectOption } from '../components/Select';
-import { alertRuleApi, insightSourceApi } from '../utils/api';
-import type { AlertRule, AlertRuleCreate, MatchStatus } from '../types';
+import CountryPicker from '../components/CountryPicker';
+import { alertRuleApi, geoipApi, insightSourceApi } from '../utils/api';
+import type { AlertRule, AlertRuleCreate, GeoipCountry, MatchStatus } from '../types';
 
 const MATCH_STATUS_OPTIONS: SelectOption<MatchStatus>[] = [
   { value: 'any', label: 'Any' },
@@ -47,6 +48,7 @@ export default function AlertRules() {
     cooldown_minutes: 5,
     match_status: 'any',
     match_threat: false,
+    match_countries: '',
     enabled: true,
   });
 
@@ -68,6 +70,19 @@ export default function AlertRules() {
     }
   };
 
+  const [countries, setCountries] = useState<GeoipCountry[]>([]);
+  const [geoipConfigured, setGeoipConfigured] = useState(true);
+
+  const loadGeoipState = async () => {
+    setGeoipConfigured(await geoipApi.isConfigured());
+    try {
+      setCountries(await geoipApi.countries());
+    } catch (err) {
+      setError('Failed to load the country list');
+      console.error(err);
+    }
+  };
+
   const loadRules = async () => {
     try {
       setLoading(true);
@@ -75,6 +90,7 @@ export default function AlertRules() {
       setRules(data);
       await loadThreatFeedState();
       setError(null);
+      await loadGeoipState();
     } catch (err) {
       setError('Failed to load alert rules');
       console.error(err);
@@ -124,9 +140,10 @@ export default function AlertRules() {
     }
 
     const hasPattern = Boolean(formData.domain_pattern || formData.client_ip_pattern || formData.client_hostname_pattern);
-    const unscoped = !formData.match_threat && !hasPattern;
+    const hasCountries = Boolean(formData.match_countries);
+    const unscoped = !formData.match_threat && !hasPattern && !hasCountries;
     if (unscoped && formData.match_status === 'any') {
-      errors.push('Specify at least one pattern (domain, IP, or hostname), or set Match Status to Blocked or Allowed');
+      errors.push('Specify at least one pattern (domain, IP, hostname, or country), or set Match Status to Blocked or Allowed');
     } else if (unscoped && cooldown === 0) {
       // A status-only rule matches on nearly every poll, so with no cooldown it alerts about once a minute.
       errors.push('A rule without patterns matches nearly every poll, so it needs a cooldown above 0');
@@ -164,6 +181,7 @@ export default function AlertRules() {
       cooldown_minutes: rule.cooldown_minutes,
       match_status: rule.match_status,
       match_threat: rule.match_threat ?? false,
+      match_countries: rule.match_countries || '',
       enabled: rule.enabled,
     });
     setShowForm(true);
@@ -195,6 +213,7 @@ export default function AlertRules() {
       cooldown_minutes: 5,
       match_status: 'any',
       match_threat: false,
+      match_countries: '',
       enabled: true,
     });
   };
@@ -388,6 +407,29 @@ export default function AlertRules() {
                 )}
               </div>
 
+              <div className="sm:col-span-2">
+                <CountryPicker
+                  id="match_countries"
+                  label="Resolved to countries"
+                  value={formData.match_countries ?? ''}
+                  countries={countries}
+                  onChange={(v) => setFormData({ ...formData, match_countries: v })}
+                />
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  Fires when an answer resolves to any chosen country.
+                </p>
+                {formData.match_countries && !geoipConfigured && (
+                  <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                    GeoIP isn't configured; this condition can't match.
+                  </p>
+                )}
+                {formData.match_countries && formData.match_status === 'blocked' && (
+                  <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                    Blocked queries store no answers, so this condition can't match.
+                  </p>
+                )}
+              </div>
+
               <div>
                 <label htmlFor="cooldown_minutes" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Cooldown (minutes)
@@ -464,6 +506,7 @@ export default function AlertRules() {
                             {matchStatusLabel(rule.match_status)}
                           </Badge>
                         )}
+                        {rule.match_countries && <Badge color="amber">Countries: {rule.match_countries}</Badge>}
                         {rule.match_threat && <Badge color="red">Malicious only</Badge>}
                         {rule.match_threat && !threatFeedReady && (
                           <Badge color="amber">No threat feed active</Badge>

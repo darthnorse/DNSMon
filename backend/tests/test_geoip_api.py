@@ -6,6 +6,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 
+from backend.countries import COUNTRY_NAMES
 from backend.geoip import CITY_EDITION, EDITIONS
 from backend.models import GeoipSettings, SettingsChangelog
 from backend.tests.geoip_helpers import KEY, background_settled, install_fixtures, refuse_unlink, seed_geoip, stored_geoip
@@ -24,6 +25,23 @@ async def test_get_unconfigured_needs_no_row(async_admin_client: AsyncClient, db
         "asn_build": None, "last_status": None, "last_error": None,
     }
     assert await db_session.get(GeoipSettings, 1) is None
+
+
+async def test_countries_lists_names_sorted(async_readonly_client: AsyncClient, db_session):
+    r = await async_readonly_client.get("/api/geoip/countries")
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert {"code": "CN", "name": "China"} in body
+    assert all(set(item) == {"code", "name"} for item in body)
+    names = [item["name"] for item in body]
+    assert names == sorted(names)
+    assert len(body) == len(COUNTRY_NAMES)
+    assert await db_session.get(GeoipSettings, 1) is None
+
+
+async def test_countries_requires_auth(async_client: AsyncClient):
+    assert (await async_client.get("/api/geoip/countries")).status_code == 401
 
 
 async def test_last_error_is_admin_only(async_readonly_client: AsyncClient, db_session):

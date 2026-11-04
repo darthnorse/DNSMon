@@ -4,7 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..models import User, GeoipSettings, SettingsChangelog
-from ..schemas import GeoipStatus, GeoipUpdate, GeoipUpdateResult
+from ..countries import COUNTRY_NAMES
+from ..schemas import GeoipCountry, GeoipStatus, GeoipUpdate, GeoipUpdateResult
 from ..auth import get_current_user, require_admin
 from ..geoip import GEOIP_ROW_ID, start_clear, start_refresh
 
@@ -49,6 +50,12 @@ def _clean_license_key(value: str | None) -> str | None:
 async def get_geoip(db: AsyncSession = Depends(get_db),
                     user: User = Depends(get_current_user)):
     return _to_status(await db.get(GeoipSettings, GEOIP_ROW_ID), is_admin=bool(user.is_admin))
+
+
+@router.get("/countries", response_model=list[GeoipCountry])
+async def get_countries(_: User = Depends(get_current_user)):
+    return [GeoipCountry(code=code, name=name)
+            for code, name in sorted(COUNTRY_NAMES.items(), key=lambda item: item[1])]
 
 
 @router.put("", response_model=GeoipUpdateResult)

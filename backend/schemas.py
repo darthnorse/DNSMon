@@ -131,6 +131,11 @@ class GeoipStatus(BaseModel):
     last_error: Optional[str] = None
 
 
+class GeoipCountry(BaseModel):
+    code: str
+    name: str
+
+
 class GeoipUpdateResult(GeoipStatus):
     refresh_started: bool = False
 

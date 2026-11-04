@@ -53,6 +53,7 @@ export interface AlertRule {
   cooldown_minutes: number;
   match_status: MatchStatus;
   match_threat: boolean;
+  match_countries: string | null;
   enabled: boolean;
   created_at: string;
   updated_at: string;
@@ -69,6 +70,7 @@ export interface AlertRuleCreate {
   cooldown_minutes?: number;
   match_status: MatchStatus;
   match_threat?: boolean;
+  match_countries?: string;
   enabled?: boolean;
 }
 
@@ -83,6 +85,11 @@ export interface GeoInfo {
   city: string | null;
   asn: number | null;
   org: string | null;
+}
+
+export interface GeoipCountry {
+  code: string;
+  name: string;
 }
 
 export interface GeoipStatus {
