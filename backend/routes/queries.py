@@ -3,7 +3,8 @@ Query search routes
 """
 from fastapi import APIRouter, Depends, HTTPException, Query as QueryParam
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import String, select, func, and_, or_, cast
+from sqlalchemy.dialects.postgresql import ARRAY
 from typing import Literal, Optional, List
 from datetime import datetime, timedelta
 
@@ -27,6 +28,7 @@ router = APIRouter(prefix="/api", tags=["queries"])
 # lookups right next to the anchor are always kept.
 CONTEXT_SIDE_LIMIT = 500
 CONTEXT_WINDOWS = (1, 2, 5, 15)
+COUNTRY_CODE_PATTERN = r'^[A-Za-z]{2}$'
 
 
 def _labelled_queries():
@@ -50,6 +52,7 @@ def _to_response(row) -> QueryResponse:
         threat_type=threat_type,
         answer_ips=q.answer_ip_strings,
         answer_cnames=q.answer_cnames,
+        answer_countries=q.answer_countries,
     )
 
 
@@ -67,6 +70,7 @@ async def search_queries(
     search: Optional[str] = QueryParam(None, max_length=255),
     domain: Optional[str] = QueryParam(None, max_length=255),
     answer: Optional[str] = QueryParam(None, max_length=255),
+    country: Optional[str] = QueryParam(None, pattern=COUNTRY_CODE_PATTERN),
     client_ip: Optional[str] = QueryParam(None, max_length=45),
     client_hostname: Optional[str] = QueryParam(None, max_length=255),
     server: Optional[str] = QueryParam(None, max_length=100),
@@ -82,6 +86,7 @@ async def search_queries(
     Search DNS queries with flexible filtering.
     - search: searches across domain, client_ip, and client_hostname (OR); an IP also matches answer_ips
     - answer: exact answer IP (any spelling) or exact CNAME target
+    - country: two-letter code; queries with an answer address in that country
     - domain/client_ip/client_hostname: specific field filters (AND)
     - server: substring match; servers: comma-separated exact names, as /api/statistics takes them
     """
@@ -103,6 +108,9 @@ async def search_queries(
 
     if answer:
         conditions.append(_answer_condition(answer))
+
+    if country:
+        conditions.append(Query.answer_countries.contains(cast([country.upper()], ARRAY(String(2)))))
 
     if domain:
         escaped_domain = escape_sql_like(domain)

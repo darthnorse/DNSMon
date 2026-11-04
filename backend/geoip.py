@@ -191,6 +191,10 @@ class GeoIPService:
     def complete(self) -> bool:
         return all(edition in self._readers for edition in EDITIONS)
 
+    @property
+    def has_countries(self) -> bool:
+        return CITY_EDITION in self._readers
+
     def build_epoch(self, edition: str) -> int | None:
         reader = self._readers.get(edition)
         return reader.metadata().build_epoch if reader else None

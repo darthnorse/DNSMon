@@ -82,6 +82,7 @@ class QueryResponse(BaseModel):
     threat_type: Optional[str] = None
     answer_ips: Optional[List[str]] = None
     answer_cnames: Optional[List[str]] = None
+    answer_countries: Optional[List[str]] = None
 
     class Config:
         from_attributes = True

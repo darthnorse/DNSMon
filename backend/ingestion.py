@@ -14,6 +14,7 @@ from .database import async_session_maker, cleanup_old_queries
 from .utils import create_client_from_server, normalize_domain
 from .config import get_settings_sync, PiholeServer
 from .dns_client import QueryRangeTruncated
+from .geoip import get_geoip
 from .constants import BLOCKED_STATUSES, CACHE_STATUSES, BLOCKED_SQL_IN, CACHE_SQL_IN
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,7 @@ class IngestedQuery:
     server: str
     answer_ips: Optional[List[str]] = None
     answer_cnames: Optional[List[str]] = None
+    answer_countries: Optional[List[str]] = None
 
 
 class QueryIngestionService:
@@ -190,6 +192,7 @@ class QueryIngestionService:
         if not queries:
             return 0, []
 
+        geoip = get_geoip()
         async with async_session_maker() as session:
             # One row per unique key within this batch; an A and an HTTPS lookup can
             # still share a microsecond, and the one carrying addresses is worth keeping.
@@ -245,6 +248,7 @@ class QueryIngestionService:
 
                 answer_ips = query_data.get("answer_ips")
                 answer_cnames = query_data.get("answer_cnames")
+                answer_countries = geoip.countries(answer_ips) if geoip.has_countries and answer_ips else None
                 key = (timestamp, domain, client_ip, server_name)
                 if key in by_key and not answer_ips:
                     continue
@@ -259,6 +263,7 @@ class QueryIngestionService:
                     'created_at': datetime.now(timezone.utc),
                     'answer_ips': answer_ips,
                     'answer_cnames': answer_cnames,
+                    'answer_countries': answer_countries,
                 }, IngestedQuery(
                     id=0,
                     domain=domain,
@@ -270,6 +275,7 @@ class QueryIngestionService:
                     server=server_name,
                     answer_ips=answer_ips,
                     answer_cnames=answer_cnames,
+                    answer_countries=answer_countries,
                 ))
 
             if skipped_untimed:

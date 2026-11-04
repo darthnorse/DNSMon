@@ -132,6 +132,8 @@ async def _run_migrations(conn):
                   col_type='INET[]', default=None, nullable=True),
         Migration(table='queries', column='answer_cnames',
                   col_type='TEXT[]', default=None, nullable=True),
+        Migration(table='queries', column='answer_countries',
+                  col_type='VARCHAR(2)[]', default=None, nullable=True),
     ]
     for m in migrations:
         result = await conn.execute(text(

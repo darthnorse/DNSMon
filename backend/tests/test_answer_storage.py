@@ -99,13 +99,15 @@ async def test_answer_indexes_exist_after_ensure(db_session):
         conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
         await conn.execute(text("DROP INDEX IF EXISTS idx_queries_answer_ips"))
         await conn.execute(text("DROP INDEX IF EXISTS idx_queries_answer_cnames"))
+        await conn.execute(text("DROP INDEX IF EXISTS idx_queries_answer_countries"))
 
     await ensure_answer_indexes()
 
     rows = (await db_session.execute(text(
         "SELECT c.relname, i.indisvalid, am.amname FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
         "JOIN pg_am am ON am.oid = c.relam WHERE c.relname LIKE 'idx_queries_answer_%' ORDER BY 1"))).all()
-    assert rows == [("idx_queries_answer_cnames", True, "gin"), ("idx_queries_answer_ips", True, "gin")]
+    assert rows == [("idx_queries_answer_cnames", True, "gin"), ("idx_queries_answer_countries", True, "gin"),
+                    ("idx_queries_answer_ips", True, "gin")]
 
 
 async def test_domains_are_stored_lowercase(db_session):

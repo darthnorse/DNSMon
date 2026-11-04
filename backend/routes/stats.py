@@ -12,6 +12,7 @@ from ..schemas import StatsResponse, StatisticsResponse
 from ..auth import get_current_user
 from ..config import get_settings_sync
 from ..constants import BLOCKED_STATUSES, CACHE_STATUSES
+from ..countries import country_name
 from ..utils import split_csv
 
 router = APIRouter(prefix="/api", tags=["stats"])
@@ -200,6 +201,47 @@ async def get_statistics_clients(
     ]
 
     return clients
+
+
+COUNTRY_STATS_LIMIT = 20
+
+
+@router.get("/statistics/countries")
+async def get_statistics_countries(
+    period: str = "24h",
+    servers: Optional[str] = None,
+    clients: Optional[str] = None,
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user)
+):
+    """Top countries by number of queries whose answers include an address there.
+
+    A query answered from several countries counts once for each. Rows with no stored
+    countries (Pi-hole, blocked, or from before GeoIP was set up) are left out.
+    Takes the same period, servers, clients and custom range parameters as /api/statistics.
+    """
+    period_start, period_end = _resolve_period(period, from_date, to_date)
+
+    answers = select(func.unnest(Query.answer_countries).label('country')).where(
+        Query.answer_countries.is_not(None), Query.timestamp >= period_start)
+    if period_end:
+        answers = answers.where(Query.timestamp <= period_end)
+    server_list = split_csv(servers)
+    if server_list:
+        answers = answers.where(Query.server.in_(server_list))
+    client_list = split_csv(clients)
+    if client_list:
+        answers = answers.where(Query.client_ip.in_(client_list))
+
+    answers = answers.subquery()
+    count = func.count()
+    result = await db.execute(
+        select(answers.c.country, count).group_by(answers.c.country)
+        .order_by(count.desc(), answers.c.country).limit(COUNTRY_STATS_LIMIT)
+    )
+    return [{"country": code, "country_name": country_name(code), "count": n} for code, n in result]
 
 
 @router.get("/statistics", response_model=StatisticsResponse)

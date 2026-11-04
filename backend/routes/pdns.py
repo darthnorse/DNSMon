@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import get_current_user
 from ..database import get_db
+from ..geoip import get_geoip
 from ..models import Query, User
 from ..schemas import (
     PdnsClientRow, PdnsCnameRow, PdnsDomainResponse, PdnsDomainRow, PdnsIpResponse, PdnsIpRow,
@@ -98,6 +99,7 @@ async def _ip_view(db: AsyncSession, ip: str, where: List) -> PdnsIpResponse:
                                count=int(n), servers=sorted(servers)) for d, first, last, n, servers in domains],
         clients=[PdnsClientRow(client_ip=c, client_hostname=hostnames.get(c), count=n, last_seen=ensure_utc(last))
                  for c, n, last in clients],
+        geo=get_geoip().lookup(ip),
     )
 
 
@@ -127,9 +129,11 @@ async def lookup_domain(
         has_answer_data = bool(ips or cnames) or (await db.execute(
             select(Query.id).where(*where).limit(1))).first() is not None
 
+    geo = get_geoip()
     return PdnsDomainResponse(
         domain=domain,
-        ips=[PdnsIpRow(ip=str(ip), first_seen=ensure_utc(first), last_seen=ensure_utc(last), count=n)
+        ips=[PdnsIpRow(ip=str(ip), first_seen=ensure_utc(first), last_seen=ensure_utc(last), count=n,
+                    geo=geo.lookup(str(ip)))
              for ip, first, last, n in ips],
         cnames=[PdnsCnameRow(cname=c, first_seen=ensure_utc(first), last_seen=ensure_utc(last), count=n)
                 for c, first, last, n in cnames],
@@ -166,14 +170,15 @@ async def _resolve(lookups: _NewestLookups, client: Optional[str], ip: str, at: 
     """The newest lookup at or before `at` whose answer contained `ip`: the client's own if it has
     one, else any device's. No lower time bound: a long-lived connection can be days old, and the
     lookup that opened it is still its best explanation; age_seconds lets the caller judge."""
+    geo = get_geoip().lookup(ip)
     for match, scope in ([("client", client)] if client else []) + [("any", None)]:
         row = await lookups.get(ip, scope, at)
         if row is not None:
             domain, ts, server, client_ip, cnames = row
             return PdnsResolveResult(
                 match=match, domain=domain, query_time=ensure_utc(ts), age_seconds=int((at - ts).total_seconds()),
-                server=server, client_ip=client_ip, cname_chain=cnames or [])
-    return PdnsResolveResult(match="none")
+                server=server, client_ip=client_ip, cname_chain=cnames or [], geo=geo)
+    return PdnsResolveResult(match="none", geo=geo)
 
 
 @router.get("/resolve", response_model=PdnsResolveResult)
