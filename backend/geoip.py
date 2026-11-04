@@ -119,7 +119,7 @@ async def _download(client: httpx.AsyncClient, url: str, dest: Path) -> None:
         if not response.is_success:
             raise _RefreshFailure(_describe_status(response.status_code))
         received = 0
-        out = await asyncio.to_thread(dest.open, 'wb')
+        out = dest.open('wb')
         try:
             async for chunk in response.aiter_raw():
                 received += len(chunk)
@@ -408,6 +408,7 @@ async def refresh_from_settings(*, service: GeoIPService | None = None,
 
 _background_tasks: set[asyncio.Task] = set()
 _refreshes: list[asyncio.Task] = []
+_clears: set[asyncio.Task] = set()
 
 
 async def logged_refresh() -> None:
@@ -432,8 +433,9 @@ def _track(task: asyncio.Task) -> asyncio.Task:
 
 def start_refresh() -> asyncio.Task:
     # A queued refresh reads the credentials when its turn comes, so one waiting behind a
-    # running one covers every later request. More would only spend download quota.
-    if len(_refreshes) >= 2:
+    # running one covers every later request. More would only spend download quota. Not past
+    # a queued clear, though: it would delete what that refresh installs for the new key.
+    if len(_refreshes) >= 2 and not _clears:
         return _refreshes[-1]
     task = _track(asyncio.create_task(logged_refresh()))
     _refreshes.append(task)
@@ -442,7 +444,10 @@ def start_refresh() -> asyncio.Task:
 
 
 def start_clear() -> asyncio.Task:
-    return _track(asyncio.create_task(_logged_clear()))
+    task = _track(asyncio.create_task(_logged_clear()))
+    _clears.add(task)
+    task.add_done_callback(_clears.discard)
+    return task
 
 
 async def open_at_startup() -> None:

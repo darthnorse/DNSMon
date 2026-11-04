@@ -1046,3 +1046,19 @@ async def test_build_change_records_an_update_even_with_nothing_installed(db_ses
 def test_httpx_logging_stays_quiet_enough_to_hide_presigned_urls():
     assert logging.getLogger("httpx").level == logging.WARNING
     assert logging.getLogger("httpcore").level == logging.WARNING
+
+
+async def test_refresh_after_a_queued_clear_is_not_coalesced_away(refresh_job):
+    gate = asyncio.Event()
+    refresh_job.side_effect = gate.wait
+    geoip_module.start_refresh()
+    geoip_module.start_refresh()
+    geoip_module.start_clear()
+
+    after_clear = geoip_module.start_refresh()
+
+    assert after_clear is geoip_module._refreshes[-1]
+    assert len(geoip_module._refreshes) == 3
+    gate.set()
+    await _background_settled()
+    assert refresh_job.await_count == 3
