@@ -157,7 +157,6 @@ class PiholeClient(DNSBlockerClient):
         yield queries
 
     async def get_queries(self, from_timestamp: int, until_timestamp: int) -> Optional[List[Dict[str, Any]]]:
-        """Get queries from Pi-hole API"""
         try:
             # Check if session is older than 3 minutes and re-auth if needed
             if self.session_info["auth_time"] and (time.time() - self.session_info["auth_time"]) > 180:

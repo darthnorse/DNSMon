@@ -186,12 +186,10 @@ class QueryIngestionService:
             skipped_unstorable = 0
 
             for query_data in queries:
-                # Extract client information
                 client_data = query_data.get("client", {})
                 if isinstance(client_data, dict):
                     client_ip = client_data.get("ip") or "unknown"
                     client_hostname = client_data.get("name") or ""
-                    # Don't store hostname if it's the same as IP
                     if client_hostname == client_ip:
                         client_hostname = None
                 else:
