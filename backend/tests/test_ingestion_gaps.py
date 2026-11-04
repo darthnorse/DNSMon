@@ -362,3 +362,75 @@ async def test_clock_is_checked_at_most_once_per_interval(db_session, fake_clien
     await service.ingest_from_server(server)
 
     assert len([r for r in caplog.records if "clock" in r.getMessage().lower()]) == 1
+
+
+class _Clock:
+    def __init__(self):
+        self.now = time.time()
+
+    def time(self):
+        return self.now
+
+    def at(self, offset_seconds: int) -> datetime:
+        return datetime.fromtimestamp(self.now + offset_seconds, tz=timezone.utc)
+
+
+class _SlowWalk(FakeClient):
+    def __init__(self, pages, clock, seconds):
+        super().__init__(pages)
+        self.clock, self.seconds = clock, seconds
+
+    async def iter_query_pages(self, from_timestamp, until_timestamp):
+        async for page in super().iter_query_pages(from_timestamp, until_timestamp):
+            yield page
+        self.clock.now += self.seconds
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    fake = _Clock()
+    monkeypatch.setattr(ingestion, "time", fake)
+    return fake
+
+
+async def test_queries_made_during_a_long_walk_still_alert(db_session, fake_client, clock):
+    server = await _server(db_session, clock.at(-3600))
+    walk_start = clock.now
+    service = QueryIngestionService()
+    fake_client(_SlowWalk([[_q(clock.at(-10), "walk.example.com")]], clock, 1000))
+    await service.ingest_from_server(server)
+
+    during, before = clock.at(-900), clock.at(-1600)
+    assert during.timestamp() > walk_start > before.timestamp()
+    fake_client(FakeClient([[_q(before, "before.example.com"), _q(during, "during.example.com")]]))
+    _, alertable = await service.ingest_from_server(server)
+
+    assert [q.domain for q in alertable] == ["during.example.com"]
+
+
+async def test_wider_alert_floor_lasts_one_poll(db_session, fake_client, clock):
+    server = await _server(db_session, clock.at(-3600))
+    service = QueryIngestionService()
+    fake_client(_SlowWalk([[_q(clock.at(-10), "walk.example.com")]], clock, 1000))
+    await service.ingest_from_server(server)
+    fake_client(FakeClient([]))
+    await service.ingest_from_server(server)
+
+    clock.now += 1000
+    fake_client(FakeClient([[_q(clock.at(-900), "outage.example.com")]]))
+    _, alertable = await service.ingest_from_server(server)
+
+    assert alertable == []
+
+
+async def test_outage_after_a_short_poll_still_does_not_alert(db_session, fake_client, clock):
+    server = await _server(db_session, clock.at(-60))
+    service = QueryIngestionService()
+    fake_client(FakeClient([[_q(clock.at(-10), "walk.example.com")]]))
+    await service.ingest_from_server(server)
+
+    clock.now += 3600
+    fake_client(FakeClient([[_q(clock.at(-1800), "outage.example.com")]]))
+    _, alertable = await service.ingest_from_server(server)
+
+    assert alertable == []

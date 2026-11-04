@@ -58,9 +58,18 @@ class QueryIngestionService:
         # From the interval the scheduler started with: a changed setting waits for a restart
         # there, and following it here could hold the job for far longer than a tick.
         self._poll_wait_seconds = self.settings.poll_interval_seconds / 2
+        self._long_walk_until: dict[str, int] = {}
 
     def _catchup_floor(self, now: int) -> int:
         return now - self.settings.max_catchup_seconds
+
+    def _alert_floor(self, server_name: str, now: int) -> int:
+        """Queries older than this are backlog. A walk that outlasted the catch-up window froze its
+        range when it started, so what clients did during it is live traffic, not outage backlog.
+        Only the next poll gets the wider floor, so an outage after that still can't burst."""
+        floor = self._catchup_floor(now)
+        walk_until = self._long_walk_until.pop(server_name, None)
+        return floor if walk_until is None else min(floor, walk_until - RESUME_OVERLAP_SECONDS)
 
     async def _resume_point(self, server: PiholeServer, supports_gap_recovery: bool, now: int) -> int:
         """Where the next fetch starts: the cursor, else the newest stored query, else the lookback window."""
@@ -124,6 +133,7 @@ class QueryIngestionService:
         Returns (stored count, the stored queries recent enough to alert on). Older
         backlog recovered after an outage is stored and counted in the hourly stats
         but never alerted on, so an outage doesn't end in a burst of stale alerts.
+        Queries made during a long recovery walk aren't backlog, and do alert.
 
         The cursor follows the newest query the server returned, in the server's own
         clock, so clock skew between DNSMon and the server can't open a gap.
@@ -134,9 +144,9 @@ class QueryIngestionService:
 
         total = 0
         alertable: List[IngestedQuery] = []
+        now = int(time.time())
         try:
-            now = int(time.time())
-            alert_floor = datetime.fromtimestamp(self._catchup_floor(now), tz=timezone.utc)
+            alert_floor = datetime.fromtimestamp(self._alert_floor(server.name, now), tz=timezone.utc)
             backlog = 0
             newest_seen: Optional[datetime] = None
 
@@ -187,6 +197,10 @@ class QueryIngestionService:
             # Stored rows re-read next poll hit ON CONFLICT and never come back as alertable.
             logger.error(f"Error ingesting from {server.name}: {e}", exc_info=True)
             return total, alertable
+
+        finally:
+            if time.time() - now > self.settings.max_catchup_seconds:
+                self._long_walk_until[server.name] = now
 
     async def _store_queries(self, queries: List[dict], server_name: str) -> Tuple[int, List[IngestedQuery]]:
         """Store queries in database with duplicate handling using bulk insert.
