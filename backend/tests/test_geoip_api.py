@@ -38,7 +38,8 @@ async def test_readonly_get_never_contains_key(async_readonly_client: AsyncClien
     assert "abc" not in r.text
     assert body["configured"] is True
     assert body["has_license_key"] is True
-    assert body["account_id"] == "12345"
+    assert body["account_id"] is None
+    assert "12345" not in r.text
     assert body["city_build"] == 1700000000
     assert body["last_updated_at"] is not None
     assert body["license_key_length"] is None
@@ -52,6 +53,7 @@ async def test_admin_get_identifies_the_saved_key_without_revealing_it(async_adm
     r = await async_admin_client.get("/api/geoip")
 
     assert r.status_code == 200, r.text
+    assert r.json()["account_id"] == "12345"
     assert r.json()["license_key_length"] == len(long_key)
     assert r.json()["license_key_last4"] == "wxyz"
     assert long_key[:-4] not in r.text

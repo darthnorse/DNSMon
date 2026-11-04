@@ -23,7 +23,7 @@ def _to_status(row: GeoipSettings | None, *, is_admin: bool) -> GeoipStatus:
     key = row.license_key
     return GeoipStatus(
         configured=row.configured,
-        account_id=row.account_id,
+        account_id=row.account_id if is_admin else None,
         has_license_key=bool(key),
         # The form never shows the saved key, so a browser autofilling the field went
         # unnoticed until MaxMind answered 401. These let an admin recognise their key.
