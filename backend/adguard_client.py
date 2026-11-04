@@ -32,9 +32,10 @@ QUERYLOG_PAGE_SIZE = 1000
 # server can't keep a poll running forever.
 MAX_QUERYLOG_PAGES = 2000
 
+_QUERYLOG_CONFIG_ENDPOINT = '/control/querylog/config'
 # Config key -> (GET endpoint that reads it, PUT endpoint that takes the same body back).
 _SYNCED_CONFIG_ENDPOINTS = {
-    'querylog_config': ('/control/querylog/config', '/control/querylog/config/update'),
+    'querylog_config': (_QUERYLOG_CONFIG_ENDPOINT, f'{_QUERYLOG_CONFIG_ENDPOINT}/update'),
     'stats_config': ('/control/stats/config', '/control/stats/config/update'),
     'blocked_services': ('/control/blocked_services/get', '/control/blocked_services/update'),
     'safesearch': ('/control/safesearch/status', '/control/safesearch/settings'),
@@ -99,7 +100,7 @@ class AdGuardHomeClient(DNSBlockerClient):
             return False
 
     async def query_log_warning(self) -> Optional[str]:
-        config = await self._get_json(_SYNCED_CONFIG_ENDPOINTS['querylog_config'][0], 'query log config')
+        config = await self._get_json(_QUERYLOG_CONFIG_ENDPOINT, 'query log config')
         if not isinstance(config, dict):
             return None
         if config.get('enabled') is False:
@@ -488,8 +489,10 @@ class AdGuardHomeClient(DNSBlockerClient):
 
             for key, prefix in _SYNCED_TOGGLE_ENDPOINTS.items():
                 body = await self._get_json(f"{prefix}/status", key)
-                if body is not None:
-                    config[key] = bool(body.get('enabled'))
+                # Only a real answer: treating a missing value as False would turn protection off on targets.
+                enabled = body.get('enabled') if isinstance(body, dict) else None
+                if isinstance(enabled, bool):
+                    config[key] = enabled
 
             rewrites = await self._get_json('/control/rewrite/list', 'rewrites')
             if rewrites is not None:

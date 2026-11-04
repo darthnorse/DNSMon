@@ -434,3 +434,82 @@ async def test_outage_after_a_short_poll_still_does_not_alert(db_session, fake_c
     _, alertable = await service.ingest_from_server(server)
 
     assert alertable == []
+
+
+async def _long_walk(service, server, fake_client, clock, seconds=1000):
+    fake_client(_SlowWalk([[_q(clock.at(-10), "walk.example.com")]], clock, seconds))
+    await service.ingest_from_server(server)
+
+
+async def test_walk_queries_still_alert_after_a_failed_retry(db_session, fake_client, clock):
+    server = await _server(db_session, clock.at(-3600))
+    service = QueryIngestionService()
+    await _long_walk(service, server, fake_client, clock)
+
+    clock.now += 60
+    fake_client(FakeClient([QueryFetchError("boom")]))
+    await service.ingest_from_server(server)
+
+    clock.now += 60
+    fake_client(FakeClient([[_q(clock.at(-1000), "during.example.com")]]))
+    _, alertable = await service.ingest_from_server(server)
+
+    assert [q.domain for q in alertable] == ["during.example.com"]
+
+
+async def test_failed_polls_do_not_extend_the_walk_through_an_outage(db_session, fake_client, clock):
+    server = await _server(db_session, clock.at(-3600))
+    service = QueryIngestionService()
+    await _long_walk(service, server, fake_client, clock)
+    for _ in range(20):
+        clock.now += 60
+        fake_client(FakeClient([QueryFetchError("boom")]))
+        await service.ingest_from_server(server)
+
+    fake_client(FakeClient([[_q(clock.at(-600), "outage.example.com"), _q(clock.at(-1200), "during.example.com")]]))
+    _, alertable = await service.ingest_from_server(server)
+
+    assert alertable == []
+
+
+async def test_queries_after_the_walk_are_not_exempt_when_the_next_poll_comes_late(db_session, fake_client, clock):
+    server = await _server(db_session, clock.at(-3600))
+    service = QueryIngestionService()
+    await _long_walk(service, server, fake_client, clock)
+
+    clock.now += 7200
+    fake_client(FakeClient([[_q(clock.at(-8000), "during.example.com"), _q(clock.at(-3600), "disabled.example.com")]]))
+    _, alertable = await service.ingest_from_server(server)
+
+    assert alertable == []
+
+
+async def test_failed_long_walk_still_leaves_its_queries_alertable(db_session, fake_client, clock):
+    server = await _server(db_session, clock.at(-3600))
+    service = QueryIngestionService()
+
+    class _FailingWalk(_SlowWalk):
+        async def iter_query_pages(self, from_timestamp, until_timestamp):
+            self.clock.now += self.seconds
+            raise QueryFetchError("boom")
+            yield
+
+    fake_client(_FailingWalk([], clock, 1000))
+    await service.ingest_from_server(server)
+
+    fake_client(FakeClient([[_q(clock.at(-900), "during.example.com")]]))
+    _, alertable = await service.ingest_from_server(server)
+
+    assert [q.domain for q in alertable] == ["during.example.com"]
+
+
+async def test_walk_shorter_than_the_window_is_covered_when_the_next_tick_lands_past_it(db_session, fake_client, clock):
+    server = await _server(db_session, clock.at(-3600))
+    service = QueryIngestionService()
+    await _long_walk(service, server, fake_client, clock, seconds=250)
+
+    clock.now += 110
+    fake_client(FakeClient([[_q(clock.at(-330), "during.example.com")]]))
+    _, alertable = await service.ingest_from_server(server)
+
+    assert [q.domain for q in alertable] == ["during.example.com"]

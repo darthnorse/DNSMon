@@ -1,6 +1,7 @@
 import json
 
 import httpx
+import pytest
 
 from backend.adguard_client import ADGUARD_DNS_SYNC_DENYLIST, AdGuardHomeClient
 from backend.sync_service import PiholeSyncService
@@ -27,8 +28,9 @@ SAFESEARCH = {"enabled": True, "bing": True, "duckduckgo": False, "ecosia": True
 
 
 class FakeAdGuard:
-    def __init__(self, fail: frozenset[str] = frozenset()):
+    def __init__(self, fail: frozenset[str] = frozenset(), overrides: dict | None = None):
         self.fail = fail
+        self.overrides = overrides or {}
         self.writes: dict[str, object] = {}
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
@@ -53,6 +55,7 @@ class FakeAdGuard:
             "/control/safebrowsing/status": {"enabled": True},
             "/control/parental/status": {"enabled": False},
         }
+        bodies.update(self.overrides)
         return httpx.Response(200, json=bodies[path]) if path in bodies else httpx.Response(404)
 
 
@@ -140,10 +143,17 @@ async def test_safe_browsing_and_parental_control_follow_the_source_either_way()
     assert '/control/parental/enable' not in target.writes
 
 
-async def test_toggles_send_the_json_content_type_adguard_requires():
-    cfg = await _client(FakeAdGuard()).get_config()
+@pytest.mark.parametrize("status", [{}, {"enabled": None}, {"enabled": "false"}, []])
+async def test_toggle_status_without_a_real_answer_leaves_targets_alone(status):
+    source = FakeAdGuard(overrides={"/control/safebrowsing/status": status})
+    cfg = await _client(source).get_config()
+    target = FakeAdGuard()
 
-    assert await _client(FakeAdGuard()).patch_config(cfg) is True
+    await _client(target).patch_config(cfg)
+
+    assert 'safebrowsing_enabled' not in cfg
+    assert '/control/safebrowsing/disable' not in target.writes
+    assert '/control/safebrowsing/enable' not in target.writes
 
 
 async def test_setting_the_source_could_not_report_is_left_alone():
@@ -172,6 +182,12 @@ async def test_failed_toggle_write_marks_sync_failed():
     target = FakeAdGuard(fail=frozenset({"/control/safebrowsing/enable"}))
 
     assert await _client(target).patch_config(cfg) is False
+
+
+def test_sync_summary_omits_blocked_services_the_source_could_not_report():
+    summary = PiholeSyncService()._get_config_summary({'user_rules': []}, 'adguard')
+
+    assert 'blocked_services' not in summary
 
 
 def test_sync_summary_counts_blocked_services():

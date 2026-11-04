@@ -58,18 +58,24 @@ class QueryIngestionService:
         # From the interval the scheduler started with: a changed setting waits for a restart
         # there, and following it here could hold the job for far longer than a tick.
         self._poll_wait_seconds = self.settings.poll_interval_seconds / 2
-        self._long_walk_until: dict[str, int] = {}
+        self._last_walk: dict[str, Tuple[int, int]] = {}
 
     def _catchup_floor(self, now: int) -> int:
         return now - self.settings.max_catchup_seconds
 
-    def _alert_floor(self, server_name: str, now: int) -> int:
-        """Queries older than this are backlog. A walk that outlasted the catch-up window froze its
-        range when it started, so what clients did during it is live traffic, not outage backlog.
-        Only the next poll gets the wider floor, so an outage after that still can't burst."""
-        floor = self._catchup_floor(now)
-        walk_until = self._long_walk_until.pop(server_name, None)
-        return floor if walk_until is None else min(floor, walk_until - RESUME_OVERLAP_SECONDS)
+    def _unread_during_walk(self, server_name: str, now: int) -> Optional[Tuple[datetime, datetime]]:
+        """The time the last walk ran. Its range froze when it started, so what clients did meanwhile
+        is live traffic the next poll reads, however long the walk took, not outage backlog. It
+        expires one catch-up window after the walk ended, so an outage afterwards can't burst."""
+        walk = self._last_walk.get(server_name)
+        if walk is None:
+            return None
+        started, ended = walk
+        if now - ended > self.settings.max_catchup_seconds:
+            del self._last_walk[server_name]
+            return None
+        return (datetime.fromtimestamp(started - RESUME_OVERLAP_SECONDS, tz=timezone.utc),
+                datetime.fromtimestamp(ended, tz=timezone.utc))
 
     async def _resume_point(self, server: PiholeServer, supports_gap_recovery: bool, now: int) -> int:
         """Where the next fetch starts: the cursor, else the newest stored query, else the lookback window."""
@@ -145,8 +151,10 @@ class QueryIngestionService:
         total = 0
         alertable: List[IngestedQuery] = []
         now = int(time.time())
+        completed = False
         try:
-            alert_floor = datetime.fromtimestamp(self._alert_floor(server.name, now), tz=timezone.utc)
+            alert_floor = datetime.fromtimestamp(self._catchup_floor(now), tz=timezone.utc)
+            walk = self._unread_during_walk(server.name, now)
             backlog = 0
             newest_seen: Optional[datetime] = None
 
@@ -168,7 +176,8 @@ class QueryIngestionService:
                         count, stored = await self._store_queries(page, server.name)
                         total += count
                         await self.update_hourly_stats(stored)
-                        recent = [q for q in stored if q.timestamp >= alert_floor]
+                        recent = [q for q in stored if q.timestamp >= alert_floor
+                                  or (walk and walk[0] <= q.timestamp <= walk[1])]
                         backlog += len(stored) - len(recent)
                         alertable.extend(recent)
                         times = [q["timestamp"] for q in page if isinstance(q.get("timestamp"), datetime)]
@@ -191,6 +200,7 @@ class QueryIngestionService:
                     f"Recovered {backlog} queries for {server.name} from a {now - from_timestamp}s gap; "
                     f"alerts not sent for them")
             logger.info(f"Ingested {total} queries from {server.name}")
+            completed = True
             return total, alertable
 
         except Exception as e:
@@ -199,8 +209,13 @@ class QueryIngestionService:
             return total, alertable
 
         finally:
-            if time.time() - now > self.settings.max_catchup_seconds:
-                self._long_walk_until[server.name] = now
+            ended = int(time.time())
+            if completed:
+                self._last_walk[server.name] = (now, ended)
+            # A failed poll keeps the earlier walk for its retry, and a quick failure must not
+            # extend it, or an outage's failed polls would make the whole outage alertable.
+            elif ended - now > self.settings.max_catchup_seconds:
+                self._last_walk[server.name] = (self._last_walk.get(server.name, (now,))[0], ended)
 
     async def _store_queries(self, queries: List[dict], server_name: str) -> Tuple[int, List[IngestedQuery]]:
         """Store queries in database with duplicate handling using bulk insert.
