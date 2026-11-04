@@ -3,12 +3,14 @@ import type { FormEvent, ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { format } from 'date-fns';
 
+import GeoLabel from '../components/GeoLabel';
 import ClientDetailLink from '../components/ClientDetailLink';
 import PdnsLink from '../components/PdnsLink';
 import { pdnsApi } from '../utils/api';
 import { getErrorMessage } from '../utils/errors';
+import { hasGeo } from '../utils/geo';
 import { isIpAddress } from '../utils/pdns';
-import type { PdnsDomainResponse, PdnsIpResponse } from '../types';
+import type { GeoInfo, PdnsDomainResponse, PdnsIpResponse } from '../types';
 
 // Mirrors PDNS_ROW_LIMIT in backend/routes/pdns.py, so a full list is labelled as cut off.
 const ROW_LIMIT = 500;
@@ -94,14 +96,17 @@ function IpView({ data }: { data: PdnsIpResponse }) {
 function AnswerTable({ title, column, rows, empty }: {
   title: string;
   column: string;
-  rows: { value: string; first_seen: string; last_seen: string; count: number }[];
+  rows: { value: string; first_seen: string; last_seen: string; count: number; geo?: GeoInfo | null }[];
   empty: string;
 }) {
+  const showGeo = rows.some((row) => hasGeo(row.geo));
+  const headers = [column, ...(showGeo ? ['Location'] : []), 'First seen', 'Last seen', 'Count'];
   return (
-    <ResultTable title={title} headers={[column, 'First seen', 'Last seen', 'Count']} rowCount={rows.length} empty={empty}>
+    <ResultTable title={title} headers={headers} rowCount={rows.length} empty={empty}>
       {rows.map((row) => (
         <tr key={row.value}>
           <td className="min-w-[14rem] px-4 py-2 text-sm"><PdnsLink value={row.value} /></td>
+          {showGeo && <td className={CELL_CLASS}><GeoLabel geo={row.geo} /></td>}
           <td className={CELL_CLASS}>{formatTime(row.first_seen)}</td>
           <td className={CELL_CLASS}>{formatTime(row.last_seen)}</td>
           <td className={`${CELL_CLASS} tabular-nums`}>{row.count.toLocaleString()}</td>
@@ -218,6 +223,9 @@ export default function Pdns() {
       {result && (
         <>
           <h2 className="text-xl font-semibold font-mono text-gray-900 dark:text-white break-all">{q}</h2>
+          {result.kind === 'ip' && hasGeo(result.data.geo) && (
+            <p className="text-sm"><GeoLabel geo={result.data.geo} /></p>
+          )}
           {result.kind === 'ip' ? <IpView data={result.data} /> : <DomainView data={result.data} />}
         </>
       )}

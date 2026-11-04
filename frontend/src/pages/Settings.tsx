@@ -6,11 +6,12 @@ import { copyToClipboard } from '../utils/clipboard';
 import NotificationsSettings from '../components/NotificationsSettings';
 import AppDefinitionsSettings from '../components/AppDefinitionsSettings';
 import InsightSourcesSettings from '../components/InsightSourcesSettings';
+import GeoipSettings from '../components/GeoipSettings';
 import Users from './Users';
 import ApiKeys from './ApiKeys';
 import type { PiholeServer, PiholeServerCreate, ServerType, OIDCProvider, OIDCProviderCreate, SyncPreview, SyncPreviewSource, SyncHistoryEntry } from '../types';
 
-type TabType = 'servers' | 'notifications' | 'polling' | 'sync' | 'oidc' | 'advanced' | 'users' | 'api-keys' | 'app-definitions' | 'insight-sources';
+type TabType = 'servers' | 'notifications' | 'polling' | 'sync' | 'oidc' | 'advanced' | 'users' | 'api-keys' | 'app-definitions' | 'insight-sources' | 'geoip';
 
 const SERVER_TYPE_LABELS: Record<ServerType, string> = {
   pihole: 'Pi-hole',
@@ -655,6 +656,7 @@ export default function Settings() {
       { id: 'users' as TabType, label: 'Users' },
       { id: 'oidc' as TabType, label: 'OIDC' },
       { id: 'api-keys' as TabType, label: 'API Keys' },
+      { id: 'geoip' as TabType, label: 'GeoIP' },
     ] : []),
     { id: 'advanced', label: 'Advanced' },
   ];
@@ -1050,6 +1052,13 @@ export default function Settings() {
 
       {activeTab === 'insight-sources' && (
         <InsightSourcesSettings
+          onError={setError}
+          onSuccess={setSuccessMessage}
+        />
+      )}
+
+      {activeTab === 'geoip' && user?.is_admin && (
+        <GeoipSettings
           onError={setError}
           onSuccess={setSuccessMessage}
         />

@@ -12,6 +12,7 @@ export interface Query {
   threat_type: string | null;
   answer_ips: string[] | null;
   answer_cnames: string[] | null;
+  answer_countries: string[] | null;
 }
 
 export type ContextScope = 'device' | 'all';
@@ -83,6 +84,30 @@ export interface GeoInfo {
   org: string | null;
 }
 
+export interface GeoipStatus {
+  configured: boolean;
+  account_id: string | null;
+  has_license_key: boolean;
+  last_checked_at: string | null;
+  last_updated_at: string | null;
+  city_build: number | null;
+  asn_build: number | null;
+  last_status: string | null;
+  last_error: string | null;
+}
+
+export interface GeoipUpdate {
+  account_id?: string;
+  license_key?: string;
+  clear?: boolean;
+}
+
+export interface CountryStat {
+  country: string;
+  country_name: string | null;
+  count: number;
+}
+
 export interface PdnsDomainRow {
   domain: string;
   first_seen: string;
@@ -131,6 +156,7 @@ export interface QuerySearchParams {
   search?: string;
   domain?: string;
   answer?: string;
+  country?: string;
   client_ip?: string;
   client_hostname?: string;
   server?: string;

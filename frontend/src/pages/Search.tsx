@@ -32,6 +32,7 @@ export default function Search() {
   const [searchParams, setSearchParams] = useState<QuerySearchParams>(() => ({
     domain: '',
     answer: '',
+    country: '',
     client_ip: link.client ?? '',
     client_hostname: '',
     server: '',
@@ -45,7 +46,13 @@ export default function Search() {
     if (link.client) handleSearch(0);
   }, []);
 
+  const countryInvalid = !!searchParams.country && searchParams.country.length !== 2;
+
   const handleSearch = async (offset = 0, servers = linkServers) => {
+    if (countryInvalid) {
+      setError('Country must be a two-letter code, e.g., SE');
+      return;
+    }
     try {
       setLoading(true);
       setError(null);
@@ -57,6 +64,7 @@ export default function Search() {
 
       if (searchParams.domain) params.domain = searchParams.domain;
       if (searchParams.answer) params.answer = searchParams.answer;
+      if (searchParams.country) params.country = searchParams.country;
       if (searchParams.client_ip) params.client_ip = searchParams.client_ip;
       if (searchParams.client_hostname) params.client_hostname = searchParams.client_hostname;
       if (searchParams.server) params.server = searchParams.server;
@@ -91,6 +99,7 @@ export default function Search() {
     setSearchParams({
       domain: '',
       answer: '',
+      country: '',
       client_ip: '',
       client_hostname: '',
       server: '',
@@ -182,6 +191,21 @@ export default function Search() {
               placeholder="IP or CNAME, e.g., 17.253.23.205"
               value={searchParams.answer}
               onChange={(e) => setSearchParams({ ...searchParams, answer: e.target.value })}
+              className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm px-3 py-2 border"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="country" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              Country
+            </label>
+            <input
+              type="text"
+              id="country"
+              placeholder="Two letters, e.g., SE"
+              maxLength={2}
+              value={searchParams.country}
+              onChange={(e) => setSearchParams({ ...searchParams, country: e.target.value.replace(/[^a-zA-Z]/g, '').toUpperCase() })}
               className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm px-3 py-2 border"
             />
           </div>
@@ -424,7 +448,7 @@ export default function Search() {
                     <tr className="bg-gray-50 dark:bg-gray-900/40">
                       <td />
                       <td colSpan={7} className="px-6 py-3">
-                        <AnswerList ips={query.answer_ips} cnames={query.answer_cnames} />
+                        <AnswerList ips={query.answer_ips} cnames={query.answer_cnames} countries={query.answer_countries} />
                       </td>
                     </tr>
                   )}

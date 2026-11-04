@@ -101,6 +101,17 @@ async def test_country_filter_is_case_insensitive(async_admin_client: AsyncClien
         assert sorted(q["domain"] for q in r.json()) == ["both.test", "gb.test"]
 
 
+async def test_count_honours_country_filter(async_admin_client: AsyncClient, db_session):
+    await _add(db_session, _row(1, ["GB"], domain="gb.test"), _row(2, ["SE", "GB"], domain="both.test"),
+               _row(3, ["SE"], domain="se.test"), _row(4, None, domain="none.test"))
+
+    r = await async_admin_client.get("/api/queries/count", params={"country": "gb"})
+
+    assert r.json() == {"count": 2}
+    bad = await async_admin_client.get("/api/queries/count", params={"country": "g"})
+    assert bad.status_code == 422
+
+
 @pytest.mark.parametrize("value", ["g", "gbr", "g1", "é", " g", "%_", "gb\n"])
 async def test_country_filter_rejects_anything_but_two_letters(async_admin_client: AsyncClient, value):
     r = await async_admin_client.get("/api/queries", params={"country": value})

@@ -1,17 +1,31 @@
+import GeoLabel from './GeoLabel';
 import PdnsLink from './PdnsLink';
+import { hasGeo } from '../utils/geo';
+import type { GeoInfo } from '../types';
 
-function AnswerLinks({ values }: { values: string[] }) {
+function AnswerLinks({ values, geo }: { values: string[]; geo?: Record<string, GeoInfo | null> }) {
   return (
     <>
-      {values.map((value) => <PdnsLink key={value} value={value} />)}
+      {values.map((value) => {
+        const info = geo?.[value];
+        if (!hasGeo(info)) return <PdnsLink key={value} value={value} />;
+        return (
+          <span key={value} className="inline-flex flex-wrap items-baseline gap-x-2">
+            <PdnsLink value={value} />
+            <GeoLabel geo={info} />
+          </span>
+        );
+      })}
     </>
   );
 }
 
 /** NULL means the server doesn't report answers (Pi-hole); an empty list means it answered with nothing. */
-export default function AnswerList({ ips, cnames, compact = false }: {
+export default function AnswerList({ ips, cnames, geo, countries, compact = false }: {
   ips: string[] | null;
   cnames: string[] | null;
+  geo?: Record<string, GeoInfo | null>;
+  countries?: string[] | null;
   compact?: boolean;
 }) {
   const unavailable = ips === null && cnames === null;
@@ -29,7 +43,7 @@ export default function AnswerList({ ips, cnames, compact = false }: {
     return (
       <span className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
         <AnswerLinks values={cnameList} />
-        <AnswerLinks values={ipList} />
+        <AnswerLinks values={ipList} geo={geo} />
       </span>
     );
   }
@@ -45,7 +59,13 @@ export default function AnswerList({ ips, cnames, compact = false }: {
       {ipList.length > 0 && (
         <div className="flex flex-wrap gap-x-3">
           <dt className="w-16 text-gray-500 dark:text-gray-400">IPs</dt>
-          <dd className="flex flex-wrap gap-x-3 min-w-0"><AnswerLinks values={ipList} /></dd>
+          <dd className="flex flex-wrap gap-x-3 min-w-0"><AnswerLinks values={ipList} geo={geo} /></dd>
+        </div>
+      )}
+      {countries && countries.length > 0 && (
+        <div className="flex flex-wrap gap-x-3">
+          <dt className="w-16 text-gray-500 dark:text-gray-400">Countries</dt>
+          <dd className="font-mono text-gray-700 dark:text-gray-300">{countries.join(', ')}</dd>
         </div>
       )}
     </dl>

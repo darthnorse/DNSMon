@@ -65,6 +65,10 @@ def _answer_condition(value: str):
     return Query.answer_cnames.contains([parse_domain(value)])
 
 
+def _country_condition(code: str):
+    return Query.answer_countries.contains(cast([code.upper()], ARRAY(String(2))))
+
+
 @router.get("/queries", response_model=List[QueryResponse])
 async def search_queries(
     search: Optional[str] = QueryParam(None, max_length=255),
@@ -110,7 +114,7 @@ async def search_queries(
         conditions.append(_answer_condition(answer))
 
     if country:
-        conditions.append(Query.answer_countries.contains(cast([country.upper()], ARRAY(String(2)))))
+        conditions.append(_country_condition(country))
 
     if domain:
         escaped_domain = escape_sql_like(domain)
@@ -235,6 +239,7 @@ async def query_context(
 async def count_queries(
     domain: Optional[str] = None,
     answer: Optional[str] = QueryParam(None, max_length=255),
+    country: Optional[str] = QueryParam(None, pattern=COUNTRY_CODE_PATTERN),
     client_ip: Optional[str] = None,
     client_hostname: Optional[str] = None,
     server: Optional[str] = None,
@@ -253,6 +258,8 @@ async def count_queries(
         conditions.append(Query.domain.ilike(f"%{escaped_domain}%", escape='\\'))
     if answer:
         conditions.append(_answer_condition(answer))
+    if country:
+        conditions.append(_country_condition(country))
     if client_ip:
         conditions.append(Query.client_ip == client_ip)
     if client_hostname:

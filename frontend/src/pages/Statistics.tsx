@@ -17,7 +17,7 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 
-import { statisticsApi, settingsApi, queryApi } from '../utils/api';
+import { statisticsApi, settingsApi, queryApi, geoipApi } from '../utils/api';
 import { getErrorMessage } from '../utils/errors';
 import { formatDomainLabel } from '../utils/labels';
 import { buildClientLink, parseClientLink, toLocalDatetimeString } from '../utils/clientLink';
@@ -27,7 +27,7 @@ import ClassifyDomainModal from '../components/ClassifyDomainModal';
 import ClientDetailLink, { clientDetailPath } from '../components/ClientDetailLink';
 import ContextLink from '../components/ContextLink';
 import StatusBadge from '../components/StatusBadge';
-import type { Statistics, PiholeServer, ClientInfo, Query, QuerySearchParams } from '../types';
+import type { Statistics, PiholeServer, ClientInfo, Query, QuerySearchParams, CountryStat, StatisticsParams } from '../types';
 
 type Period = '24h' | '7d' | '30d' | 'custom';
 
@@ -59,6 +59,8 @@ export default function StatisticsPage() {
 
   const [stats, setStats] = useState<Statistics | null>(null);
   const [recentQueries, setRecentQueries] = useState<Query[] | null>(null);
+  const [countries, setCountries] = useState<CountryStat[] | null>(null);
+  const geoipConfiguredRef = useRef<Promise<boolean>>(Promise.resolve(false));
   const [servers, setServers] = useState<PiholeServer[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -92,6 +94,11 @@ export default function StatisticsPage() {
 
   useEffect(() => {
     loadServers();
+  }, []);
+
+  // Assigned before the stats effect below runs, so the first load can wait on it.
+  useEffect(() => {
+    geoipConfiguredRef.current = geoipApi.get().then((status) => status.configured, () => false);
   }, []);
 
   // Load clients when period or servers change (or when custom range is applied).
@@ -188,6 +195,15 @@ export default function StatisticsPage() {
     }
   };
 
+  const loadCountries = async (params: StatisticsParams): Promise<CountryStat[] | null> => {
+    if (!(await geoipConfiguredRef.current)) return null;
+    try {
+      return await statisticsApi.getCountries(params);
+    } catch {
+      return null;
+    }
+  };
+
   const loadStats = async () => {
     // Stats requests overlap (mount fires one before loadClients narrows the selection);
     // only the latest may write state, or a slower all-clients response clobbers a linked client's.
@@ -200,7 +216,7 @@ export default function StatisticsPage() {
         setLoading(false);
         return;
       }
-      const params: { period?: string; servers?: string; clients?: string; from_date?: string; to_date?: string } = { ...periodParams };
+      const params: StatisticsParams = { ...periodParams };
       if (selectedServers.length > 0) {
         params.servers = selectedServers.join(',');
       }
@@ -209,12 +225,14 @@ export default function StatisticsPage() {
         params.clients = selectedClients.join(',');
       }
       const singleClient = selectedClients.length === 1 ? selectedClients[0] : null;
-      const [data, recent] = await Promise.all([
+      const [data, recent, countryStats] = await Promise.all([
         statisticsApi.get(params),
         singleClient ? loadRecentQueries(singleClient) : Promise.resolve(null),
+        loadCountries(params),
       ]);
       if (!isLatest()) return;
       setStats(data);
+      setCountries(countryStats);
       setRecentQueries(recent);
       setError(null);
     } catch (err: unknown) {
@@ -811,6 +829,24 @@ export default function StatisticsPage() {
           />
         </div>
       </div>
+
+      {countries && (
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+              Top resolved countries
+            </h2>
+            <TopList
+              items={countries.map((c, i) => ({
+                rank: i + 1,
+                label: c.country_name ?? c.country,
+                sublabel: c.country_name ? c.country : undefined,
+                value: c.count,
+              }))}
+            />
+          </div>
+        </div>
+      )}
 
       {recentQueries && selectedClients.length === 1 && (
         <RecentQueries
