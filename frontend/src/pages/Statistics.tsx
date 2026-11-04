@@ -230,6 +230,7 @@ export default function StatisticsPage() {
         const countryStats = await loadCountries(params);
         if (isLatest()) setCountries(countryStats);
       };
+      setCountries(null);
       applyCountries();
       const [data, recent] = await Promise.all([
         statisticsApi.get(params),
