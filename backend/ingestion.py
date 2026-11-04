@@ -506,8 +506,8 @@ class QueryIngestionService:
         return total_count, all_queries
 
     async def stop(self) -> None:
-        """Cancel running polls. A walk's cursor only moves once it finishes, so the next start
-        re-reads the range, but rows already stored don't come back as alertable, and neither
+        """Cancel running polls. A newest-first walk's cursor only moves once it finishes, so the next
+        start re-reads the range, but rows already stored don't come back as alertable, and neither
         do the results of polls that finished since the last tick."""
         tasks = list(self._in_flight.values())
         for task in tasks:
