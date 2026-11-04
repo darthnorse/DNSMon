@@ -592,7 +592,8 @@ class AdGuardHomeClient(DNSBlockerClient):
             for key, prefix in _SYNCED_TOGGLE_ENDPOINTS.items():
                 if config.get(key) is not None:
                     action = 'enable' if config[key] else 'disable'
-                    success &= await self._write('POST', f"{prefix}/{action}", None, key)
+                    # These read no body, but AdGuard answers 415 without a JSON content type.
+                    success &= await self._write('POST', f"{prefix}/{action}", {}, key)
 
             if 'filtering_enabled' in config:
                 success &= await self._write('POST', '/control/filtering/config', {

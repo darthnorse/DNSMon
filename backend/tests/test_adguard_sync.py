@@ -36,7 +36,9 @@ class FakeAdGuard:
         if path in self.fail:
             return httpx.Response(500)
         if request.method in ("POST", "PUT"):
-            self.writes[path] = json.loads(request.content) if request.content else None
+            if request.headers.get("content-type") != "application/json":
+                return httpx.Response(415)
+            self.writes[path] = json.loads(request.content)
             return httpx.Response(200)
         bodies = {
             "/control/filtering/status": {"enabled": True, "interval": 0, "user_rules": [],
@@ -136,6 +138,12 @@ async def test_safe_browsing_and_parental_control_follow_the_source_either_way()
     assert '/control/parental/disable' in target.writes
     assert '/control/safebrowsing/disable' not in target.writes
     assert '/control/parental/enable' not in target.writes
+
+
+async def test_toggles_send_the_json_content_type_adguard_requires():
+    cfg = await _client(FakeAdGuard()).get_config()
+
+    assert await _client(FakeAdGuard()).patch_config(cfg) is True
 
 
 async def test_setting_the_source_could_not_report_is_left_alone():
