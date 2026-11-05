@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { settingsApi, syncApi, oidcProviderApi } from '../utils/api';
 import { useAuth } from '../contexts/AuthContext';
 import { getErrorMessage } from '../utils/errors';
 import { copyToClipboard } from '../utils/clipboard';
+import { SERVER_SORT_OPTIONS, loadServerSort, saveServerSort, sortServers, type ServerSort } from '../utils/serverSort';
 import NotificationsSettings from '../components/NotificationsSettings';
 import AppDefinitionsSettings from '../components/AppDefinitionsSettings';
 import InsightSourcesSettings from '../components/InsightSourcesSettings';
@@ -67,6 +68,8 @@ export default function Settings() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const [servers, setServers] = useState<PiholeServer[]>([]);
+  const [serverSort, setServerSort] = useState<ServerSort>(loadServerSort);
+  const sortedServers = useMemo(() => sortServers(servers, serverSort), [servers, serverSort]);
   const [showServerForm, setShowServerForm] = useState(false);
   const [editingServer, setEditingServer] = useState<PiholeServer | null>(null);
   const [serverFormData, setServerFormData] = useState<PiholeServerCreate>({ ...INITIAL_SERVER_FORM });
@@ -721,12 +724,32 @@ export default function Settings() {
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-lg font-medium text-gray-900 dark:text-white">DNS Servers</h2>
             {!showServerForm && !editingServer && (
-              <button
-                onClick={() => setShowServerForm(true)}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium"
-              >
-                Add Server
-              </button>
+              <div className="flex items-center gap-3">
+                {servers.length > 1 && (
+                  <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                    Sort by
+                    <select
+                      value={serverSort}
+                      onChange={(e) => {
+                        const sort = e.target.value as ServerSort;
+                        setServerSort(sort);
+                        saveServerSort(sort);
+                      }}
+                      className="border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md px-2 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    >
+                      {SERVER_SORT_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <button
+                  onClick={() => setShowServerForm(true)}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium"
+                >
+                  Add Server
+                </button>
+              </div>
             )}
           </div>
 
@@ -987,7 +1010,7 @@ export default function Settings() {
                   No DNS servers configured. Add your first server above.
                 </p>
               ) : (
-                servers.map((server) => (
+                sortedServers.map((server) => (
                 <div key={server.id} className="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm">
                   <div className="flex justify-between items-start">
                     <div>
