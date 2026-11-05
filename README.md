@@ -34,16 +34,27 @@ A comprehensive web-based dashboard for monitoring and managing multiple Pi-hole
 
 ### Multi-Server Support
 - **Pi-hole v6** - Full REST API integration
-- **AdGuard Home** - Native API support
-- **Technitium DNS** - Full API integration with backup/restore sync
+- **AdGuard Home** - Native API support, with passive DNS
+- **Technitium DNS** - Full API integration with backup/restore sync, with passive DNS
 - Monitor unlimited servers from a single dashboard
 - Per-server statistics and health monitoring
+
+Some features depend on what each server reports:
+
+| | Pi-hole v6 | AdGuard Home | Technitium |
+|---|---|---|---|
+| Query monitoring, statistics and alerts | ✓ | ✓ | ✓ |
+| Configuration sync | ✓ | ✓ | ✓ |
+| Passive DNS (what each query resolved to) | | ✓ | ✓ |
+| GeoIP: country and network owner, country filter and alerts | | ✓ | ✓ |
+| Full outage recovery from the server's log | | ✓ | ✓ |
 
 ### Real-time Query Monitoring
 - Automatic query ingestion with configurable polling intervals
 - Advanced search across domain, client IP, and hostname
 - Date range filtering with pagination
 - Query status tracking (allowed, blocked, cached)
+- Query context: see what a device looked up around any query
 - Recovers queries missed during an outage from the server's own log (AdGuard Home and Technitium), without a burst of stale alerts
 
 ### Passive DNS
@@ -53,8 +64,21 @@ A comprehensive web-based dashboard for monitoring and managing multiple Pi-hole
 - `resolve` API to name a connection: which domain did this device look up that resolved to this IP?
 - Answers share the query retention setting
 
+### Apps and Categories
+- **Insights** page: top apps and categories, with a drill-down into the domains behind each app
+- App and category labels under domains on the Dashboard and in Statistics
+- Labels come from feeds you control under **Settings** → **Insight Sources** (AdGuard's app list, DNSMon's own list, v2fly Community and Hagezi Pro.Plus), each with its own toggle
+- **Top Uncategorized Domains** work-list shows what isn't labelled yet
+- Classify a domain in a click, with autocomplete and a "did you mean?" check, or manage your own definitions under **Settings** → **App Definitions**
+
+### Threat Detection (optional)
+- Flag queries to known malicious domains using the Q-Feeds threat feed (off by default; add your API key in **Settings** → **Insight Sources**)
+- Threat badges on queries and a **Malicious queries (24h)** tile on the Dashboard
+- Alert rules can fire on any query to a flagged domain
+
 ### GeoIP (optional)
 - Country and network owner for the IPs in DNS answers, using MaxMind's free GeoLite2 databases
+- Needs AdGuard Home or Technitium, since Pi-hole doesn't report answers
 - Filter searches by country, and see top resolved countries in Statistics
 - Databases are downloaded to your server and refreshed automatically; lookups stay local
 - Everything else works without it
@@ -74,6 +98,9 @@ A comprehensive web-based dashboard for monitoring and managing multiple Pi-hole
   - Client IP patterns (e.g., `192.168.1.*`)
   - Client hostname patterns (e.g., `*kids-tablet*`)
 - Exclusion patterns to reduce false positives
+- Exclude client IPs by exact address, wildcard or CIDR range
+- Match on blocked or allowed queries only, with or without a pattern
+- Alert on queries to malicious domains (needs a threat feed)
 - Alert when a query resolves to chosen countries (needs GeoIP and a server that reports answers)
 - Configurable cooldown periods to prevent alert spam
 - Batched notifications for multiple matches
@@ -273,6 +300,8 @@ DNSMon reads Technitium's query log through the **Query Logs (Sqlite)** DNS App,
 
 ### Setting Up GeoIP
 
+GeoIP adds details to DNS answers, so it needs at least one AdGuard Home or Technitium server. It adds nothing on a Pi-hole-only install.
+
 1. Create a free [MaxMind GeoLite2 account](https://www.maxmind.com/en/geolite2/signup) and generate a license key.
 2. In DNSMon, go to **Settings** → **GeoIP** and enter your Account ID and license key.
 
@@ -386,6 +415,16 @@ curl -X POST -H "Authorization: Bearer YOUR_API_KEY" -H "Content-Type: applicati
 ### Queries
 - `GET /api/queries` - Search queries with filters
 - `GET /api/queries/count` - Count matching queries
+
+### Insights and Classification
+- `GET /api/insights/apps` - Top apps
+- `GET /api/insights/categories` - Top categories
+- `GET /api/insights/apps/domains` - Domains behind an app
+- `GET /api/insights/uncategorized-domains` - Domains with no label yet
+- `GET /api/insights/threats` - Queries to malicious domains
+- `GET /api/classify/label` - A domain's current label
+- `POST /api/classify` - Classify a domain (admin)
+- `DELETE /api/classify` - Remove a classification (admin)
 
 ### Passive DNS
 - `GET /api/pdns/domain/{domain}` - IPs and CNAMEs a domain resolved to
