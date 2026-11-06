@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   ResponsiveContainer,
   BarChart,
@@ -49,6 +49,7 @@ export default function Insights() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [drillDownError, setDrillDownError] = useState<string | null>(null);
+  const drillDownPanelRef = useRef<HTMLDivElement>(null);
 
   const loadInsights = useCallback(async () => {
     try {
@@ -85,6 +86,10 @@ export default function Insights() {
     };
     loadDomains();
   }, [selectedApp, period]);
+
+  useEffect(() => {
+    if (selectedApp) drillDownPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [selectedApp]);
 
   const topApps = apps.slice(0, 15);
 
@@ -143,6 +148,11 @@ export default function Insights() {
                     layout="vertical"
                     data={topApps}
                     margin={{ top: 0, right: 16, left: 8, bottom: 0 }}
+                    style={{ cursor: 'pointer' }}
+                    onClick={(state) => {
+                      const appName = state?.activeLabel;
+                      if (appName) setSelectedApp((current) => (current === appName ? null : appName));
+                    }}
                   >
                     <XAxis
                       type="number"
@@ -171,11 +181,6 @@ export default function Insights() {
                       name="Queries"
                       fill="#3B82F6"
                       radius={[0, 3, 3, 0]}
-                      cursor="pointer"
-                      onClick={(_data, index) => {
-                        const app = topApps[index];
-                        if (app) setSelectedApp(app.app_name);
-                      }}
                     />
                   </BarChart>
                 </ResponsiveContainer>
@@ -227,42 +232,9 @@ export default function Insights() {
               )}
             </div>
 
-            {/* Top Uncategorized Domains panel */}
-            <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6 lg:col-span-2">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">Top Uncategorized Domains</h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Classify the heaviest hitters first to raise coverage fastest.</p>
-              {uncat.length === 0 ? (
-                <div className="flex items-center justify-center h-64 text-gray-500 dark:text-gray-400">
-                  Nothing uncategorized in this period 🎉
-                </div>
-              ) : (
-                <ul className="divide-y divide-gray-100 dark:divide-gray-700">
-                  {uncat.map((d) => (
-                    <li key={d.domain} className="flex items-center justify-between py-1.5 text-sm">
-                      <span className="flex items-center gap-1.5 min-w-0">
-                        <span className="font-mono text-gray-800 dark:text-gray-200 break-all">{d.domain}</span>
-                        <ThreatBadge threatType={d.threat_type} />
-                      </span>
-                      <span className="flex items-center gap-3 shrink-0">
-                        <span className="text-gray-500 dark:text-gray-400">{d.total.toLocaleString()}</span>
-                        <button
-                          onClick={() => setClassifyTarget(d.domain)}
-                          className="px-2 py-0.5 text-xs rounded bg-blue-600 hover:bg-blue-700 text-white"
-                        >
-                          Classify
-                        </button>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </div>
-
-          {/* App drill-down panel */}
-          <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
-            {selectedApp ? (
-              <>
+            {/* App drill-down panel */}
+            {selectedApp && (
+              <div ref={drillDownPanelRef} className="bg-white dark:bg-gray-800 shadow rounded-lg p-6 lg:col-span-2 scroll-mt-4">
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
                     Domains for{' '}
@@ -273,9 +245,9 @@ export default function Insights() {
                     className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 flex items-center gap-1"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                     </svg>
-                    Back to all apps
+                    Close
                   </button>
                 </div>
 
@@ -335,16 +307,39 @@ export default function Insights() {
                     </table>
                   </div>
                 )}
-              </>
-            ) : (
-              <div className="flex flex-col items-center justify-center py-12 text-gray-500 dark:text-gray-400">
-                <svg className="w-10 h-10 mb-3 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                    d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                <p className="text-sm">Click an app bar above to see its domain breakdown</p>
               </div>
             )}
+
+            {/* Top Uncategorized Domains panel */}
+            <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6 lg:col-span-2">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">Top Uncategorized Domains</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Classify the heaviest hitters first to raise coverage fastest.</p>
+              {uncat.length === 0 ? (
+                <div className="flex items-center justify-center h-64 text-gray-500 dark:text-gray-400">
+                  Nothing uncategorized in this period 🎉
+                </div>
+              ) : (
+                <ul className="divide-y divide-gray-100 dark:divide-gray-700">
+                  {uncat.map((d) => (
+                    <li key={d.domain} className="flex items-center justify-between py-1.5 text-sm">
+                      <span className="flex items-center gap-1.5 min-w-0">
+                        <span className="font-mono text-gray-800 dark:text-gray-200 break-all">{d.domain}</span>
+                        <ThreatBadge threatType={d.threat_type} />
+                      </span>
+                      <span className="flex items-center gap-3 shrink-0">
+                        <span className="text-gray-500 dark:text-gray-400">{d.total.toLocaleString()}</span>
+                        <button
+                          onClick={() => setClassifyTarget(d.domain)}
+                          className="px-2 py-0.5 text-xs rounded bg-blue-600 hover:bg-blue-700 text-white"
+                        >
+                          Classify
+                        </button>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
         </>
       )}
